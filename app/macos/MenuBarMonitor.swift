@@ -10,7 +10,15 @@ struct MenuBarSnapshot {
 final class MenuBarMonitor {
     private let queue = DispatchQueue(label: "local.catsinmenubar.menu-layout", qos: .utility)
     private var scanning = false
-    static var trusted: Bool { AXIsProcessTrusted() }
+    // Asking for trust goes through tccd; once every few seconds is plenty.
+    private static var trustedCache = (value: false, at: -100.0)
+    static var trusted: Bool {
+        let now = ProcessInfo.processInfo.systemUptime
+        if now - trustedCache.at > 3 { trustedCache = (AXIsProcessTrusted(), now) }
+        return trustedCache.value
+    }
+    // Whether a process can own menu bar items, looked up once per process (bundle lookups are slow).
+    private var candidates: [pid_t: Bool] = [:]
     static func requestAccess() {
         let options = [kAXTrustedCheckOptionPrompt.takeUnretainedValue() as String: true] as CFDictionary
         _ = AXIsProcessTrustedWithOptions(options)
@@ -26,8 +34,14 @@ final class MenuBarMonitor {
         }
         scanning = true
         // Helpers such as WebKit or XPC services never own menu bar items.
-        let apps = NSWorkspace.shared.runningApplications.filter {
-            !$0.isTerminated && ($0.bundleURL?.pathExtension == "app" || Self.systemBars.contains($0.bundleIdentifier ?? ""))
+        let running = NSWorkspace.shared.runningApplications
+        let alive = Set(running.map(\.processIdentifier))
+        candidates = candidates.filter { alive.contains($0.key) }
+        let apps = running.filter { app in
+            if let known = candidates[app.processIdentifier] { return known }
+            let relevant = app.bundleURL?.pathExtension == "app" || Self.systemBars.contains(app.bundleIdentifier ?? "")
+            candidates[app.processIdentifier] = relevant
+            return relevant
         }
         // Clicking a status item activates an agent app that has no menus; the bar keeps the previous app's menus.
         let front = (NSWorkspace.shared.menuBarOwningApplication ?? NSWorkspace.shared.frontmostApplication)?.processIdentifier

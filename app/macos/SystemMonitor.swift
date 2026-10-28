@@ -25,6 +25,7 @@ final class SystemMonitor: ObservableObject {
     private var lastTicks: [UInt32]?
     private var lastBytes: [String: (UInt32, UInt32)] = [:]
     private var lastSample = Date()
+    private var namedInterface: String?? = .none
 
     func start(interval: Double) {
         timer?.invalidate()
@@ -139,9 +140,13 @@ final class SystemMonitor: ObservableObject {
         if !lastBytes.isEmpty { stats.download = down / elapsed; stats.upload = up / elapsed }
         lastBytes = bytes
         stats.localIP = address ?? "—"
-        if let primary, let interfaces = SCNetworkInterfaceCopyAll() as? [SCNetworkInterface],
-           let match = interfaces.first(where: { SCNetworkInterfaceGetBSDName($0) as String? == primary }) {
-            stats.networkName = SCNetworkInterfaceGetLocalizedDisplayName(match) as String? ?? primary
-        } else { stats.networkName = primary ?? "Offline" }
+        // The display name only changes with the interface, so look it up once per interface.
+        if primary != namedInterface {
+            namedInterface = primary
+            if let primary, let interfaces = SCNetworkInterfaceCopyAll() as? [SCNetworkInterface],
+               let match = interfaces.first(where: { SCNetworkInterfaceGetBSDName($0) as String? == primary }) {
+                stats.networkName = SCNetworkInterfaceGetLocalizedDisplayName(match) as String? ?? primary
+            } else { stats.networkName = primary ?? "Offline" }
+        }
     }
 }

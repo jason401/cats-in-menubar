@@ -338,6 +338,16 @@ final class HabitatView: NSView {
     init(colony: Colony, frame: NSRect) { self.colony = colony; super.init(frame: frame) }
     required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
     override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
+    private var drawnRects: [NSRect] = []
+    /// Redraws only the strips around cats and the ball (where they were and where they are now),
+    /// instead of the whole menu bar width every frame.
+    func invalidateCats() {
+        guard !showLanes else { needsDisplay = true; return }
+        var rects = colony.cats.filter(\.visible).map { NSRect(x: $0.x - 30, y: 0, width: 60, height: bounds.height) }
+        if let toy = colony.ball { rects.append(NSRect(x: toy.x - 8, y: 0, width: 16, height: bounds.height)) }
+        for rect in drawnRects + rects { setNeedsDisplay(rect) }
+        drawnRects = rects
+    }
     override func mouseDown(with event: NSEvent) {
         let point = convert(event.locationInWindow, from: nil)
         guard let i = colony.catIndex(at: point.x) else { return }

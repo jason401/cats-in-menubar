@@ -85,3 +85,8 @@ Fixed build identity with a dedicated app-specific local certificate. Verified d
 - Settings window rebuilt to match AI Face / AI Illuminati: `NSTabViewController` toolbar tabs (General, Cats, Monitor), 334 x 460, compact cards (`SettingsCard/Row/Switch/Segments/Menu`, copied pattern, sibling projects untouched).
 - Panel position verified from the log: top edge sits just under the menu bar.
 - User confirmed live: calling home works.
+
+## CPU use (2026-10-28)
+
+- Measured ~12 % of one core. Profile: menu scan on the main thread (bundle lookups for every process, AXIsProcessTrusted via tccd every scan), full-width redraw at 30 fps, network name lookup each sample.
+- Now: trust cached 3 s, per-process candidate cache, scan timer 1 s (notifications still trigger immediate scans), dirty-rect redraws around cats and ball, 10 fps while every cat is sleeping/sitting/loafing, network name cached per interface. Measured ~2-3 %, ~5 % while cats run.

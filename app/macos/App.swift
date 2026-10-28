@@ -72,7 +72,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         NotificationCenter.default.addObserver(self, selector: #selector(layoutChanged), name: NSApplication.didChangeScreenParametersNotification, object: nil)
         let animate = Timer(timeInterval: 1.0 / 30, repeats: true) { [weak self] _ in self?.tick() }
         RunLoop.main.add(animate, forMode: .common); animationTimer = animate
-        let layout = Timer(timeInterval: 0.4, repeats: true) { [weak self] _ in self?.scan() }
+        // App switches and display changes trigger an immediate scan; the timer only catches slower changes.
+        let layout = Timer(timeInterval: 1.0, repeats: true) { [weak self] _ in self?.scan() }
         RunLoop.main.add(layout, forMode: .common); layoutTimer = layout
         scan()
         if !defaults.bool(forKey: "hasLaunched") || !MenuBarMonitor.trusted {
@@ -134,6 +135,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         defaults.set(model.catsAway, forKey: "catsHome")
     }
     var shownHomeCount = -1
+    var frame = 0
     func updateTowerIcon() {
         let count = colony.homeCount
         guard count != shownHomeCount else { return }
@@ -153,13 +155,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     @objc func didWake() { suspended = false; lastTick = ProcessInfo.processInfo.systemUptime; layoutChanged() }
     func tick() {
         let now = ProcessInfo.processInfo.systemUptime
-        let dt = now - lastTick; lastTick = now
         updateMouse()
         updateTowerIcon()
+        // Napping, sitting cats only breathe and swish: 10 fps is enough and saves most of the drawing.
+        frame += 1
+        let lively = colony.ball != nil || colony.cats.contains { cat in
+            cat.visible && (abs(cat.velocity) > 0.1 || cat.escaping || ![.sleeping, .sitting, .loafing].contains(cat.action))
+        }
+        if !lively && frame % 3 != 0 { return }
+        let dt = now - lastTick; lastTick = now
         if colony.homeX == nil, let x = towerX { colony.homeX = x }
         guard !paused, !suspended, overlay?.isVisible == true else { return }
         colony.step(dt)
-        habitatView?.needsDisplay = true
+        habitatView?.invalidateCats()
     }
     /// The overlay is click-through except right over a cat, so cats can be picked up without blocking the menu bar.
     func updateMouse() {
