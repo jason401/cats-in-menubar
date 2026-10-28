@@ -17,8 +17,12 @@ enum SpriteAtlas {
         }
     }
     static let sourceScale: CGFloat = 24.0 / 180.0
+    /// Temporary standing pose until a dedicated one is drawn: the walk frame with the legs gathered under the body.
+    static let standFrame = 4
     static func frameIndex(_ cat: Cat) -> Int {
-        let walking = Int(max(0, cat.gait) / (9 * cat.size.scale) * 6) % 6
+        // A moving cat that has stopped (turning, arriving, waiting at the tower) stands, not frozen mid-stride.
+        let stopped = abs(cat.velocity) < 1.5 * cat.size.scale
+        let walking = stopped ? standFrame : Int(max(0, cat.gait) / (9 * cat.size.scale) * 6) % 6
         let running = 6 + Int(max(0, cat.gait) / (20 * cat.size.scale) * 6) % 6
         switch cat.action {
         case .sleeping: return 14
@@ -44,8 +48,17 @@ enum SpriteAtlas {
         images[key] = image
         return image
     }
-    @discardableResult static func draw(_ cat: Cat, at point: NSPoint, scale: CGFloat) -> Bool {
-        let index = frameIndex(cat)
+    /// Frames in the same cycle step through each other; anything else is a pose change worth blending.
+    static func group(_ frame: Int) -> Int {
+        switch frame {
+        case 0..<6: -1
+        case 6..<12: -2
+        case 18...20: -3
+        default: frame
+        }
+    }
+    @discardableResult static func draw(_ cat: Cat, at point: NSPoint, scale: CGFloat, frame override: Int? = nil, direction: Double? = nil, alpha: CGFloat = 1) -> Bool {
+        let index = override ?? frameIndex(cat)
         guard metadata.indices.contains(cat.coat), metadata[cat.coat].indices.contains(index), let image = image(index, coat: cat.coat) else { return false }
         let frame = metadata[cat.coat][index]
         var scale = scale * cat.size.scale
@@ -60,12 +73,13 @@ enum SpriteAtlas {
         NSGraphicsContext.saveGraphicsState()
         let transform = NSAffineTransform()
         transform.translateX(by: point.x, yBy: point.y + lift * scale)
-        transform.scaleX(by: cat.direction, yBy: 1)
+        transform.scaleX(by: direction ?? cat.direction, yBy: 1)
         transform.concat()
         NSGraphicsContext.current?.imageInterpolation = .high
         let offset = cat.action == .held ? 0 : 9 * scale
         image.draw(in: NSRect(x: offset - frame.headX * factor, y: frame.footLift * factor,
-                             width: Double(frame.width) * factor, height: Double(frame.height) * factor * breathing))
+                             width: Double(frame.width) * factor, height: Double(frame.height) * factor * breathing),
+                   from: .zero, operation: .sourceOver, fraction: alpha)
         NSGraphicsContext.restoreGraphicsState()
         return true
     }

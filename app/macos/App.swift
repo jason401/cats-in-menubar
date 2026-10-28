@@ -237,7 +237,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         updateTowerIcon()
         // Napping, sitting cats only breathe and swish: a few frames a second is enough.
         frame += 1
-        let lively = colony.ball != nil || colony.cats.contains { cat in
+        let lively = colony.ball != nil || habitatView?.blending == true || colony.cats.contains { cat in
             cat.visible && (abs(cat.velocity) > 0.1 || cat.escaping || ![.sleeping, .sitting, .loafing].contains(cat.action))
         }
         if !lively && frame % model.power.idleEvery != 0 { return }

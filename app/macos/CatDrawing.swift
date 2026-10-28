@@ -347,6 +347,39 @@ final class HabitatView: NSView {
     init(colony: Colony, frame: NSRect) { self.colony = colony; super.init(frame: frame) }
     required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
     override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
+    /// Last pose shown per cat slot, so a pose change (sit, stand, turn) blends instead of jumping.
+    private struct Shown {
+        var frame: Int
+        var direction: Double
+        var fromFrame = -1
+        var fromDirection = 1.0
+        var since = 0.0
+    }
+    private var shown: [Int: Shown] = [:]
+    static let blendTime = 0.15
+    /// True while some cat is blending between poses; the app keeps full frame rate for it.
+    var blending: Bool {
+        let now = ProcessInfo.processInfo.systemUptime
+        return shown.values.contains { $0.fromFrame >= 0 && now - $0.since < HabitatView.blendTime }
+    }
+    private func drawCat(_ i: Int, baseline: CGFloat) {
+        let cat = colony.cats[i]
+        let point = NSPoint(x: cat.x, y: baseline)
+        guard cat.visible && cat.hiddenFor <= 0 else { shown[i] = nil; return }
+        let frame = SpriteAtlas.frameIndex(cat)
+        let now = ProcessInfo.processInfo.systemUptime
+        var memory = shown[i] ?? Shown(frame: frame, direction: cat.direction)
+        if SpriteAtlas.group(frame) != SpriteAtlas.group(memory.frame) || cat.direction != memory.direction {
+            memory = Shown(frame: frame, direction: cat.direction, fromFrame: memory.frame, fromDirection: memory.direction, since: now)
+        } else { memory.frame = frame }
+        shown[i] = memory
+        CatDrawing.cat(cat, at: point)
+        // The old pose fades out on top of the new one, so there is never a see-through moment.
+        let q = (now - memory.since) / HabitatView.blendTime
+        if memory.fromFrame >= 0 && q < 1 && cat.action != .hopping {
+            SpriteAtlas.draw(cat, at: point, scale: 1, frame: memory.fromFrame, direction: memory.fromDirection, alpha: CGFloat(1 - q))
+        }
+    }
     private var drawnRects: [NSRect] = []
     /// Redraws only the strips around cats and the ball (where they were and where they are now),
     /// instead of the whole menu bar width every frame.
@@ -386,12 +419,12 @@ final class HabitatView: NSView {
             for lane in colony.lanes { NSRect(x: lane.lower, y: 0, width: lane.width, height: bounds.height).fill() }
         }
         let baseline = max(0, floor((bounds.height - 22) / 2))
-        for cat in colony.cats where !cat.escaping && cat.action != .hopping { CatDrawing.cat(cat, at: NSPoint(x: cat.x, y: baseline)) }
+        for (i, cat) in colony.cats.enumerated() where !cat.escaping && cat.action != .hopping { drawCat(i, baseline: baseline) }
         if let toy = colony.ball { CatDrawing.ball(toy, baseline: baseline) }
         NSGraphicsContext.restoreGraphicsState()
         // Cats leaving covered space or hopping into the tower may briefly pass over icons.
-        for cat in colony.cats where cat.visible && (cat.escaping || cat.action == .hopping) {
-            CatDrawing.cat(cat, at: NSPoint(x: cat.x, y: baseline))
+        for (i, cat) in colony.cats.enumerated() where cat.visible && (cat.escaping || cat.action == .hopping) {
+            drawCat(i, baseline: baseline)
         }
     }
 }

@@ -128,3 +128,9 @@ Supersedes the previous recoloring/sitting-placeholder implementation. User repo
 - Further art work: six illustrated walk/run key poses can still benefit from hand-authored in-betweens. Do not promise that automatic frame sequencing alone produces a perfect gait.
 
 - Final timing check: physics now advances with 30 Hz substeps independently of drawing frequency. Equal real-time travel verified at 8/15/30 fps; low-power idle updates no longer discard elapsed time.
+
+## Stopped poses and pose blending (2026-10-28, Claude)
+
+- Choppiness diagnosis: the 21 sprite frames are separate illustrations, not drawn as continuous cycles (tail, head height and body length jump between walk frames) and there are no transition or standing frames. Art request for GPT: `design/art-request-v3.md` (27 frames first priority, 62 total, orange first). Code below uses only the current art; do not assume the new frames exist.
+- Moving cats that stop (turn pause, arrival, waiting at the tower) used to freeze on a mid-stride walk frame. They now use `SpriteAtlas.standFrame` (walk frame 4, legs under the body) until a real standing frame exists.
+- Pose changes between frame groups (walk, run, held, each still pose) and direction flips blend: the previous pose fades out on top of the new one over 0.15 s, at full frame rate even while resting.

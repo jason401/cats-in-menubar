@@ -50,6 +50,14 @@ func runSelfTests() {
         held.cats[0].x = 300; held.cats[0].coat = coat; held.cats[0].hiddenFor = 0
         held.grab(0)
         expect(SpriteAtlas.frameIndex(held.cats[0]) == 18, "pickup uses the neutral dangling sprite, not sitting")
+        // A moving cat that has stopped stands instead of freezing mid-stride.
+        var stopped = held.cats[0]
+        for action in [CatAction.walking, .running, .chasing, .goingHome] {
+            stopped.action = action; stopped.velocity = 0; stopped.gait = 4.5
+            expect(SpriteAtlas.frameIndex(stopped) == SpriteAtlas.standFrame, "stopped \(action) cat stands")
+        }
+        stopped.action = .walking; stopped.velocity = 12
+        expect(SpriteAtlas.group(SpriteAtlas.frameIndex(stopped)) == SpriteAtlas.group(0), "moving cat still walks")
         for _ in 0..<15 { held.cats[0].swing = 100; held.step(1.0 / 30) }
         expect(SpriteAtlas.frameIndex(held.cats[0]) == 19, "dragging right makes the body trail left")
         for _ in 0..<25 { held.cats[0].swing = -100; held.step(1.0 / 30) }
