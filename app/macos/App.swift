@@ -47,8 +47,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         statusItem.button?.target = self
         statusItem.button?.action = #selector(togglePanel)
         popover.behavior = .transient
-        popover.contentViewController = NSHostingController(rootView: DashboardView(model: model, system: system,
+        let host = NSHostingController(rootView: DashboardView(model: model, system: system,
             openSettings: { [weak self] in self?.showSettings() }, play: { [weak self] in self?.play() }))
+        host.sizingOptions = [.preferredContentSize]
+        popover.contentViewController = host
         AppModel.log("Launched pid \(ProcessInfo.processInfo.processIdentifier), Accessibility: \(MenuBarMonitor.trusted)")
         model.changed = { [weak self] in self?.applyOptions() }
         model.play = { [weak self] in self?.play() }
@@ -101,8 +103,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     @objc func togglePanel() {
         if popover.isShown { popover.performClose(nil); return }
         guard let button = statusItem.button else { return }
+        // Size the panel before showing it; growing after it opens pushes it up behind the menu bar.
+        if let view = popover.contentViewController?.view {
+            view.layoutSubtreeIfNeeded()
+            popover.contentSize = view.fittingSize
+        }
         NSApp.activate(ignoringOtherApps: true)
         popover.show(relativeTo: button.bounds, of: button, preferredEdge: .minY)
+        if let frame = popover.contentViewController?.view.window?.frame, let screen = button.window?.screen {
+            AppModel.log("Panel frame \(frame) screen visible top \(screen.visibleFrame.maxY)")
+        }
     }
     @objc func play() { guard !paused else { return }; colony.play() }
     @objc func showSettings() {

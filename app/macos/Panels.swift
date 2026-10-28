@@ -51,35 +51,35 @@ struct DashboardView: View {
             }
             VStack(spacing: 0) {
                 if showCPU {
-                    StatSection(icon: "cpu", title: "CPU: \(percent(s.cpu))") {
+                    StatSection(icon: "gauge.with.dots.needle.67percent", tint: .blue, title: "CPU: \(percent(s.cpu))") {
                         Detail("System", percent(s.cpuSystem)); Detail("User", percent(s.cpuUser)); Detail("Idle", percent(s.cpuIdle))
                         Sparkline(values: system.cpuHistory).frame(height: 22).padding(.top, 2)
                     }
                 }
                 if showMemory {
-                    StatSection(icon: "memorychip", title: "Memory: \(percent(s.memoryUsed / max(1, s.memoryTotal)))") {
+                    StatSection(icon: "square.stack.3d.up.fill", tint: .purple, title: "Memory: \(percent(s.memoryUsed / max(1, s.memoryTotal)))") {
                         Detail("Pressure", percent(s.memoryPressure)); Detail("App Memory", bytes(s.memoryApp))
                         Detail("Wired Memory", bytes(s.memoryWired)); Detail("Compressed", bytes(s.memoryCompressed))
                         Meter(value: s.memoryUsed / max(1, s.memoryTotal))
                     }
                 }
                 if showDisk {
-                    StatSection(icon: "internaldrive", title: "Storage: \(percent(s.diskUsed / max(1, s.diskTotal))) used") {
+                    StatSection(icon: "externaldrive.fill", tint: .orange, title: "Storage: \(percent(s.diskUsed / max(1, s.diskTotal))) used") {
                         Detail(nil, "\(bytes(s.diskUsed)) / \(bytes(s.diskTotal))")
                         Meter(value: s.diskUsed / max(1, s.diskTotal))
                     }
                 }
                 if showBattery {
                     if s.hasBattery {
-                        StatSection(icon: s.charging ? "battery.100.bolt" : "battery.75", title: "Battery: \(Int(s.batteryLevel * 100))%") {
+                        StatSection(icon: s.charging ? "battery.100.bolt" : "battery.75", tint: .green, title: "Battery: \(Int(s.batteryLevel * 100))%") {
                             Detail(nil, s.charging ? "Charging" : (s.onAC ? "On power adapter" : "On battery"))
                         }
                     } else {
-                        StatSection(icon: "powerplug", title: "Power: Adapter") { EmptyView() }
+                        StatSection(icon: "bolt.fill", tint: .green, title: "Power: Adapter") { EmptyView() }
                     }
                 }
                 if showNetwork {
-                    StatSection(icon: "network", title: "Network: \(s.networkName)") {
+                    StatSection(icon: s.networkName.localizedCaseInsensitiveContains("wi-fi") ? "wifi" : (s.networkName == "Offline" ? "wifi.slash" : "cable.connector"), tint: .teal, title: "Network: \(s.networkName)") {
                         Detail("Local IP", s.localIP); Detail("Upload", rate(s.upload)); Detail("Download", rate(s.download))
                     }
                 }
@@ -103,11 +103,15 @@ struct DashboardView: View {
 
 private struct StatSection<Content: View>: View {
     let icon: String
+    let tint: Color
     let title: String
     @ViewBuilder var content: Content
     var body: some View {
         HStack(alignment: .top, spacing: 12) {
-            Image(systemName: icon).font(.system(size: 20, weight: .regular)).frame(width: 30).padding(.top, 2)
+            // Small colored badge, in the spirit of System Settings icons.
+            Image(systemName: icon).font(.system(size: 13, weight: .semibold)).foregroundStyle(.white)
+                .frame(width: 26, height: 26)
+                .background(RoundedRectangle(cornerRadius: 7).fill(tint.gradient))
             VStack(alignment: .leading, spacing: 2) {
                 Text(title).font(.system(size: 13, weight: .semibold))
                 content
