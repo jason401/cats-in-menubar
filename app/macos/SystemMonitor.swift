@@ -25,6 +25,8 @@ final class SystemMonitor: ObservableObject {
     private var lastTicks: [UInt32]?
     private var lastBytes: [String: (UInt32, UInt32)] = [:]
     private var lastSample = Date()
+    private var lastDisk = Date.distantPast
+    private var lastBattery = Date.distantPast
     private var namedInterface: String?? = .none
 
     func start(interval: Double) {
@@ -42,8 +44,9 @@ final class SystemMonitor: ObservableObject {
         lastSample = now
         readCPU(into: &next)
         readMemory(into: &next)
-        readDisk(into: &next)
-        readBattery(into: &next)
+        // Free space is expensive to ask for and changes slowly; power changes a little faster.
+        if now.timeIntervalSince(lastDisk) > 30 { readDisk(into: &next); lastDisk = now }
+        if now.timeIntervalSince(lastBattery) > 10 { readBattery(into: &next); lastBattery = now }
         readNetwork(into: &next, elapsed: elapsed)
         next.thermal = ProcessInfo.processInfo.thermalState
         stats = next

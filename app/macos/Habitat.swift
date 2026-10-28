@@ -70,7 +70,7 @@ final class Colony {
     var ball: ToyBall?
     var lanes: [Lane] = []
     var quiet = false
-    var energy = 0.0        // 0...1, e.g. CPU load; busier Mac, livelier cats
+    var mood = 0.0          // from the power level: negative = more naps, positive = livelier
     var activity = 1        // 0 calm, 1 normal, 2 playful
     var homeX: Double?      // overlay x of the cat tower icon
     static let hopTime = 0.55
@@ -126,8 +126,8 @@ final class Colony {
     func choose(_ i: Int, lane: Lane) {
         let previous = cats[i].action
         if cats[i].homeBound { start(i, .goingHome, for: .infinity); return }
-        // Calm/playful setting and a busy Mac shift the choice from naps toward running and hunting.
-        let r = min(0.999, max(0, random() + Double(activity - 1) * 0.12 + energy * 0.2))
+        // The Calm/Playful setting and the power level shift the choice between naps and running or hunting.
+        let r = min(0.999, max(0, random() + Double(activity - 1) * 0.12 + mood))
         if quiet { start(i, .sleeping, for: 18 + random() * 50); return }
         if previous == .pouncing { start(i, .sitting, for: 3 + random() * 4); return }
         // Waking up usually comes with a good stretch.

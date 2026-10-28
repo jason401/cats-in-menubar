@@ -12,6 +12,29 @@ func runSelfTests() {
     expect(Habitat.freeLanes(width: 500, obstacles: [Lane(lower: 0, upper: 500)]).isEmpty, "fully occupied")
     expect(Habitat.freeLanes(width: 520, obstacles: [Lane(lower: 20, upper: 300), Lane(lower: 200, upper: 450)]) == [Lane(lower: 458, upper: 520)], "overlapping obstacles merge")
     expect(Habitat.freeLanes(width: 500, obstacles: [Lane(lower: -100, upper: 600)]).isEmpty, "out of bounds clipping")
+    // Power levels follow CPU headroom with smoothing and a gap between thresholds.
+    var governor = PowerGovernor()
+    _ = governor.update(cpu: 0.95, lowPowerMode: false, thermal: .nominal)
+    expect(governor.level == .full, "one spike does not change the mode")
+    for _ in 0..<10 { _ = governor.update(cpu: 0.9, lowPowerMode: false, thermal: .nominal) }
+    expect(governor.level == .low, "a busy Mac goes to low power")
+    for _ in 0..<10 { _ = governor.update(cpu: 0.45, lowPowerMode: false, thermal: .nominal) }
+    expect(governor.level == .eco, "half busy is eco")
+    for _ in 0..<10 { _ = governor.update(cpu: 0.4, lowPowerMode: false, thermal: .nominal) }
+    expect(governor.level == .eco, "no flip back while still in between")
+    for _ in 0..<10 { _ = governor.update(cpu: 0.05, lowPowerMode: false, thermal: .nominal) }
+    expect(governor.level == .full && governor.liveliness > 0, "an idle Mac gets full, lively cats")
+    expect(governor.update(cpu: 0.05, lowPowerMode: true, thermal: .nominal) == .low, "Low Power Mode means low power")
+    expect(PowerLevel.low.frameInterval > PowerLevel.full.frameInterval && PowerLevel.low.scanInterval > PowerLevel.full.scanInterval, "low power slows timers")
+    do {
+        var restSeed: UInt64 = 7
+        let resting = Colony(random: { restSeed = restSeed &* 6364136223846793005 &+ 1; return Double(restSeed >> 11) / Double(UInt64(1) << 53) })
+        resting.mood = PowerLevel.low.mood
+        resting.updateLanes([Lane(lower: 0, upper: 900)])
+        var ran = false
+        for _ in 0..<9000 { resting.step(1.0 / 30); ran = ran || resting.cats.contains { $0.action == .running && !$0.escaping } }
+        expect(!ran, "no zoomies in low power")
+    }
     var seed: UInt64 = 42
     let colony = Colony(random: { seed = seed &* 6364136223846793005 &+ 1; return Double(seed >> 11) / Double(UInt64(1) << 53) })
     var actions = Set<CatAction>()

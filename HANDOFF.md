@@ -90,3 +90,12 @@ Fixed build identity with a dedicated app-specific local certificate. Verified d
 
 - Measured ~12 % of one core. Profile: menu scan on the main thread (bundle lookups for every process, AXIsProcessTrusted via tccd every scan), full-width redraw at 30 fps, network name lookup each sample.
 - Now: trust cached 3 s, per-process candidate cache, scan timer 1 s (notifications still trigger immediate scans), dirty-rect redraws around cats and ball, 10 fps while every cat is sleeping/sitting/loafing, network name cached per interface. Measured ~2-3 %, ~5 % while cats run.
+
+## Power levels (2026-10-28)
+
+- User asked to invert the CPU reaction: plenty of headroom means lively cats; a busy Mac means the app backs off.
+- `Power.swift`: `PowerGovernor` smooths CPU and uses gaps between thresholds (full → eco above 45 %, → low above 75 %; back to full below 30 %). macOS Low Power Mode or serious heat forces low; fair heat caps at eco.
+- Per level: animation 30/15/8 fps (resting 10/5/2 fps), layout scan 1/2/4 s, system sampling at least 0/2/5 s, cat mood 0/-0.15/-0.35 (+0.08 when nearly idle). Low power has no zoomies (self-test).
+- Setting: Cats → Behavior → "Save power" (key `adaptivePower`, replaces `reactToCPU`), with the current level shown; panel summary shows it too.
+- Disk free space read every 30 s and battery every 10 s (free-space query was the top cost).
+- Live: switched to Eco at 45 % system CPU. App measured 1-9 % of one core in Eco depending on cat activity; drawing moving cats is now the main cost.

@@ -6,6 +6,7 @@ final class AppModel: ObservableObject {
     @Published var status = "Checking menu layout…" { didSet { if status != oldValue { AppModel.log(status) } } }
     @Published var catSummary = "Looking for empty space…"
     @Published var catsAway = false     // called into the cat tower
+    @Published var power = PowerLevel.full
     var home: (() -> Void)?
     @Published var access = MenuBarMonitor.trusted { didSet { if access != oldValue { AppModel.log("Accessibility: \(access)") } } }
     static let logURL = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Library/Logs/CatsInMenubar.log")
@@ -38,6 +39,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     var suspended = false
     var hovering = false
     var monitorInterval = 0.0
+    var governor = PowerGovernor()
     let defaults = UserDefaults.standard
 
     func applicationDidFinishLaunching(_ notification: Notification) {
@@ -70,16 +72,23 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         workspace.addObserver(self, selector: #selector(willSleep), name: NSWorkspace.willSleepNotification, object: nil)
         workspace.addObserver(self, selector: #selector(didWake), name: NSWorkspace.didWakeNotification, object: nil)
         NotificationCenter.default.addObserver(self, selector: #selector(layoutChanged), name: NSApplication.didChangeScreenParametersNotification, object: nil)
-        let animate = Timer(timeInterval: 1.0 / 30, repeats: true) { [weak self] _ in self?.tick() }
-        RunLoop.main.add(animate, forMode: .common); animationTimer = animate
-        // App switches and display changes trigger an immediate scan; the timer only catches slower changes.
-        let layout = Timer(timeInterval: 1.0, repeats: true) { [weak self] _ in self?.scan() }
-        RunLoop.main.add(layout, forMode: .common); layoutTimer = layout
+        NotificationCenter.default.addObserver(self, selector: #selector(powerStateChanged), name: .NSProcessInfoPowerStateDidChange, object: nil)
+        startTimers()
         scan()
         if !defaults.bool(forKey: "hasLaunched") || !MenuBarMonitor.trusted {
             showSettings(); defaults.set(true, forKey: "hasLaunched")
         }
     }
+    /// Animation and layout timers run at the current power level's pace.
+    /// App switches and display changes still trigger an immediate scan; the timer only catches slower changes.
+    func startTimers() {
+        animationTimer?.invalidate(); layoutTimer?.invalidate()
+        let animate = Timer(timeInterval: model.power.frameInterval, repeats: true) { [weak self] _ in self?.tick() }
+        RunLoop.main.add(animate, forMode: .common); animationTimer = animate
+        let layout = Timer(timeInterval: model.power.scanInterval, repeats: true) { [weak self] _ in self?.scan() }
+        RunLoop.main.add(layout, forMode: .common); layoutTimer = layout
+    }
+    @objc func powerStateChanged() { DispatchQueue.main.async { self.systemUpdated(self.system.stats) } }
     @objc func preferencesChanged() { DispatchQueue.main.async { self.applyOptions() } }
     var paused: Bool { defaults.bool(forKey: Pref.paused) }
     /// Manual quiet time, or the nightly schedule when enabled.
@@ -94,13 +103,24 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         colony.setCount(defaults.integer(forKey: Pref.count)); colony.quiet = quietNow
         colony.activity = defaults.integer(forKey: Pref.activity)
         habitatView?.showLanes = model.debug
-        let interval = defaults.double(forKey: Pref.interval)
-        if interval != monitorInterval { monitorInterval = interval; system.start(interval: interval) }
         systemUpdated(system.stats)
+        let interval = max(defaults.double(forKey: Pref.interval), model.power.sampleFloor)
+        if interval != monitorInterval { monitorInterval = interval; system.start(interval: interval) }
         if paused { overlay?.orderOut(nil) } else { scan() }
     }
     func systemUpdated(_ stats: SystemStats) {
-        colony.energy = defaults.bool(forKey: Pref.reactToCPU) ? stats.cpu : 0
+        // Plenty of CPU headroom: lively, smooth cats. Busy, hot or Low Power Mode: they rest and the app slows down.
+        let level = defaults.bool(forKey: Pref.adaptivePower)
+            ? governor.update(cpu: stats.cpu, lowPowerMode: ProcessInfo.processInfo.isLowPowerModeEnabled, thermal: stats.thermal)
+            : .full
+        colony.mood = defaults.bool(forKey: Pref.adaptivePower) ? governor.liveliness : 0
+        if level != model.power {
+            AppModel.log("Power: \(level.label) (CPU \(Int(governor.smoothed * 100))%)")
+            model.power = level
+            startTimers()
+            let interval = max(defaults.double(forKey: Pref.interval), level.sampleFloor)
+            if interval != monitorInterval { monitorInterval = interval; system.start(interval: interval) }
+        }
         colony.quiet = quietNow
         let title = defaults.bool(forKey: Pref.cpuInBar) ? String(format: " %d%%", Int((stats.cpu * 100).rounded())) : ""
         if statusItem.button?.title != title {
@@ -157,12 +177,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let now = ProcessInfo.processInfo.systemUptime
         updateMouse()
         updateTowerIcon()
-        // Napping, sitting cats only breathe and swish: 10 fps is enough and saves most of the drawing.
+        // Napping, sitting cats only breathe and swish: a few frames a second is enough.
         frame += 1
         let lively = colony.ball != nil || colony.cats.contains { cat in
             cat.visible && (abs(cat.velocity) > 0.1 || cat.escaping || ![.sleeping, .sitting, .loafing].contains(cat.action))
         }
-        if !lively && frame % 3 != 0 { return }
+        if !lively && frame % model.power.idleEvery != 0 { return }
         let dt = now - lastTick; lastTick = now
         if colony.homeX == nil, let x = towerX { colony.homeX = x }
         guard !paused, !suspended, overlay?.isVisible == true else { return }
@@ -219,7 +239,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             self.model.status = lanes.isEmpty ? (snapshot.reliable ? "No room right now. Cats will return when space opens up." : snapshot.message) : "\(lanes.count) safe area(s) · \(Int(lanes.reduce(0) { $0 + $1.width })) pt available"
             let visible = self.colony.cats.filter(\.visible).count
             self.model.catSummary = lanes.isEmpty ? (self.model.access ? "Waiting for empty space" : "Needs Accessibility access") :
-                "\(visible) cat\(visible == 1 ? "" : "s") · \(Int(lanes.reduce(0) { $0 + $1.width })) pt of room"
+                "\(visible) cat\(visible == 1 ? "" : "s") · \(Int(lanes.reduce(0) { $0 + $1.width })) pt of room · \(self.model.power.label)"
             self.habitatView?.needsDisplay = true
             if lanes.isEmpty { self.overlay?.orderOut(nil) } else { self.overlay?.orderFrontRegardless() }
         }

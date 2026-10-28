@@ -5,12 +5,12 @@ import SwiftUI
 /// Preference keys in the app's own UserDefaults domain.
 enum Pref {
     static let count = "catCount", paused = "paused", quiet = "quiet"
-    static let activity = "activity", reactToCPU = "reactToCPU", allowDrag = "allowDrag"
+    static let activity = "activity", adaptivePower = "adaptivePower", allowDrag = "allowDrag"
     static let nightQuiet = "nightQuiet", nightFrom = "nightFrom", nightTo = "nightTo"
     static let cpuInBar = "showCPUInBar", interval = "monitorInterval"
     static let showCPU = "showCPU", showMemory = "showMemory", showDisk = "showDisk", showBattery = "showBattery", showNetwork = "showNetwork"
     static let defaults: [String: Any] = [
-        count: 3, paused: false, quiet: false, activity: 1, reactToCPU: true, allowDrag: true,
+        count: 3, paused: false, quiet: false, activity: 1, adaptivePower: true, allowDrag: true,
         nightQuiet: false, nightFrom: 23, nightTo: 7, cpuInBar: false, interval: 2.0,
         showCPU: true, showMemory: true, showDisk: true, showBattery: true, showNetwork: true,
     ]
@@ -393,7 +393,7 @@ struct CatsTab: View {
     @AppStorage(Pref.paused) private var paused = false
     @AppStorage(Pref.allowDrag) private var allowDrag = true
     @AppStorage(Pref.activity) private var activity = 1
-    @AppStorage(Pref.reactToCPU) private var reactToCPU = true
+    @AppStorage(Pref.adaptivePower) private var adaptivePower = true
     @AppStorage(Pref.quiet) private var quiet = false
     @AppStorage(Pref.nightQuiet) private var nightQuiet = false
     @AppStorage(Pref.nightFrom) private var nightFrom = 23
@@ -416,10 +416,13 @@ struct CatsTab: View {
             SettingsCard(title: "Behavior") {
                 SettingsRow(title: "Activity") { SettingsSegments(options: [("Calm", 0), ("Normal", 1), ("Playful", 2)], selection: $activity) }
                 Divider()
-                SettingsRow(title: "Busy Mac") {
-                    SettingsSwitch(title: "Busy Mac", isOn: $reactToCPU).help("High CPU use makes the cats run around more, like a little load meter.")
+                SettingsRow(title: "Save power") {
+                    SettingsSwitch(title: "Save power", isOn: $adaptivePower)
+                        .help("Plenty of CPU headroom: lively cats at full frame rate. As the Mac gets busy, hot or enters Low Power Mode, cats rest more and the app draws and checks less often.")
                 }
-                SettingsNote(text: "Livelier cats when the CPU is busy.")
+                Divider()
+                SettingsRow(title: "Now") { SettingsStatus(text: model.power.label, ok: model.power == .full) }
+                SettingsNote(text: "When the Mac is busy, cats nap and the app draws less to stay out of the way.")
             }
             SettingsCard(title: "Quiet time") {
                 SettingsRow(title: "Sleep now") { SettingsSwitch(title: "Sleep now", isOn: $quiet) }
