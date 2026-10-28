@@ -83,6 +83,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     var lastScan = 0.0
     var menuOpen = false
     var scanStarted = 0.0
+    var hovering = false
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
@@ -136,6 +137,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         settings?.makeKeyAndOrderFront(nil)
     }
     @objc func layoutChanged() {
+        habitatView?.endDrag()
         epoch += 1
         colony.updateLanes([])
         overlay?.orderOut(nil)
@@ -143,16 +145,28 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
     @objc func willSleep() { suspended = true; layoutChanged() }
     @objc func didWake() { suspended = false; lastTick = ProcessInfo.processInfo.systemUptime; layoutChanged() }
-    func menuWillOpen(_ menu: NSMenu) { menuOpen = true; overlay?.orderOut(nil) }
+    func menuWillOpen(_ menu: NSMenu) { menuOpen = true; habitatView?.endDrag(); overlay?.orderOut(nil) }
     func menuDidClose(_ menu: NSMenu) { menuOpen = false; layoutChanged() }
     func tick() {
         let now = ProcessInfo.processInfo.systemUptime
         let dt = now - lastTick; lastTick = now
+        updateMouse()
         // Do not keep using a stale obstacle map when the AX server stalls.
-        if now - lastScan > 1.5 { overlay?.orderOut(nil); return }
+        if now - lastScan > 1.5 { habitatView?.endDrag(); overlay?.orderOut(nil); return }
         guard !model.paused, !suspended, !menuOpen, overlay?.isVisible == true else { return }
         colony.step(dt)
         habitatView?.needsDisplay = true
+    }
+    /// The overlay is click-through except right over a cat, so cats can be picked up without blocking the menu bar.
+    func updateMouse() {
+        guard let overlay, let view = habitatView, overlay.isVisible else { return }
+        let mouse = NSEvent.mouseLocation
+        let inside = overlay.frame.contains(mouse)
+        let overCat = inside && colony.catIndex(at: mouse.x - overlay.frame.minX) != nil
+        let catching = view.dragging != nil || overCat
+        if overlay.ignoresMouseEvents == catching { overlay.ignoresMouseEvents = !catching }
+        if overCat && view.dragging == nil { NSCursor.openHand.set() }
+        if overCat != hovering { hovering = overCat; if !overCat { NSCursor.arrow.set() } }
     }
     func scan() {
         model.access = MenuBarMonitor.trusted

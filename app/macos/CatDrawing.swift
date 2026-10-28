@@ -11,7 +11,28 @@ enum CatDrawing {
         Coat(fur: NSColor(calibratedRed: 0.97, green: 0.95, blue: 0.91, alpha: 1), line: NSColor(calibratedWhite: 0.38, alpha: 1),
              eye: NSColor(calibratedWhite: 0.12, alpha: 1), ear: NSColor(calibratedRed: 1.0, green: 0.68, blue: 0.70, alpha: 1)),
     ]
-    private enum Piece { case fill(NSBezierPath), line(NSBezierPath, CGFloat) }
+    private enum Piece { case fill(NSBezierPath), line(NSBezierPath, CGFloat, Bool) }
+    enum Eyes { case open, wide, half, closed }
+    struct Leg { var hip: NSPoint; var knee: NSPoint; var foot: NSPoint; var near: Bool }
+    /// A tiny skeleton in points, facing right, feet on y = 0, inside a 34 pt wide envelope.
+    struct Pose {
+        var shoulder = NSPoint(x: 5, y: 9.4)
+        var hip = NSPoint(x: -6.5, y: 9.6)
+        var body: CGFloat = 8          // trunk thickness; 0 = drawn by `blobs` only
+        var head = NSPoint(x: 10.4, y: 13.6)
+        var legs: [Leg] = []
+        var tail: [NSPoint] = []
+        var blobs: [NSRect] = []
+        var earBack: CGFloat = 0
+        var eyes = Eyes.open
+        var lift: CGFloat = 0
+    }
+    static let headRadius: CGFloat = 4.2
+
+    private static func p(_ x: CGFloat, _ y: CGFloat) -> NSPoint { NSPoint(x: x, y: y) }
+    private static func leg(_ hip: NSPoint, _ foot: NSPoint, bend: CGFloat, near: Bool) -> Leg {
+        Leg(hip: hip, knee: p((hip.x + foot.x) / 2 + bend, (hip.y + foot.y) / 2 + 0.3), foot: foot, near: near)
+    }
     private static func oval(_ cx: CGFloat, _ cy: CGFloat, _ w: CGFloat, _ h: CGFloat) -> NSBezierPath {
         NSBezierPath(ovalIn: NSRect(x: cx - w / 2, y: cy - h / 2, width: w, height: h))
     }
@@ -22,111 +43,251 @@ enum CatDrawing {
         path.lineCapStyle = .round; path.lineJoinStyle = .round
         return path
     }
-    private static func ear(_ x: CGFloat, _ y: CGFloat, tilt: CGFloat) -> NSBezierPath {
-        let path = NSBezierPath()
-        path.move(to: NSPoint(x: x - 2.6, y: y)); path.line(to: NSPoint(x: x + tilt, y: y + 5)); path.line(to: NSPoint(x: x + 2.6, y: y)); path.close()
-        path.lineJoinStyle = .round
-        return path
+
+    // MARK: Poses
+    static func pose(_ cat: Cat) -> Pose {
+        let t = CGFloat(cat.phase), e = CGFloat(cat.elapsed), seed = CGFloat(cat.coat) * 1.7
+        let speed = CGFloat(abs(cat.velocity))
+        switch cat.action {
+        case .sleeping: return sleep(t)
+        case .loafing: return loaf(t, seed)
+        case .sitting: return sit(t, seed, grooming: false)
+        case .grooming: return sit(t, seed, grooming: true)
+        case .stretching: return stretch(min(1, e / CGFloat(Colony.stretchTime)), t)
+        case .stalking: return stalk(cat, t)
+        case .pouncing:
+            // Gathered take-off, then fully stretched out in the air, then landing.
+            let q = min(1, e / 0.45)
+            var pose = run(cycle: -.pi / 2 + min(1, q * 2.2) * .pi, strength: 1.15, t: t)
+            pose.lift = sin(q * .pi) * 4.5; pose.eyes = .wide
+            return pose
+        case .held: return held(cat, t)
+        case .running, .chasing:
+            return speed > 18 ? run(cycle: CGFloat(cat.gait) / 26 * 2 * .pi, strength: min(1, speed / 40), t: t) : walk(cat, t, seed)
+        case .playing:
+            if speed < 4 { var pose = stalk(cat, t); pose.eyes = .wide; return pose }
+            return speed > 20 ? run(cycle: CGFloat(cat.gait) / 26 * 2 * .pi, strength: min(1, speed / 40), t: t) : walk(cat, t, seed)
+        case .walking: return walk(cat, t, seed)
+        }
     }
-    /// Faces right in a 34 x 26 pt envelope centered on `point`; `cat.direction` mirrors it.
+    private static func walk(_ cat: Cat, _ t: CGFloat, _ seed: CGFloat) -> Pose {
+        let s = min(1, CGFloat(abs(cat.velocity)) / 12)
+        let c = CGFloat(cat.gait) / 9 * 2 * .pi             // one stride every 9 pt, so feet never slide
+        let bob = abs(sin(c)) * 0.5 * s
+        var pose = Pose()
+        pose.shoulder = p(5, 9.4 + bob); pose.hip = p(-6.5, 9.6 + bob)
+        // Diagonal pairs move together, like a real walk.
+        for (x, offset, near, front) in [(CGFloat(5.6), CGFloat.pi, false, true), (-5.8, 0, false, false), (4.4, 0, true, true), (-7.2, .pi, true, false)] {
+            let swing = sin(c + offset) * 2.8 * s
+            let lift = max(0, cos(c + offset)) * 1.5 * s
+            let top = front ? pose.shoulder.y - 2 : pose.hip.y - 2
+            pose.legs.append(leg(p(x, top), p(x + swing, 0.9 + lift), bend: front ? 0.5 : -1.3, near: near))
+        }
+        let wag = sin(t * 2.2 + seed) * 2
+        pose.tail = [p(-9.5, 10.6 + bob), p(-14, 11.5), p(-12 + wag, 17), p(-15 + wag, 19)]
+        pose.head = p(10.4, 13.6 + bob * 0.5)
+        return pose
+    }
+    /// Gallop: the spine stretches and gathers, front and back legs work in pairs, the tail streams behind.
+    private static func run(cycle c: CGFloat, strength s: CGFloat, t: CGFloat) -> Pose {
+        let e = sin(c) * s
+        let air = max(0, cos(c)) * 1.6 * s
+        let half = 6 + 1.6 * e
+        var pose = Pose()
+        pose.shoulder = p(half - 0.5, 9.4 + air + 0.9 * e)
+        pose.hip = p(-half - 0.5, 9.4 + air - 0.6 * e)
+        for (offset, near) in [(CGFloat(0), false), (0.45, true)] {
+            let reach = sin(c + offset) * s
+            let front = p(pose.shoulder.x + 1 + 4.5 * reach, 0.9 + max(0, -cos(c + offset)) * 2.2 * s + air * 0.6)
+            let back = p(pose.hip.x - 0.5 - 4.5 * reach, 0.9 + max(0, cos(c + offset)) * 2.2 * s + air * 0.6)
+            pose.legs.append(leg(p(pose.shoulder.x, pose.shoulder.y - 2), front, bend: 0.8, near: near))
+            pose.legs.append(leg(p(pose.hip.x, pose.hip.y - 2), back, bend: -1.6, near: near))
+        }
+        pose.head = p(pose.shoulder.x + 4.8, pose.shoulder.y + 3.4 - 0.5 * e)
+        pose.earBack = 0.9 * s
+        let y = pose.hip.y
+        pose.tail = [p(pose.hip.x - 2.5, y + 1), p(-12.5, y + 2 + 1.5 * sin(c + 1)), p(-14.5, y + 3 + 2.5 * sin(c + 2)), p(-16.5, y + 4 + 2 * sin(c + 2.8))]
+        return pose
+    }
+    /// Hunting crouch: belly low, elbows up, eyes wide; the rear wiggles before a pounce.
+    private static func stalk(_ cat: Cat, _ t: CGFloat) -> Pose {
+        let creep = min(1, CGFloat(abs(cat.velocity)) / 5)
+        let c = CGFloat(cat.gait) / 6 * 2 * .pi
+        let wiggle: CGFloat = cat.wiggle > 0 ? 1 : 0
+        var pose = Pose()
+        pose.body = 7.4
+        pose.shoulder = p(4.5, 5.6)
+        pose.hip = p(-7 + sin(t * 18) * 0.8 * wiggle, 6.4 + wiggle * 0.9)
+        pose.head = p(10.2, 7.8)
+        for (dx, near) in [(CGFloat(-1), false), (0, true)] {
+            let step = sin(c + (near ? .pi : 0)) * 1.2 * creep
+            pose.legs.append(Leg(hip: p(pose.shoulder.x + dx, pose.shoulder.y - 1), knee: p(pose.shoulder.x + dx + 2.6, 4.4), foot: p(pose.shoulder.x + dx + 3.2 + step, 0.9), near: near))
+            pose.legs.append(Leg(hip: p(pose.hip.x + dx, pose.hip.y - 1), knee: p(pose.hip.x + dx + 2.4, 3.8), foot: p(pose.hip.x + dx - 0.6 - step, 0.9), near: near))
+        }
+        let twitch = sin(t * 7) * 1.2
+        pose.tail = [p(pose.hip.x - 2.5, pose.hip.y), p(-13, 4.5), p(-15, 3 + twitch), p(-16.5, 3.8 + twitch)]
+        pose.eyes = .wide
+        return pose
+    }
+    /// Front stretch (chest down, rear up) then back stretch (one hind leg reaching back).
+    private static func stretch(_ q: CGFloat, _ t: CGFloat) -> Pose {
+        var pose = Pose()
+        if q < 0.5 {
+            let k = sin(q / 0.5 * .pi)
+            pose.shoulder = p(6, 9.2 - 4.6 * k); pose.hip = p(-6, 9.4 + 1.6 * k)
+            for (dx, near) in [(CGFloat(-0.8), false), (0.4, true)] {
+                pose.legs.append(leg(p(pose.shoulder.x + dx, pose.shoulder.y - 1.5), p(pose.shoulder.x + dx + 1 + 6.5 * k, 0.9), bend: 0, near: near))
+                pose.legs.append(leg(p(pose.hip.x + dx, pose.hip.y - 2), p(pose.hip.x + dx - 0.3, 0.9), bend: -1 * (1 - k), near: near))
+            }
+            pose.head = p(pose.shoulder.x + 4.6 + 1.2 * k, pose.shoulder.y + 3.6 - 1.2 * k)
+            pose.eyes = k > 0.35 ? .closed : .open
+            let y = pose.hip.y
+            pose.tail = [p(pose.hip.x - 2.5, y + 1), p(-12, y + 4), p(-11, y + 8.5), p(-13, min(21, y + 10.5))]
+        } else {
+            let k = sin((q - 0.5) / 0.5 * .pi)
+            pose.shoulder = p(6, 9.4 + 1.2 * k); pose.hip = p(-6, 9.4 - 1.6 * k)
+            for (dx, near) in [(CGFloat(-0.8), false), (0.4, true)] {
+                pose.legs.append(leg(p(pose.shoulder.x + dx, pose.shoulder.y - 2), p(pose.shoulder.x + dx + 0.4, 0.9), bend: 0.3, near: near))
+                let reach = near ? k : 0
+                pose.legs.append(leg(p(pose.hip.x + dx, pose.hip.y - 2), p(pose.hip.x + dx - 6 * reach, 0.9 + 1.5 * reach), bend: -1.2 * (1 - reach), near: near))
+            }
+            pose.head = p(pose.shoulder.x + 4.8, pose.shoulder.y + 4 + 0.6 * k)
+            pose.eyes = k > 0.5 ? .closed : .open
+            let y = pose.hip.y
+            pose.tail = [p(pose.hip.x - 2.5, y + 0.5), p(-12, y), p(-14.5, y - 0.5), p(-16.5, y + 1)]
+        }
+        return pose
+    }
+    private static func sit(_ t: CGFloat, _ seed: CGFloat, grooming: Bool) -> Pose {
+        var pose = Pose()
+        pose.body = 8.4
+        pose.shoulder = p(0.6, 10.8); pose.hip = p(-3.8, 4.6)
+        pose.blobs = [NSRect(x: -10.1, y: 0, width: 11, height: 8.6)]  // haunch
+        let s = pose.shoulder
+        pose.legs.append(leg(p(s.x - 0.4, s.y - 2), p(s.x + 0.6, 0.9), bend: 0, near: false))
+        if grooming {
+            let lick = sin(t * 7) * 0.8
+            pose.legs.append(Leg(hip: p(s.x + 1.2, s.y - 2), knee: p(s.x + 3.6, s.y - 0.6), foot: p(s.x + 4.6, s.y + 2.6 + lick), near: true))
+            pose.head = p(3.8, 14.4 + lick * 0.3)
+            pose.eyes = .closed
+        } else {
+            pose.legs.append(leg(p(s.x + 1.2, s.y - 2), p(s.x + 2.2, 0.9), bend: 0, near: true))
+            pose.head = p(2.8 + sin(t * 0.4 + seed) * 0.6, 15.6)
+        }
+        // The tail wraps around the paws; its tip flicks now and then.
+        let flick = pow(max(0, sin(t * 1.1 + seed)), 4) * 2.5
+        pose.tail = [p(-8, 2.2), p(-12.5, 0.4), p(-3, -0.4), p(5, 1.2 + flick)]
+        return pose
+    }
+    private static func loaf(_ t: CGFloat, _ seed: CGFloat) -> Pose {
+        var pose = Pose()
+        pose.body = 0
+        pose.blobs = [NSRect(x: -12, y: 0.1, width: 21, height: 9.4)]
+        pose.head = p(7.2, 9 + sin(t * 0.5 + seed) * 0.2)
+        pose.tail = [p(-11, 2.6), p(-13.5, 0.6), p(-4, -0.2), p(4, 1.1)]
+        pose.eyes = sin(t * 0.3 + seed) > 0.2 ? .half : .open
+        return pose
+    }
+    private static func sleep(_ t: CGFloat) -> Pose {
+        let breath = 1 + 0.05 * sin(t * 1.6)
+        var pose = Pose()
+        pose.body = 0
+        pose.blobs = [NSRect(x: -11.5, y: 0.1, width: 20, height: 8.6 * breath)]
+        pose.head = p(6.2, 5.4 * breath)
+        pose.tail = [p(-10.5, 2.4), p(-14, 0), p(2, -0.4), p(9.5, 1.2)]
+        pose.eyes = .closed; pose.earBack = 0.6
+        return pose
+    }
+    /// Carried by the scruff: hanging body, dangling legs and tail that swing with the drag.
+    private static func held(_ cat: Cat, _ t: CGFloat) -> Pose {
+        let sw = max(-1, min(1, CGFloat(cat.swing) / 80)) * CGFloat(cat.direction)
+        var pose = Pose()
+        pose.shoulder = p(1 - sw * 1.5, 12.6); pose.hip = p(-1.2 + sw * 2, 5.8)
+        let dangle = sin(t * 3) * 0.4
+        for (dx, near) in [(CGFloat(-0.6), false), (0.8, true)] {
+            pose.legs.append(leg(p(pose.shoulder.x + dx, pose.shoulder.y - 2), p(pose.shoulder.x + dx + sw * 2 + dangle, pose.shoulder.y - 7.5), bend: 0, near: near))
+            pose.legs.append(leg(p(pose.hip.x + dx, pose.hip.y - 1.5), p(pose.hip.x + dx + sw * 2.5 - dangle, 0.8), bend: 0, near: near))
+        }
+        pose.head = p(2.4 - sw, 16.6)
+        pose.tail = [p(pose.hip.x - 1.5, pose.hip.y - 1), p(-4 + sw * 4, 1.2), p(-6 + sw * 6, 0.6), p(-8 + sw * 8 + sin(t * 2) * 1.5, 2)]
+        pose.eyes = .wide
+        return pose
+    }
+
+    // MARK: Rendering
+    /// Faces right, centered on `point`; `cat.direction` mirrors it.
     static func cat(_ cat: Cat, at point: NSPoint, scale: CGFloat = 1) {
         guard cat.visible && cat.hiddenFor <= 0 else { return }
+        let pose = pose(cat)
         NSGraphicsContext.saveGraphicsState()
         let transform = NSAffineTransform()
-        transform.translateX(by: point.x, yBy: point.y)
+        transform.translateX(by: point.x, yBy: point.y + pose.lift * scale)
         transform.scaleX(by: scale * cat.direction, yBy: scale)
         transform.concat()
         NSGraphicsContext.current?.shouldAntialias = true
         let coat = coats[cat.coat % coats.count]
-        let t = CGFloat(cat.phase)
-        let speed = abs(cat.velocity)
+        let r = headRadius, head = pose.head
+        // Occasional ear flick, staggered per cat.
+        let flick: CGFloat = sin(CGFloat(cat.phase) * 0.9 + CGFloat(cat.coat) * 1.7) > 0.985 ? 1.2 : 0
+        let earY = head.y + r * 0.5
+        let ears = [(head.x - r * 0.55 - pose.earBack, -0.4 - flick - pose.earBack * 1.5), (head.x + r * 0.6 - pose.earBack, 0.4 - pose.earBack * 1.5)]
         var pieces: [Piece] = []
-        var head = NSPoint.zero, headRadius: CGFloat = 5.6, eyesClosed = false, earTilt: CGFloat = 0
-        // Occasional ear flick and blink, staggered per cat.
-        let seed = CGFloat(cat.coat) * 1.7
-        if sin(t * 0.9 + seed) > 0.985 { earTilt = 1.2 }
-        let blink = sin(t * 0.7 + seed * 2) > 0.992
-        switch cat.action {
-        case .sleeping:
-            let breath = 1 + 0.05 * sin(t * 1.6)
-            pieces.append(.line(stroke([NSPoint(x: -11, y: 3), NSPoint(x: -14, y: -0.5), NSPoint(x: 2, y: -0.5), NSPoint(x: 9, y: 1.4)]), 2.4))
-            pieces.append(.fill(oval(-1.5, 4.6 * breath, 22, 9.4 * breath)))
-            head = NSPoint(x: 7.5, y: 6.2 * breath); headRadius = 5
-            eyesClosed = true
-        case .sitting, .grooming:
-            let grooming = cat.action == .grooming
-            let sway = sin(t * 1.3 + seed) * 1.6
-            pieces.append(.line(stroke([NSPoint(x: -7, y: 1.5), NSPoint(x: -13, y: 0.5), NSPoint(x: -12, y: 6 + sway), NSPoint(x: -14.5, y: 9 + sway)]), 2.4))
-            pieces.append(.fill(oval(-4.5, 4.8, 12, 9.6)))      // haunch
-            pieces.append(.fill(oval(-1, 8, 10.5, 14)))         // upright body
-            pieces.append(.line(stroke([NSPoint(x: 2.8, y: 7), NSPoint(x: 3.2, y: 1.2)]), 2.6))
-            if grooming {
-                let lick = sin(t * 7) * 0.8
-                pieces.append(.line(stroke([NSPoint(x: 1.5, y: 8), NSPoint(x: 6.5, y: 12.5 + lick)]), 2.6))
-                head = NSPoint(x: 4.8, y: 15 + lick * 0.4); eyesClosed = true
-            } else {
-                pieces.append(.line(stroke([NSPoint(x: 0.4, y: 7), NSPoint(x: 0.6, y: 1.2)]), 2.6))
-                head = NSPoint(x: 3.4, y: 16.4 + sin(t * 0.5 + seed) * 0.3)
-            }
-        case .walking, .chasing, .playing:
-            let crouch: CGFloat = cat.action == .playing && speed < 4 ? 2 : 0
-            let cycle = CGFloat(cat.gait) / 10 * 2 * .pi       // one stride every 10 pt walked
-            let stride = min(1, CGFloat(speed) / 12)
-            let bob = abs(sin(cycle)) * 0.8 * stride
-            let hip: CGFloat = 7 - crouch
-            for (x, offset, near) in [(CGFloat(-6.5), CGFloat.pi, false), (CGFloat(5), 0, false), (-8.5, 0, true), (3, .pi, true)] {
-                let swing = sin(cycle + offset) * 2.6 * stride
-                let lift = max(0, cos(cycle + offset)) * 1.4 * stride
-                let leg = stroke([NSPoint(x: x, y: hip + bob), NSPoint(x: x + swing, y: 1.2 + lift)])
-                pieces.append(.line(leg, near ? 2.8 : 2.4))
-            }
-            let wag = sin(t * (cat.action == .playing ? 9 : 2.2) + seed) * 2
-            pieces.append(.line(stroke([NSPoint(x: -10, y: 10 + bob - crouch), NSPoint(x: -15, y: 12), NSPoint(x: -13 + wag, y: 17), NSPoint(x: -15.5 + wag, y: 19 - crouch)]), 2.4))
-            pieces.append(.fill(NSBezierPath(roundedRect: NSRect(x: -11.5, y: 5 + bob - crouch, width: 20, height: 9.5), xRadius: 4.8, yRadius: 4.8)))
-            head = NSPoint(x: 9, y: 14.2 + bob * 0.6 - crouch * 1.5)
+        for leg in pose.legs where !leg.near { pieces.append(.line(stroke([leg.hip, leg.knee, leg.foot]), 2.2, true)) }
+        if !pose.tail.isEmpty { pieces.append(.line(stroke(pose.tail), 2.1, false)) }
+        for blob in pose.blobs { pieces.append(.fill(NSBezierPath(ovalIn: blob))) }
+        if pose.body > 0 {
+            pieces.append(.line(stroke([pose.hip, pose.shoulder]), pose.body, false))
+            pieces.append(.fill(oval(pose.shoulder.x, pose.shoulder.y, pose.body + 0.8, pose.body + 0.8)))
         }
-        let headPath = oval(head.x, head.y, headRadius * 2.1, headRadius * 1.9)
-        let leftEar = ear(head.x - headRadius * 0.55, head.y + headRadius * 0.55, tilt: -0.4 - earTilt)
-        let rightEar = ear(head.x + headRadius * 0.6, head.y + headRadius * 0.55, tilt: 0.4)
-        pieces += [.fill(leftEar), .fill(rightEar), .fill(headPath)]
-        // One soft outline around the whole silhouette, then the fur on top, so joints stay seamless.
-        for (color, extra) in [(coat.line, CGFloat(1.6)), (coat.fur, 0)] {
-            color.set()
+        for leg in pose.legs where leg.near { pieces.append(.line(stroke([leg.hip, leg.knee, leg.foot]), 2.4, false)) }
+        for (x, tilt) in ears {
+            let ear = NSBezierPath()
+            ear.move(to: p(x - 2, earY)); ear.line(to: p(x + tilt, earY + 3.9)); ear.line(to: p(x + 2, earY)); ear.close()
+            ear.lineJoinStyle = .round
+            pieces.append(.fill(ear))
+        }
+        pieces.append(.fill(oval(head.x, head.y, r * 2.15, r * 1.95)))
+        // One soft outline around the whole silhouette, then fur on top, so joints stay seamless.
+        let shade = coat.fur.blended(withFraction: 0.18, of: .black) ?? coat.fur
+        for outline in [true, false] {
             for piece in pieces {
                 switch piece {
                 case .fill(let path):
-                    path.fill()
-                    if extra > 0 { path.lineWidth = extra; path.stroke() }
-                case .line(let path, let width):
-                    path.lineWidth = width + extra; path.stroke()
+                    (outline ? coat.line : coat.fur).set(); path.fill()
+                    if outline { path.lineWidth = 1.6; path.stroke() }
+                case .line(let path, let width, let far):
+                    (outline ? coat.line : (far ? shade : coat.fur)).set()
+                    path.lineWidth = width + (outline ? 1.6 : 0); path.stroke()
                 }
             }
         }
         coat.ear.set()
-        for (x, sign) in [(head.x - headRadius * 0.55, CGFloat(-1)), (head.x + headRadius * 0.6, 1)] {
+        for (x, tilt) in ears {
             let inner = NSBezierPath()
-            let tip = NSPoint(x: x + sign * 0.3 + (sign < 0 ? -earTilt : 0), y: head.y + headRadius * 0.55 + 3.2)
-            inner.move(to: NSPoint(x: x - 1.2, y: head.y + headRadius * 0.6)); inner.line(to: tip); inner.line(to: NSPoint(x: x + 1.2, y: head.y + headRadius * 0.6)); inner.close()
+            inner.move(to: p(x - 1, earY + 0.3)); inner.line(to: p(x + tilt * 0.8, earY + 2.8)); inner.line(to: p(x + 1, earY + 0.3)); inner.close()
             inner.fill()
         }
-        let eyeY = head.y + 0.4
-        for eyeX in [head.x - 0.4, head.x + 2.8] {
-            if eyesClosed || blink {
-                coat.eye == coats[1].eye ? coat.line.set() : coat.eye.set()
-                let lid = stroke([NSPoint(x: eyeX - 1, y: eyeY + 0.3), NSPoint(x: eyeX - 0.4, y: eyeY - 0.5), NSPoint(x: eyeX + 0.4, y: eyeY - 0.5), NSPoint(x: eyeX + 1, y: eyeY + 0.3)])
-                lid.lineWidth = 0.8; lid.stroke()
-            } else {
-                coat.eye.set(); oval(eyeX, eyeY, 1.6, 2.2).fill()
+        let blink = sin(CGFloat(cat.phase) * 0.7 + CGFloat(cat.coat) * 3.4) > 0.992
+        let eyeY = head.y + 0.3
+        for eyeX in [head.x + 0.1, head.x + 2.5] {
+            switch blink ? .closed : pose.eyes {
+            case .closed:
+                (cat.coat == 1 ? coat.line : coat.eye).set()
+                let lid = stroke([p(eyeX - 0.9, eyeY + 0.3), p(eyeX - 0.4, eyeY - 0.4), p(eyeX + 0.4, eyeY - 0.4), p(eyeX + 0.9, eyeY + 0.3)])
+                lid.lineWidth = 0.75; lid.stroke()
+            case .half: coat.eye.set(); oval(eyeX, eyeY - 0.3, 1.4, 0.9).fill()
+            case .wide: coat.eye.set(); oval(eyeX, eyeY, 1.7, 2.4).fill()
+            case .open: coat.eye.set(); oval(eyeX, eyeY, 1.3, 1.9).fill()
             }
         }
         NSColor(calibratedRed: 1.0, green: 0.55, blue: 0.62, alpha: 1).set()
-        oval(head.x + 1.3, head.y - 1.6, 1.5, 1.0).fill()
+        oval(head.x + 1.4, head.y - 1.4, 1.2, 0.8).fill()
         if cat.action == .sleeping {
             // A small "z" drifts up and fades.
-            let cycle = (t / 2.6).truncatingRemainder(dividingBy: 1)
+            let cycle = (CGFloat(cat.phase) / 2.6).truncatingRemainder(dividingBy: 1)
             let attrs: [NSAttributedString.Key: Any] = [.font: NSFont.systemFont(ofSize: 5 + cycle * 2, weight: .bold),
                                                        .foregroundColor: NSColor.secondaryLabelColor.withAlphaComponent(1 - cycle)]
-            ("z" as NSString).draw(at: NSPoint(x: 9 + cycle * 3, y: 10 + cycle * 7), withAttributes: attrs)
+            ("z" as NSString).draw(at: p(8 + cycle * 3, 9 + cycle * 7), withAttributes: attrs)
         }
         NSGraphicsContext.restoreGraphicsState()
     }
@@ -142,8 +303,29 @@ enum CatDrawing {
 final class HabitatView: NSView {
     let colony: Colony
     var showLanes = false
+    private(set) var dragging: Int?
+    private var grabOffset = 0.0
+    private var lastDrag = 0.0
     init(colony: Colony, frame: NSRect) { self.colony = colony; super.init(frame: frame) }
     required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
+    override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
+    override func mouseDown(with event: NSEvent) {
+        let point = convert(event.locationInWindow, from: nil)
+        guard let i = colony.catIndex(at: point.x) else { return }
+        dragging = i; grabOffset = colony.cats[i].x - point.x; lastDrag = event.timestamp
+        colony.grab(i); NSCursor.closedHand.set(); needsDisplay = true
+    }
+    override func mouseDragged(with event: NSEvent) {
+        guard let i = dragging else { return }
+        let point = convert(event.locationInWindow, from: nil)
+        colony.drag(i, to: point.x + grabOffset, dt: event.timestamp - lastDrag)
+        lastDrag = event.timestamp; needsDisplay = true
+    }
+    override func mouseUp(with event: NSEvent) { endDrag(); NSCursor.openHand.set() }
+    func endDrag() {
+        if let i = dragging { colony.release(i); needsDisplay = true }
+        dragging = nil
+    }
     override func draw(_ dirtyRect: NSRect) {
         super.draw(dirtyRect)
         guard !colony.lanes.isEmpty else { return }

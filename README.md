@@ -1,6 +1,6 @@
 # Cats in Menubar
 
-A native macOS menu bar playground for two or three tiny cats. They nap, groom, walk, occasionally chase one another, and play with a ball in the space between menus and status icons.
+A native macOS menu bar playground for two or three tiny cats. They nap, loaf, stretch, groom, walk, sometimes run or hunt an imaginary bug, chase one another, and play with a ball in the space between menus and status icons.
 
 ## Run
 
@@ -25,7 +25,7 @@ The cat menu bar icon opens settings. Grant **Accessibility** access to **Cats i
 - Primary display only in this first version.
 - Cats and toys stay within connected free intervals, with 8 pt of clearance around occupied regions.
 - If an occupied region expands over a cat, the cat disappears immediately after detection, then reappears in available space. It never deliberately traverses an occupied interval.
-- Overlay clicks pass through to the menu bar.
+- Overlay clicks pass through to the menu bar, except directly over a cat: cats can be picked up and dragged within their own free space.
 - No screen capture, screen-recording permission, network requests, AI services, or downloaded artwork. Accessibility traversal reads roles, positions, sizes, visibility and child structure, not menu text.
 - Preferences live in the app's own UserDefaults domain, `local.catsinmenubar`.
 

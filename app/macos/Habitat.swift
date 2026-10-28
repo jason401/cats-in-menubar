@@ -27,7 +27,10 @@ enum Habitat {
     }
 }
 
-enum CatAction: String, CaseIterable { case sitting, walking, sleeping, grooming, playing, chasing }
+enum CatAction: String, CaseIterable {
+    case sitting, walking, sleeping, grooming, playing, chasing
+    case running, stalking, pouncing, stretching, loafing, held
+}
 struct Cat {
     var x: Double
     var destination: Double
@@ -36,6 +39,10 @@ struct Cat {
     var gait = 0.0          // distance walked, drives leg motion so feet never slide
     var turnCooldown = 0.0  // a cat must stand a moment before facing the other way
     var pounceCooldown = 0.0
+    var elapsed = 0.0       // time in the current action, drives one-shot poses like stretching
+    var target = 0.0        // where a hunt ends
+    var wiggle = 0.0        // butt wiggle before a pounce
+    var swing = 0.0         // horizontal speed while carried by the mouse
     var action: CatAction = .sitting
     var remaining = 5.0
     var phase = 0.0
@@ -86,8 +93,7 @@ final class Colony {
                 cats[i].hiddenFor = 0.45
                 cats[i].velocity = 0
                 cats[i].visible = true
-                cats[i].action = .sitting
-                cats[i].remaining = 2 + random() * 4
+                start(i, .sitting, for: 2 + random() * 4)
             } else { cats[i].visible = false }
         }
         if let toy = ball, !lanes.contains(where: { $0.lower <= toy.lane.lower && $0.upper >= toy.lane.upper }) {
@@ -95,27 +101,53 @@ final class Colony {
             for i in cats.indices where cats[i].action == .playing { cats[i].action = .sitting; cats[i].remaining = 1 }
         }
     }
+    static let stretchTime = 3.2
+    func start(_ i: Int, _ action: CatAction, for duration: Double) {
+        cats[i].action = action; cats[i].remaining = duration; cats[i].elapsed = 0; cats[i].wiggle = 0
+    }
+    func clamp(_ x: Double, to lane: Lane) -> Double {
+        min(lane.upper - Habitat.catRadius, max(lane.lower + Habitat.catRadius, x))
+    }
     func choose(_ i: Int, lane: Lane) {
+        let previous = cats[i].action
         let r = random()
-        if quiet || r < 0.32 { cats[i].action = .sleeping; cats[i].remaining = 18 + random() * 50 }
-        else if r < 0.54 { cats[i].action = .sitting; cats[i].remaining = 5 + random() * 12 }
-        else if r < 0.70 { cats[i].action = .grooming; cats[i].remaining = 4 + random() * 7 }
-        else if r < 0.88 || lane.width < 150 {
-            cats[i].action = .walking
-            cats[i].destination = lane.lower + Habitat.catRadius + random() * (lane.width - 2 * Habitat.catRadius)
-            cats[i].remaining = 12
+        if quiet { start(i, .sleeping, for: 18 + random() * 50); return }
+        if previous == .pouncing { start(i, .sitting, for: 3 + random() * 4); return }
+        // Waking up usually comes with a good stretch.
+        if (previous == .sleeping || previous == .loafing) && r < 0.65 { start(i, .stretching, for: Colony.stretchTime); return }
+        if r < 0.22 { start(i, .sleeping, for: 18 + random() * 45) }
+        else if r < 0.34 { start(i, .sitting, for: 4 + random() * 8) }
+        else if r < 0.44 { start(i, .loafing, for: 8 + random() * 12) }
+        else if r < 0.53 { start(i, .grooming, for: 4 + random() * 5) }
+        else if r < 0.58 { start(i, .stretching, for: Colony.stretchTime) }
+        else if r < 0.76 || lane.width < 120 {
+            start(i, .walking, for: 14)
+            cats[i].destination = clamp(lane.lower + random() * lane.width, to: lane)
+        } else if r < 0.85 {
+            // A sudden zoomie to the far side of the free space.
+            start(i, .running, for: 10)
+            let middle = (lane.lower + lane.upper) / 2
+            cats[i].destination = clamp(cats[i].x < middle ? lane.upper - random() * lane.width * 0.25 : lane.lower + random() * lane.width * 0.25, to: lane)
+        } else if r < 0.93 {
+            // Hunt an imaginary bug: creep, wiggle, pounce.
+            let side = random() < 0.5 ? -1.0 : 1.0
+            let prey = clamp(cats[i].x + side * (45 + random() * 40), to: lane)
+            if abs(prey - cats[i].x) < 35 { start(i, .sitting, for: 4) }
+            else {
+                start(i, .stalking, for: 15)
+                cats[i].target = prey
+                cats[i].destination = prey - (prey > cats[i].x ? 1 : -1) * 20
+            }
         } else {
             if ball == nil { ball = ToyBall(x: cats[i].x, velocity: cats[i].direction * 34, lane: lane) }
-            if let toy = ball, lane.contains(toy.x, margin: 5) {
-                cats[i].action = .playing; cats[i].remaining = 10 + random() * 8
-            } else { cats[i].action = .sitting; cats[i].remaining = 4 }
+            if let toy = ball, lane.contains(toy.x, margin: 5) { start(i, .playing, for: 10 + random() * 8) }
+            else { start(i, .sitting, for: 4) }
         }
         // A rare short chase, only within the same connected free interval.
         if !quiet, cats[i].action == .walking, random() < 0.22,
            let friend = cats.indices.first(where: { $0 != i && cats[$0].visible && lane.contains(cats[$0].x, margin: Habitat.catRadius) && cats[$0].action == .walking }) {
-            cats[i].action = .chasing
+            start(i, .chasing, for: 4)
             cats[i].destination = cats[friend].x
-            cats[i].remaining = 3
         }
     }
     func step(_ dt: Double) {
@@ -134,8 +166,10 @@ final class Colony {
             guard cats[i].visible, let lane = lanes.first(where: { $0.contains(cats[i].x, margin: Habitat.catRadius) }) else { continue }
             cats[i].hiddenFor = max(0, cats[i].hiddenFor - dt)
             cats[i].phase += dt
+            cats[i].elapsed += dt
+            if cats[i].action == .held { cats[i].swing *= exp(-6 * dt); continue }
             cats[i].remaining -= dt
-            if quiet && cats[i].action != .sleeping { cats[i].action = .sleeping; cats[i].remaining = 30 }
+            if quiet && cats[i].action != .sleeping { start(i, .sleeping, for: 30) }
             if cats[i].remaining <= 0 { choose(i, lane: lane) }
             cats[i].turnCooldown = max(0, cats[i].turnCooldown - dt)
             cats[i].pounceCooldown = max(0, cats[i].pounceCooldown - dt)
@@ -155,10 +189,26 @@ final class Colony {
                     }
                 } else { cats[i].action = .sitting; cats[i].remaining = 3 }
             }
-            let moving = [.walking, .chasing, .playing].contains(cats[i].action)
-            let delta = moving ? cats[i].destination - cats[i].x : 0
-            let maxSpeed = cats[i].action == .chasing ? 42.0 : (cats[i].action == .playing ? 30 : 15)
-            let accel = cats[i].action == .walking ? 30.0 : 70  // idle actions also stop quickly
+            if cats[i].action == .stalking && cats[i].wiggle > 0 {
+                cats[i].wiggle -= dt
+                if cats[i].wiggle <= 0 {
+                    let prey = clamp(cats[i].target, to: lane)
+                    start(i, .pouncing, for: 1.5)
+                    cats[i].destination = prey
+                }
+            }
+            let moving: Set<CatAction> = [.walking, .running, .chasing, .playing, .stalking, .pouncing]
+            let holding = cats[i].action == .stalking && cats[i].wiggle > 0
+            let delta = moving.contains(cats[i].action) && !holding ? cats[i].destination - cats[i].x : 0
+            let (maxSpeed, accel): (Double, Double) = switch cats[i].action {
+            case .walking: (15, 30)
+            case .running: (58, 90)
+            case .chasing: (50, 90)
+            case .playing: (30, 70)
+            case .stalking: (6, 20)
+            case .pouncing: (75, 400)
+            default: (0, 70)  // idle actions also stop quickly
+            }
             var desired = 0.0
             if abs(delta) > 0.5 {
                 let wanted = delta > 0 ? 1.0 : -1.0
@@ -169,7 +219,13 @@ final class Colony {
                     // Ease in and brake smoothly before the destination.
                     desired = wanted * min(maxSpeed, sqrt(2 * accel * abs(delta)))
                 }
-            } else if moving && cats[i].action != .playing && abs(cats[i].velocity) < 0.5 { cats[i].remaining = 0 }
+            } else if moving.contains(cats[i].action) && abs(cats[i].velocity) < 0.5 {
+                switch cats[i].action {
+                case .playing: break
+                case .stalking: if cats[i].wiggle <= 0 { cats[i].wiggle = 0.7 + random() * 0.7 }
+                default: cats[i].remaining = 0
+                }
+            }
             let change = desired - cats[i].velocity
             cats[i].velocity += max(-accel * dt, min(accel * dt, change))
             let before = cats[i].x
@@ -179,10 +235,30 @@ final class Colony {
             cats[i].gait += abs(cats[i].x - before)
         }
     }
+    // Mouse handling: a held cat stays inside its own free interval and is never carried over menus or icons.
+    func catIndex(at x: Double) -> Int? {
+        cats.indices.filter { cats[$0].visible && cats[$0].hiddenFor <= 0 && abs(cats[$0].x - x) < 13 }
+            .min { abs(cats[$0].x - x) < abs(cats[$1].x - x) }
+    }
+    func grab(_ i: Int) {
+        guard cats.indices.contains(i), cats[i].visible else { return }
+        start(i, .held, for: .infinity); cats[i].velocity = 0; cats[i].swing = 0
+    }
+    func drag(_ i: Int, to x: Double, dt: Double) {
+        guard cats.indices.contains(i), cats[i].action == .held,
+              let lane = lanes.first(where: { $0.contains(cats[i].x, margin: Habitat.catRadius) }) else { return }
+        let next = clamp(x, to: lane)
+        cats[i].swing += ((next - cats[i].x) / max(dt, 0.001) - cats[i].swing) * min(1, dt * 12)
+        cats[i].x = next; cats[i].destination = next
+    }
+    func release(_ i: Int) {
+        guard cats.indices.contains(i), cats[i].action == .held else { return }
+        start(i, .grooming, for: 2 + random() * 2); cats[i].swing = 0
+    }
     func play() {
         guard !quiet, let i = cats.indices.first(where: { index in cats[index].visible && lanes.contains(where: { $0.contains(cats[index].x, margin: Habitat.catRadius) && $0.width >= 150 }) }),
               let lane = lanes.first(where: { $0.contains(cats[i].x, margin: Habitat.catRadius) }) else { return }
         ball = ToyBall(x: min(lane.upper - 5, cats[i].x + 12), velocity: 45, lane: lane)
-        cats[i].action = .playing; cats[i].remaining = 20
+        start(i, .playing, for: 20)
     }
 }

@@ -56,3 +56,10 @@ Fixed build identity with a dedicated app-specific local certificate. Verified d
 - Fast left-right shaking came from playing: the target spot depended on the facing direction, so the cat flipped every frame and kicked the ball every frame (922 rapid flips in the simulation). Now the side comes from the ball position, batting has a 0.9-2.3 s cooldown, cats brake, pause 0.6 s before turning, and ease in/out. Self-test asserts no direction flip within 0.5 s.
 - Cats redrawn as simple antialiased vector silhouettes (orange, black, white) with one soft outline; leg motion follows distance walked.
 - Menu bar icon and app icon are an original cat tower (`TowerIcon.swift`); the build renders `AppIcon.icns`.
+
+## Poses and dragging (2026-10-28)
+
+- Cats are drawn from a small skeleton (shoulder, hip, jointed legs, tail curve); head radius 4.2 pt for slimmer proportions.
+- New behaviors: running (gallop with stretching spine and streaming tail), stalking (crouch, creep, butt wiggle) then pouncing, stretching (front then back, often after sleep), loafing. Self-test requires each to occur.
+- Drag: overlay stays click-through except while the pointer is over a cat (`updateMouse` each tick). A held cat dangles, swings with drag speed and is clamped to its own free interval; it is put down when the layout changes or the overlay hides. Live drag not yet tried by the user.
+- `build/previews/cats.png` shows every pose, the run cycle and actual size.
