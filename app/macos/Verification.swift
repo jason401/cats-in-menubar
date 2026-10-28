@@ -14,13 +14,23 @@ func runSelfTests() {
     var seed: UInt64 = 42
     let colony = Colony(random: { seed = seed &* 6364136223846793005 &+ 1; return Double(seed >> 11) / Double(UInt64(1) << 53) })
     var actions = Set<CatAction>()
+    var lastFlip = [Double](repeating: -10, count: 3)
+    var facing = colony.cats.map(\.direction)
+    var jitter: [String: Int] = [:]
     let configurations: [[Lane]] = [lanes, [Lane(lower: 280, upper: 380), Lane(lower: 500, upper: 740)], [], [Lane(lower: 10, upper: 100)], [Lane(lower: 100, upper: 900)]]
     for tick in 0..<30000 {
         if tick % 173 == 0 { colony.updateLanes(configurations[(tick / 173) % configurations.count]) }
         if tick % 911 == 0 { colony.play() }
         colony.step(1.0 / 30)
-        for cat in colony.cats {
+        for (i, cat) in colony.cats.enumerated() {
             actions.insert(cat.action)
+            let time = Double(tick) / 30
+            if cat.visible && cat.direction != facing[i] {
+                // Turning back within half a second reads as frantic left-right shaking.
+                if time - lastFlip[i] < 0.5 { jitter[cat.action.rawValue, default: 0] += 1 }
+                lastFlip[i] = time
+            }
+            facing[i] = cat.direction
             if cat.visible {
                 expect(colony.lanes.contains { $0.contains(cat.x, margin: Habitat.catRadius) }, "cat cannot overlap an obstacle")
                 expect(colony.lanes.contains { $0.contains(cat.x, margin: Habitat.catRadius) && $0.contains(cat.destination, margin: Habitat.catRadius) }, "path stays in one connected interval")
@@ -30,6 +40,7 @@ func runSelfTests() {
             expect(colony.lanes.contains { $0.contains(ball.x, margin: 4) }, "ball stays in free space")
         }
     }
+    expect(jitter.isEmpty, "no rapid direction flips: \(jitter)")
     expect(actions.contains(.sleeping) && actions.contains(.walking) && actions.contains(.playing) && actions.contains(.grooming), "routine covers idle and active behaviors")
     colony.updateLanes([Lane(lower: 0, upper: 400)])
     colony.quiet = true; colony.step(0.1)
@@ -51,11 +62,12 @@ func renderPreview(to path: String) {
     let heading: [NSAttributedString.Key: Any] = [.font: NSFont.systemFont(ofSize: 25, weight: .semibold), .foregroundColor: NSColor.white]
     ("Cats in Menubar" as NSString).draw(at: NSPoint(x: 30, y: 306), withAttributes: heading)
     let label: [NSAttributedString.Key: Any] = [.font: NSFont.systemFont(ofSize: 12), .foregroundColor: NSColor.lightGray]
-    ("Original pixel cats · walking / sleeping / grooming / playing" as NSString).draw(at: NSPoint(x: 30, y: 280), withAttributes: label)
-    for (i, action) in [CatAction.walking, .sleeping, .grooming, .playing].enumerated() {
-        let x = CGFloat(115 + i * 245)
+    ("Original vector cats · walking / sleeping / sitting / grooming / playing" as NSString).draw(at: NSPoint(x: 30, y: 280), withAttributes: label)
+    for (i, action) in [CatAction.walking, .sleeping, .sitting, .grooming, .playing].enumerated() {
+        let x = CGFloat(100 + i * 195)
         var cat = Cat(x: 0, destination: 0, action: action, phase: 1.3, visible: true, coat: i % 3)
-        CatDrawing.cat(cat, at: NSPoint(x: x, y: 140), scale: 4)
+        cat.velocity = action == .walking ? 15 : 0; cat.gait = 3
+        CatDrawing.cat(cat, at: NSPoint(x: x, y: 140), scale: 5)
         (action.rawValue.capitalized as NSString).draw(at: NSPoint(x: x - 30, y: 105), withAttributes: label)
         cat.phase = 2.4
         CatDrawing.cat(cat, at: NSPoint(x: x, y: 43))

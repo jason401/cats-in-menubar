@@ -32,6 +32,10 @@ struct Cat {
     var x: Double
     var destination: Double
     var direction = 1.0
+    var velocity = 0.0
+    var gait = 0.0          // distance walked, drives leg motion so feet never slide
+    var turnCooldown = 0.0  // a cat must stand a moment before facing the other way
+    var pounceCooldown = 0.0
     var action: CatAction = .sitting
     var remaining = 5.0
     var phase = 0.0
@@ -80,6 +84,7 @@ final class Colony {
                 cats[i].x = lane.lower + Habitat.catRadius + (lane.width - 2 * Habitat.catRadius) * (Double(i + 1) / Double(cats.count + 1))
                 cats[i].destination = cats[i].x
                 cats[i].hiddenFor = 0.45
+                cats[i].velocity = 0
                 cats[i].visible = true
                 cats[i].action = .sitting
                 cats[i].remaining = 2 + random() * 4
@@ -132,30 +137,52 @@ final class Colony {
             cats[i].remaining -= dt
             if quiet && cats[i].action != .sleeping { cats[i].action = .sleeping; cats[i].remaining = 30 }
             if cats[i].remaining <= 0 { choose(i, lane: lane) }
+            cats[i].turnCooldown = max(0, cats[i].turnCooldown - dt)
+            cats[i].pounceCooldown = max(0, cats[i].pounceCooldown - dt)
             if cats[i].action == .playing {
                 if var toy = ball, lane.contains(toy.x, margin: 5) {
-                    cats[i].destination = min(lane.upper - Habitat.catRadius, max(lane.lower + Habitat.catRadius, toy.x - cats[i].direction * 10))
-                    if abs(toy.x - cats[i].x) < 17 {
-                        toy.velocity = cats[i].direction * (45 + random() * 30)
+                    // Side is taken from where the ball is, not where the cat faces, so it cannot oscillate.
+                    let side = toy.x >= cats[i].x ? 1.0 : -1.0
+                    if cats[i].pounceCooldown > 0 {
+                        cats[i].destination = cats[i].x
+                    } else if abs(toy.x - cats[i].x) < 14 && abs(cats[i].velocity) < 12 {
+                        toy.velocity = side * (40 + random() * 35)
                         ball = toy
+                        cats[i].pounceCooldown = 0.9 + random() * 1.4
+                        cats[i].destination = cats[i].x
+                    } else {
+                        cats[i].destination = min(lane.upper - Habitat.catRadius, max(lane.lower + Habitat.catRadius, toy.x - side * 11))
                     }
                 } else { cats[i].action = .sitting; cats[i].remaining = 3 }
             }
-            if [.walking, .chasing, .playing].contains(cats[i].action) {
-                let delta = cats[i].destination - cats[i].x
-                if abs(delta) > 1 {
-                    cats[i].direction = delta > 0 ? 1 : -1
-                    let speed = cats[i].action == .chasing ? 48.0 : (cats[i].action == .playing ? 32 : 19)
-                    cats[i].x += cats[i].direction * min(abs(delta), speed * dt)
-                } else if cats[i].action != .playing { cats[i].remaining = 0 }
-            }
+            let moving = [.walking, .chasing, .playing].contains(cats[i].action)
+            let delta = moving ? cats[i].destination - cats[i].x : 0
+            let maxSpeed = cats[i].action == .chasing ? 42.0 : (cats[i].action == .playing ? 30 : 15)
+            let accel = cats[i].action == .walking ? 30.0 : 70  // idle actions also stop quickly
+            var desired = 0.0
+            if abs(delta) > 0.5 {
+                let wanted = delta > 0 ? 1.0 : -1.0
+                if wanted != cats[i].direction {
+                    // Slow down, pause, then turn around.
+                    if abs(cats[i].velocity) < 0.5 && cats[i].turnCooldown <= 0 { cats[i].direction = wanted; cats[i].turnCooldown = 0.6 }
+                } else {
+                    // Ease in and brake smoothly before the destination.
+                    desired = wanted * min(maxSpeed, sqrt(2 * accel * abs(delta)))
+                }
+            } else if moving && cats[i].action != .playing && abs(cats[i].velocity) < 0.5 { cats[i].remaining = 0 }
+            let change = desired - cats[i].velocity
+            cats[i].velocity += max(-accel * dt, min(accel * dt, change))
+            let before = cats[i].x
+            cats[i].x += cats[i].velocity * dt
             cats[i].x = min(lane.upper - Habitat.catRadius, max(lane.lower + Habitat.catRadius, cats[i].x))
+            if cats[i].x == lane.lower + Habitat.catRadius || cats[i].x == lane.upper - Habitat.catRadius { cats[i].velocity = 0 }
+            cats[i].gait += abs(cats[i].x - before)
         }
     }
     func play() {
         guard !quiet, let i = cats.indices.first(where: { index in cats[index].visible && lanes.contains(where: { $0.contains(cats[index].x, margin: Habitat.catRadius) && $0.width >= 150 }) }),
               let lane = lanes.first(where: { $0.contains(cats[i].x, margin: Habitat.catRadius) }) else { return }
         ball = ToyBall(x: min(lane.upper - 5, cats[i].x + 12), velocity: 45, lane: lane)
-        cats[i].action = .playing; cats[i].remaining = 20; cats[i].direction = 1
+        cats[i].action = .playing; cats[i].remaining = 20
     }
 }

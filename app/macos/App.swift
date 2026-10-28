@@ -30,7 +30,7 @@ struct SettingsView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 18) {
             HStack(spacing: 12) {
-                Image(systemName: "cat.fill").font(.system(size: 30)).foregroundStyle(.orange)
+                Image(nsImage: TowerIcon.app(size: 48))
                 VStack(alignment: .leading, spacing: 4) {
                     Text("Cats in Menubar").font(.title2.bold())
                     Text("A little life in the empty space.").foregroundStyle(.secondary)
@@ -86,7 +86,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
-        statusItem.button?.image = NSImage(systemSymbolName: "cat.fill", accessibilityDescription: "Cats in Menubar")
+        statusItem.button?.image = TowerIcon.menuBar()
         statusItem.button?.toolTip = "Cats in Menubar"
         let menu = NSMenu()
         menu.delegate = self

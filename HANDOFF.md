@@ -50,3 +50,9 @@ Fixed build identity with a dedicated app-specific local certificate. Verified d
 - Only `.app` bundles are scanned (WebKit/XPC helpers were blocking every scan). A timeout only blocks if that process owned status items in the previous scan.
 - Status is appended to `~/Library/Logs/CatsInMenubar.log`. `open -n "build/Cats in Menubar.app" --args --probe` logs AX roles/frames (no titles) of menu bars for debugging.
 - Live log after fix: `1 safe area(s) · 840 pt available`. User confirmed cats are visible on the menu bar (2026-10-28).
+
+## Look and motion pass (2026-10-28)
+
+- Fast left-right shaking came from playing: the target spot depended on the facing direction, so the cat flipped every frame and kicked the ball every frame (922 rapid flips in the simulation). Now the side comes from the ball position, batting has a 0.9-2.3 s cooldown, cats brake, pause 0.6 s before turning, and ease in/out. Self-test asserts no direction flip within 0.5 s.
+- Cats redrawn as simple antialiased vector silhouettes (orange, black, white) with one soft outline; leg motion follows distance walked.
+- Menu bar icon and app icon are an original cat tower (`TowerIcon.swift`); the build renders `AppIcon.icns`.

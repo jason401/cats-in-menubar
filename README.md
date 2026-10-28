@@ -59,7 +59,8 @@ Status changes are appended to `~/Library/Logs/CatsInMenubar.log`. `open -n "bui
 ## Layout
 
 - `app/macos/Habitat.swift`: interval geometry and behavior simulation.
-- `app/macos/CatDrawing.swift`: original procedural pixel art and overlay drawing.
+- `app/macos/CatDrawing.swift`: original vector cats and overlay drawing.
+- `app/macos/TowerIcon.swift`: cat-tower menu bar and app icon.
 - `app/macos/MenuBarMonitor.swift`: background Accessibility layout scan.
 - `app/macos/App.swift`: app lifecycle, transparent panel, settings and menu.
 - `app/macos/Probe.swift`: development probe of menu bar structure.

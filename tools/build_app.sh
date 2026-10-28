@@ -17,12 +17,15 @@ xcrun swiftc -swift-version 5 -O -target "$(uname -m)-apple-macos14.0" \
   -module-cache-path "$PWD/build/module-cache" \
   -framework Cocoa -framework SwiftUI -framework ApplicationServices \
   app/macos/*.swift -o "$APP/Contents/MacOS/CatsInMenubar"
+"$APP/Contents/MacOS/CatsInMenubar" --render-iconset "$STAGING/AppIcon.iconset"
+iconutil -c icns "$STAGING/AppIcon.iconset" -o "$APP/Contents/Resources/AppIcon.icns"
 cat > "$APP/Contents/Info.plist" <<'PLIST'
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0"><dict>
 <key>CFBundleExecutable</key><string>CatsInMenubar</string>
 <key>CFBundleIdentifier</key><string>local.catsinmenubar</string>
+<key>CFBundleIconFile</key><string>AppIcon</string>
 <key>CFBundleName</key><string>Cats in Menubar</string>
 <key>CFBundleDisplayName</key><string>Cats in Menubar</string>
 <key>CFBundlePackageType</key><string>APPL</string>
