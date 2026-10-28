@@ -15,58 +15,69 @@ final class MenuBarMonitor {
         let options = [kAXTrustedCheckOptionPrompt.takeUnretainedValue() as String: true] as CFDictionary
         _ = AXIsProcessTrustedWithOptions(options)
     }
+    // Status-item owners seen recently; only these can make a scan incomplete when they time out.
+    private var knownExtras = Set<pid_t>()
+    static let systemBars: Set<String> = ["com.apple.MenuBarAgent", "com.apple.controlcenter", "com.apple.systemuiserver"]
+
     func scan(screen: NSRect, barHeight: CGFloat, ownItem: NSRect?, completion: @escaping (MenuBarSnapshot) -> Void) {
         guard !scanning else { return }
         guard Self.trusted else {
             completion(MenuBarSnapshot(obstacles: [], reliable: false, message: "Accessibility access is needed to find empty space.")); return
         }
         scanning = true
+        // Helpers such as WebKit or XPC services never own menu bar items.
         let apps = NSWorkspace.shared.runningApplications.filter {
-            !$0.isTerminated && ($0.activationPolicy != .prohibited ||
-                $0.bundleIdentifier == "com.apple.controlcenter" || $0.bundleIdentifier == "com.apple.systemuiserver")
+            !$0.isTerminated && ($0.bundleURL?.pathExtension == "app" || Self.systemBars.contains($0.bundleIdentifier ?? ""))
         }
         let front = NSWorkspace.shared.frontmostApplication?.processIdentifier
-        // AX coordinates use a top-left origin relative to the primary display.
-        let primaryTop = NSScreen.screens.first?.frame.maxY ?? screen.maxY
-        let band = CGRect(x: screen.minX, y: primaryTop - screen.maxY, width: screen.width, height: barHeight)
+        // AX x coordinates match AppKit; y uses a top-left origin. Every display mirrors the menu bar,
+        // and AX may report items on any of them: app menus align left, status items align right.
+        let screens = NSScreen.screens.map(\.frame)
+        let known = knownExtras
         queue.async {
             var obstacles: [Lane] = []
             var frontRead = false
             var systemRead = false
-            var incomplete = false
             var unreadableApps: [String] = []
+            var extrasOwners = Set<pid_t>()
+            func lanes(_ frames: [CGRect], rightAligned: Bool) -> [Lane] {
+                frames.compactMap { frame in
+                    guard frame.minY < barHeight, frame.maxY > 0,
+                          let display = screens.first(where: { $0.minX <= frame.midX && frame.midX < $0.maxX }) else { return nil }
+                    let lower = rightAligned ? frame.minX - display.maxX + screen.maxX : frame.minX - display.minX + screen.minX
+                    return Lane(lower: lower - screen.minX, upper: lower + frame.width - screen.minX)
+                }
+            }
             for app in apps {
                 let element = AXUIElementCreateApplication(app.processIdentifier)
-                AXUIElementSetMessagingTimeout(element, 0.06)
+                AXUIElementSetMessagingTimeout(element, 0.1)
+                let id = app.bundleIdentifier ?? "unknown"
                 if app.processIdentifier == front {
                     let result = Self.attribute(element, kAXMenuBarAttribute)
                     if result.0 == .success, let root = result.1 {
-                        let found = Self.items(root, band: band)
-                        obstacles += found.0.map { Lane(lower: $0.minX - screen.minX, upper: $0.maxX - screen.minX) }
+                        let found = Self.items(root)
+                        obstacles += lanes(found.0, rightAligned: false)
                         frontRead = found.1 && !found.0.isEmpty
                     }
                 }
-                let isSystemBar = app.bundleIdentifier == "com.apple.controlcenter" || app.bundleIdentifier == "com.apple.systemuiserver"
-                var extras = Self.attribute(element, kAXExtrasMenuBarAttribute)
-                if isSystemBar && (extras.0 == .attributeUnsupported || extras.0 == .noValue) {
-                    extras = Self.attribute(element, kAXMenuBarAttribute)
-                }
+                let extras = Self.attribute(element, kAXExtrasMenuBarAttribute)
                 if extras.0 == .success, let root = extras.1 {
-                    let found = Self.items(root, band: band)
-                    obstacles += found.0.map { Lane(lower: $0.minX - screen.minX, upper: $0.maxX - screen.minX) }
-                    if !found.1 { incomplete = true; unreadableApps.append(app.bundleIdentifier ?? "unknown") }
-                    if isSystemBar { systemRead = found.1 && (systemRead || !found.0.isEmpty) }
-                } else if extras.0 == .cannotComplete && (app.activationPolicy != .prohibited) {
+                    extrasOwners.insert(app.processIdentifier)
+                    let found = Self.items(root)
+                    obstacles += lanes(found.0, rightAligned: true)
+                    if !found.1 { unreadableApps.append(id) }
+                    if Self.systemBars.contains(id) && found.1 && !found.0.isEmpty { systemRead = true }
+                } else if extras.0 == .cannotComplete && known.contains(app.processIdentifier) {
                     // A temporarily unresponsive status app must not turn its space into a playground.
-                    incomplete = true
-                    unreadableApps.append(app.bundleIdentifier ?? "unknown")
+                    extrasOwners.insert(app.processIdentifier)
+                    unreadableApps.append(id)
                 }
             }
             if let ownItem { obstacles.append(Lane(lower: ownItem.minX - screen.minX, upper: ownItem.maxX - screen.minX)) }
-            let reliable = frontRead && systemRead && !incomplete
+            let reliable = frontRead && systemRead && unreadableApps.isEmpty
             let snapshot = MenuBarSnapshot(obstacles: obstacles, reliable: reliable,
                 message: reliable ? "Menu layout detected" : "Waiting for menu layout (app menu: \(frontRead), system icons: \(systemRead)). Unreadable: \(unreadableApps.joined(separator: ", "))")
-            DispatchQueue.main.async { self.scanning = false; completion(snapshot) }
+            DispatchQueue.main.async { self.knownExtras = extrasOwners; self.scanning = false; completion(snapshot) }
         }
     }
     private static func attribute(_ element: AXUIElement, _ name: String) -> (AXError, AXUIElement?) {
@@ -88,31 +99,19 @@ final class MenuBarMonitor {
               AXValueGetValue(unsafeBitCast(sizeValue, to: AXValue.self), .cgSize, &size) else { return nil }
         return CGRect(origin: point, size: size)
     }
-    private static func items(_ root: AXUIElement, band: CGRect) -> ([CGRect], Bool) {
+    /// Top-level item frames of a menu bar. Dropdown contents are never visited.
+    private static func items(_ root: AXUIElement) -> ([CGRect], Bool) {
+        var childrenValue: CFTypeRef?
+        guard AXUIElementCopyAttributeValue(root, kAXChildrenAttribute as CFString, &childrenValue) == .success,
+              let children = childrenValue as? [AXUIElement] else { return ([], false) }
         var rectangles: [CGRect] = []
         var reliable = true
-        func visit(_ element: AXUIElement, depth: Int) {
-            guard depth < 5 else { reliable = false; return }
-            var roleValue: CFTypeRef?
-            _ = AXUIElementCopyAttributeValue(element, kAXRoleAttribute as CFString, &roleValue)
-            let role = roleValue as? String ?? ""
-            var childrenValue: CFTypeRef?
-            let error = AXUIElementCopyAttributeValue(element, kAXChildrenAttribute as CFString, &childrenValue)
-            let children = childrenValue as? [AXUIElement] ?? []
-            if role == kAXMenuBarItemRole || (depth > 0 && children.isEmpty) {
-                if let frame = rect(element), frame.width > 0, frame.height > 0 {
-                    if frame.intersects(band) { rectangles.append(frame.intersection(band)) }
-                } else {
-                    var hidden: CFTypeRef?
-                    _ = AXUIElementCopyAttributeValue(element, "AXHidden" as CFString, &hidden)
-                    if (hidden as? Bool) != true { reliable = false }
-                }
-                return // Never descend into dropdown contents.
-            }
-            if error == .cannotComplete { reliable = false }
-            for child in children { visit(child, depth: depth + 1) }
+        for child in children {
+            if let frame = rect(child), frame.width > 0, frame.height > 0 { rectangles.append(frame); continue }
+            var hidden: CFTypeRef?
+            _ = AXUIElementCopyAttributeValue(child, "AXHidden" as CFString, &hidden)
+            if (hidden as? Bool) != true { reliable = false }
         }
-        visit(root, depth: 0)
         return (rectangles, reliable)
     }
 }

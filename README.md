@@ -52,11 +52,16 @@ zsh tools/test.sh
 
 The first command builds and checks interval subtraction, obstacle changes, disconnected regions, hidden states, quiet time and ball bounds through 30,000 reproducible simulation steps. It also renders `build/previews/cats.png`. Diagnostics reads the live menu geometry without requesting permission and reports whether it is usable.
 
+## Debugging
+
+Status changes are appended to `~/Library/Logs/CatsInMenubar.log`. `open -n "build/Cats in Menubar.app" --args --probe` logs menu bar roles and frames (no text).
+
 ## Layout
 
 - `app/macos/Habitat.swift`: interval geometry and behavior simulation.
 - `app/macos/CatDrawing.swift`: original procedural pixel art and overlay drawing.
 - `app/macos/MenuBarMonitor.swift`: background Accessibility layout scan.
 - `app/macos/App.swift`: app lifecycle, transparent panel, settings and menu.
+- `app/macos/Probe.swift`: development probe of menu bar structure.
 - `app/macos/Verification.swift`: reproducible simulation checks and artwork preview.
 - `tools/`: build and verification scripts.

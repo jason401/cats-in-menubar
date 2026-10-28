@@ -40,3 +40,13 @@ User intent: 2–3 cats occupy empty menu bar space, never deliberately enter me
 System Settings showed the app enabled in **Device Control and Data Access** (macOS 27 naming), while the running app still reported no Accessibility access. The first bundle was rebuilt under an ad-hoc signature while the previous process was running, so its designated requirement changed with the executable hash. This is the likely permission mismatch; restart alone did not restore access.
 
 Fixed build identity with a dedicated app-specific local certificate. Verified designated requirement now uses the stable identifier and certificate hash rather than the executable cdhash. Candidate builds are signed and verified before replacing the output bundle. Added geometry-only blocked-scan details to settings for the next live check. Optimized build, full simulation checks and artwork rendering passed again. New signed app launched. User asked to re-register the existing permission for the new identity; live menu geometry validation is pending that step.
+
+## Second live check: permission fixed, macOS 27 menu bar changes
+
+- Stale Accessibility record reset with `tccutil reset Accessibility local.catsinmenubar`; after the user re-enabled it the app reported `Accessibility: true`.
+- macOS 27 moved system status icons to `com.apple.MenuBarAgent` (Control Center / SystemUIServer return no extras). Now accepted as the system bar.
+- With several displays AX reports menu items on whichever display shows the bar. Frames are mapped back to the primary display: app menus by left edge, status items by right edge.
+- The real bar is 30 pt (`screen.frame.maxY - visibleFrame.maxY`); `NSStatusBar.thickness` still says 22.
+- Only `.app` bundles are scanned (WebKit/XPC helpers were blocking every scan). A timeout only blocks if that process owned status items in the previous scan.
+- Status is appended to `~/Library/Logs/CatsInMenubar.log`. `open -n "build/Cats in Menubar.app" --args --probe` logs AX roles/frames (no titles) of menu bars for debugging.
+- Live log after fix: `1 safe area(s) · 840 pt available`. Visual check on screen by the user pending.

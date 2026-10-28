@@ -6,8 +6,15 @@ final class AppModel: ObservableObject {
     @Published var quiet: Bool { didSet { UserDefaults.standard.set(quiet, forKey: "quiet"); changed?() } }
     @Published var count: Int { didSet { UserDefaults.standard.set(count, forKey: "catCount"); changed?() } }
     @Published var debug = false { didSet { changed?() } }
-    @Published var status = "Checking menu layout…"
-    @Published var access = MenuBarMonitor.trusted
+    @Published var status = "Checking menu layout…" { didSet { if status != oldValue { AppModel.log(status) } } }
+    @Published var access = MenuBarMonitor.trusted { didSet { if access != oldValue { AppModel.log("Accessibility: \(access)") } } }
+    // Geometry/status only, so live behavior can be checked without screen capture.
+    static func log(_ line: String) {
+        let url = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Library/Logs/CatsInMenubar.log")
+        let text = "\(ISO8601DateFormatter().string(from: Date())) \(line)\n"
+        if let handle = try? FileHandle(forWritingTo: url) { handle.seekToEndOfFile(); handle.write(Data(text.utf8)); try? handle.close() }
+        else { try? Data(text.utf8).write(to: url) }
+    }
     var changed: (() -> Void)?
     var play: (() -> Void)?
     init() {
@@ -89,6 +96,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         menu.addItem(.separator())
         menu.addItem(withTitle: "Quit Cats in Menubar", action: #selector(quit), keyEquivalent: "q").target = self
         statusItem.menu = menu
+        AppModel.log("Launched pid \(ProcessInfo.processInfo.processIdentifier), Accessibility: \(MenuBarMonitor.trusted)")
         model.changed = { [weak self] in self?.applyOptions() }
         model.play = { [weak self] in self?.play() }
         applyOptions()
@@ -150,9 +158,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         model.access = MenuBarMonitor.trusted
         guard !suspended, !model.paused, !menuOpen, let screen = NSScreen.screens.first else { return }
         let frame = screen.frame
-        let height = max(NSStatusBar.system.thickness, screen.safeAreaInsets.top)
+        // The reserved band is the real bar height (30 pt on macOS 27, not NSStatusBar.thickness).
+        let height = max(frame.maxY - screen.visibleFrame.maxY, screen.safeAreaInsets.top)
         // A hidden/auto-hidden menu bar is deliberately not a playground.
-        guard frame.maxY - screen.visibleFrame.maxY >= height - 2 else {
+        guard height >= NSStatusBar.system.thickness - 2 else {
             overlay?.orderOut(nil); colony.updateLanes([]); model.status = "Cats are resting while the menu bar is hidden."; return
         }
         if frame != lastScreen || height != lastHeight {
