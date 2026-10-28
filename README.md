@@ -6,6 +6,12 @@ A native macOS menu bar playground for two or three tiny cats. They nap, groom, 
 
 Requires macOS 14 or later and Apple's Command Line Tools. No package dependencies or API keys.
 
+Create the dedicated local signing identity once, then build:
+
+```sh
+zsh tools/setup_signing.sh
+```
+
 Double-click **Build Cats in Menubar.command**, or run:
 
 ```sh
@@ -29,11 +35,11 @@ This is an early prototype, not a guarantee of zero overlap. Layout polling runs
 
 Automatic menu bar hiding is treated conservatively: if the reserved menu bar region is absent, cats hide. Full-screen spaces, notch layouts, menu bar managers, and external-display changes need live compatibility testing. All cats currently share one ball; exact non-overlap between cats is not enforced. macOS Reduce Motion and launch at login are follow-up work.
 
-The default build uses an ad-hoc development signature. Rebuilding can invalidate Accessibility approval; remove/re-add the app if needed. For a stable grant, provide a persistent signing identity:
+Builds require the persistent **Cats in Menubar Local Signing** identity created by `tools/setup_signing.sh`. The build stops if it is missing; there is no ad-hoc fallback. Signing is done in a temporary candidate bundle before the final bundle is replaced.
 
-```sh
-CATS_SIGNING_IDENTITY="Your Signing Identity" zsh tools/build_app.sh
-```
+When migrating from the first ad-hoc prototype, the existing permission can appear enabled while the new app reports no access. Re-register the new app in System Settings → Privacy & Security → **Device Control and Data Access** (called **Accessibility** on earlier macOS versions). Toggle the app off/on, or remove and add the current `build/Cats in Menubar.app` if macOS still retains the previous signature. Future builds keep the same app identity.
+
+The setup script only creates this app's own non-exportable local key and code-signing certificate; trust is limited to code signing, and only Apple's codesign tool is preauthorized. It does not alter TLS trust or other apps' keys. A custom persistent identity can be supplied with `CATS_SIGNING_IDENTITY`.
 
 Existing AI Face / AI Illuminati identities, apps and data are never modified or reused automatically. The app bundle is standalone; it does not execute source files from this checkout.
 

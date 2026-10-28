@@ -34,6 +34,7 @@ final class MenuBarMonitor {
             var frontRead = false
             var systemRead = false
             var incomplete = false
+            var unreadableApps: [String] = []
             for app in apps {
                 let element = AXUIElementCreateApplication(app.processIdentifier)
                 AXUIElementSetMessagingTimeout(element, 0.06)
@@ -53,17 +54,18 @@ final class MenuBarMonitor {
                 if extras.0 == .success, let root = extras.1 {
                     let found = Self.items(root, band: band)
                     obstacles += found.0.map { Lane(lower: $0.minX - screen.minX, upper: $0.maxX - screen.minX) }
-                    if !found.1 { incomplete = true }
+                    if !found.1 { incomplete = true; unreadableApps.append(app.bundleIdentifier ?? "unknown") }
                     if isSystemBar { systemRead = found.1 && (systemRead || !found.0.isEmpty) }
                 } else if extras.0 == .cannotComplete && (app.activationPolicy != .prohibited) {
                     // A temporarily unresponsive status app must not turn its space into a playground.
                     incomplete = true
+                    unreadableApps.append(app.bundleIdentifier ?? "unknown")
                 }
             }
             if let ownItem { obstacles.append(Lane(lower: ownItem.minX - screen.minX, upper: ownItem.maxX - screen.minX)) }
             let reliable = frontRead && systemRead && !incomplete
             let snapshot = MenuBarSnapshot(obstacles: obstacles, reliable: reliable,
-                message: reliable ? "Menu layout detected" : "Waiting for a readable menu layout; cats are hidden.")
+                message: reliable ? "Menu layout detected" : "Waiting for menu layout (app menu: \(frontRead), system icons: \(systemRead)). Unreadable: \(unreadableApps.joined(separator: ", "))")
             DispatchQueue.main.async { self.scanning = false; completion(snapshot) }
         }
     }

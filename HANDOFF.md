@@ -31,5 +31,12 @@ User intent: 2–3 cats occupy empty menu bar space, never deliberately enter me
 - This is sampled detection, not an OS-enforced reservation; zero transient overlap cannot be promised.
 - AX coverage for third-party menu bar apps and menu-bar managers needs live testing. The system-bar attribute has a standard-menu fallback. An AX app timeout hides cats conservatively.
 - Primary display only. Full-screen, auto-hide and notch Macs need live testing. Cats can share/overlap one another. Reduce Motion is not yet implemented.
-- Ad-hoc development signature: rebuilt executable can lose its Accessibility grant. Persistent dedicated signing identity is follow-up work; do not silently reuse other apps' identities.
+- Dedicated persistent **Cats in Menubar Local Signing** identity is now installed; builds require it with no ad-hoc fallback. Older ad-hoc grants need one-time re-registration. Other apps' identities remain untouched.
 - App artwork is a first procedural prototype, not finished commissioned sprites.
+
+
+## First live report: cats missing after permission grant
+
+System Settings showed the app enabled in **Device Control and Data Access** (macOS 27 naming), while the running app still reported no Accessibility access. The first bundle was rebuilt under an ad-hoc signature while the previous process was running, so its designated requirement changed with the executable hash. This is the likely permission mismatch; restart alone did not restore access.
+
+Fixed build identity with a dedicated app-specific local certificate. Verified designated requirement now uses the stable identifier and certificate hash rather than the executable cdhash. Candidate builds are signed and verified before replacing the output bundle. Added geometry-only blocked-scan details to settings for the next live check. Optimized build, full simulation checks and artwork rendering passed again. New signed app launched. User asked to re-register the existing permission for the new identity; live menu geometry validation is pending that step.

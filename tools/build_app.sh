@@ -1,7 +1,17 @@
 #!/bin/zsh
 set -eu
 cd "${0:A:h}/.."
-APP="$PWD/build/Cats in Menubar.app"
+DESTINATION="$PWD/build/Cats in Menubar.app"
+mkdir -p "$PWD/build"
+# Persistent app-specific identity keeps Accessibility grants stable across rebuilds.
+IDENTITY="${CATS_SIGNING_IDENTITY:-Cats in Menubar Local Signing}"
+security find-identity -v -p codesigning | /usr/bin/grep -F "\"$IDENTITY\"" >/dev/null || {
+  echo "Missing signing identity: $IDENTITY. Run zsh tools/setup_signing.sh first." >&2
+  exit 1
+}
+STAGING=$(mktemp -d "$PWD/build/.candidate.XXXXXX")
+trap 'rm -rf "$STAGING"' EXIT
+APP="$STAGING/Cats in Menubar.app"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources" "$PWD/build/module-cache"
 xcrun swiftc -swift-version 5 -O -target "$(uname -m)-apple-macos14.0" \
   -module-cache-path "$PWD/build/module-cache" \
@@ -23,8 +33,8 @@ cat > "$APP/Contents/Info.plist" <<'PLIST'
 <key>NSHighResolutionCapable</key><true/>
 </dict></plist>
 PLIST
-# A fresh project's development signature; existing apps and signing identities are untouched.
-# Set CATS_SIGNING_IDENTITY to a persistent identity for reliable Accessibility grants across rebuilds.
-codesign --force --sign "${CATS_SIGNING_IDENTITY:--}" --identifier local.catsinmenubar "$APP"
+codesign --force --sign "$IDENTITY" --identifier local.catsinmenubar "$APP"
 codesign --verify --deep --strict "$APP"
-echo "Built: $APP"
+rm -rf "$DESTINATION"
+mv "$APP" "$DESTINATION"
+echo "Built: $DESTINATION"
