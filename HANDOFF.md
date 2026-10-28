@@ -49,4 +49,4 @@ Fixed build identity with a dedicated app-specific local certificate. Verified d
 - The real bar is 30 pt (`screen.frame.maxY - visibleFrame.maxY`); `NSStatusBar.thickness` still says 22.
 - Only `.app` bundles are scanned (WebKit/XPC helpers were blocking every scan). A timeout only blocks if that process owned status items in the previous scan.
 - Status is appended to `~/Library/Logs/CatsInMenubar.log`. `open -n "build/Cats in Menubar.app" --args --probe` logs AX roles/frames (no titles) of menu bars for debugging.
-- Live log after fix: `1 safe area(s) · 840 pt available`. Visual check on screen by the user pending.
+- Live log after fix: `1 safe area(s) · 840 pt available`. User confirmed cats are visible on the menu bar (2026-10-28).
