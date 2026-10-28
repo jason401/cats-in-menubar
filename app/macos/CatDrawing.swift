@@ -241,7 +241,8 @@ enum CatDrawing {
     /// Faces right, centered on `point`; `cat.direction` mirrors it.
     static func cat(_ cat: Cat, at point: NSPoint, scale: CGFloat = 1) {
         guard cat.visible && cat.hiddenFor <= 0 else { return }
-        var scale = scale
+        if SpriteAtlas.draw(cat, at: point, scale: scale) { return }
+        var scale = scale * cat.size.scale
         if cat.action == .hopping {
             // Shrinks into the tower icon, grows back on the way out.
             let q = CGFloat(min(1, cat.elapsed / Colony.hopTime))
@@ -319,6 +320,14 @@ enum CatDrawing {
             ("z" as NSString).draw(at: p(8 + cycle * 3, 9 + cycle * 7), withAttributes: attrs)
         }
         NSGraphicsContext.restoreGraphicsState()
+    }
+    static func thumbnail(_ appearance: CatAppearance) -> NSImage {
+        NSImage(size: NSSize(width: 46, height: 30), flipped: false) { _ in
+            var cat = Cat(x: 0, destination: 0, action: .walking, phase: 1.3, visible: true, coat: appearance.coat, size: appearance.size)
+            cat.velocity = 15; cat.gait = 3
+            Self.cat(cat, at: NSPoint(x: 23, y: 2))
+            return true
+        }
     }
     static func ball(_ toy: ToyBall, baseline: CGFloat) {
         let rect = NSRect(x: toy.x - 3, y: baseline + 1, width: 6, height: 6)

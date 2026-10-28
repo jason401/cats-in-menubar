@@ -7,6 +7,11 @@ final class AppModel: ObservableObject {
     @Published var catSummary = "Looking for empty space…"
     @Published var catsAway = false     // called into the cat tower
     @Published var power = PowerLevel.full
+    @Published var lineup: [CatAppearance] = []
+    @Published var keepLineup = false
+    var configureCat: ((Int, CatAppearance) -> Void)?
+    var shuffleCats: (() -> Void)?
+    var rememberCats: ((Bool) -> Void)?
     var home: (() -> Void)?
     @Published var access = MenuBarMonitor.trusted { didSet { if access != oldValue { AppModel.log("Accessibility: \(access)") } } }
     static let logURL = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Library/Logs/CatsInMenubar.log")
@@ -40,6 +45,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     var hovering = false
     var monitorInterval = 0.0
     var governor = PowerGovernor()
+    var appliedLineup: Data?
     let defaults = UserDefaults.standard
 
     func applicationDidFinishLaunching(_ notification: Notification) {
@@ -59,10 +65,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         model.changed = { [weak self] in self?.applyOptions() }
         model.play = { [weak self] in self?.play() }
         model.home = { [weak self] in self?.toggleHome() }
-        if defaults.bool(forKey: "catsHome") {
-            for i in colony.cats.indices { colony.cats[i].home = true; colony.cats[i].homeBound = true }
-            model.catsAway = true
-        }
+        // Each launch starts with cats outside. A saved lineup overrides only appearance, never location.
+        defaults.set(false, forKey: "catsHome")
+        model.keepLineup = defaults.bool(forKey: Pref.fixedLineup)
+        model.configureCat = { [weak self] i, appearance in self?.configureCat(i, appearance) }
+        model.shuffleCats = { [weak self] in self?.shuffleCats() }
+        model.rememberCats = { [weak self] enabled in self?.rememberCats(enabled) }
         system.updated = { [weak self] stats in self?.systemUpdated(stats) }
         NotificationCenter.default.addObserver(self, selector: #selector(preferencesChanged), name: UserDefaults.didChangeNotification, object: nil)
         applyOptions()
@@ -100,13 +108,63 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         return from <= to ? (hour >= from && hour < to) : (hour >= from || hour < to)
     }
     func applyOptions() {
+        let previousCount = colony.cats.count
         colony.setCount(defaults.integer(forKey: Pref.count)); colony.quiet = quietNow
+        if previousCount != colony.cats.count { appliedLineup = nil }
+        if defaults.bool(forKey: Pref.fixedLineup), let data = defaults.data(forKey: Pref.lineup), data != appliedLineup,
+           let appearances = try? JSONDecoder().decode([CatAppearance].self, from: data) {
+            habitatView?.endDrag()
+            colony.applyAppearances(appearances)
+            appliedLineup = data
+        }
+        syncLineup()
         colony.activity = defaults.integer(forKey: Pref.activity)
         habitatView?.showLanes = model.debug
         systemUpdated(system.stats)
         let interval = max(defaults.double(forKey: Pref.interval), model.power.sampleFloor)
         if interval != monitorInterval { monitorInterval = interval; system.start(interval: interval) }
         if paused { overlay?.orderOut(nil) } else { scan() }
+    }
+    func syncLineup() {
+        let appearances = colony.cats.map(\.appearance)
+        if model.lineup != appearances { model.lineup = appearances }
+        model.keepLineup = defaults.bool(forKey: Pref.fixedLineup)
+    }
+    func saveLineup() {
+        // Preserve an inactive third slot when the user temporarily reduces the cat count.
+        var appearances = (defaults.data(forKey: Pref.lineup).flatMap { try? JSONDecoder().decode([CatAppearance].self, from: $0) }) ?? []
+        for i in colony.cats.indices {
+            if appearances.indices.contains(i) { appearances[i] = colony.cats[i].appearance }
+            else { appearances.append(colony.cats[i].appearance) }
+        }
+        if let data = try? JSONEncoder().encode(appearances) {
+            appliedLineup = data
+            defaults.set(data, forKey: Pref.lineup)
+        }
+    }
+    func configureCat(_ index: Int, _ appearance: CatAppearance) {
+        guard colony.cats.indices.contains(index) else { return }
+        habitatView?.endDrag()
+        colony.cats[index].appearance = appearance
+        colony.reconcile()
+        saveLineup()
+        defaults.set(true, forKey: Pref.fixedLineup)
+        syncLineup()
+        habitatView?.needsDisplay = true
+    }
+    func rememberCats(_ enabled: Bool) {
+        if enabled { saveLineup() }
+        defaults.set(enabled, forKey: Pref.fixedLineup)
+        syncLineup()
+    }
+    func shuffleCats() {
+        habitatView?.endDrag()
+        colony.shuffle()
+        model.catsAway = false
+        defaults.set(false, forKey: "catsHome")
+        defaults.set(false, forKey: Pref.fixedLineup)
+        syncLineup()
+        habitatView?.needsDisplay = true
     }
     func systemUpdated(_ stats: SystemStats) {
         // Plenty of CPU headroom: lively, smooth cats. Busy, hot or Low Power Mode: they rest and the app slows down.

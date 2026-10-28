@@ -7,6 +7,9 @@ if let index = CommandLine.arguments.firstIndex(of: "--render-panels"), CommandL
     renderPanels(to: CommandLine.arguments[index + 1]); exit(0)
 }
 if CommandLine.arguments.contains("--probe") { runProbe(); exit(0) }
+if let index = CommandLine.arguments.firstIndex(of: "--render-lineup"), CommandLine.arguments.count > index + 1 {
+    renderLineup(to: CommandLine.arguments[index + 1]); exit(0)
+}
 if CommandLine.arguments.contains("--self-test") { runSelfTests(); exit(0) }
 if let index = CommandLine.arguments.firstIndex(of: "--render-preview"), CommandLine.arguments.count > index + 1 {
     renderPreview(to: CommandLine.arguments[index + 1]); exit(0)

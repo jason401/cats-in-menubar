@@ -7,6 +7,7 @@ func runSelfTests() {
         checks += 1
         if !condition() { fputs("FAIL: \(message)\n", stderr); exit(1) }
     }
+    expect(SpriteAtlas.available, "approved sprite atlas is bundled; never substitute the old drawing")
     let lanes = Habitat.freeLanes(width: 1000, obstacles: [Lane(lower: 0, upper: 220), Lane(lower: 800, upper: 1000)])
     expect(lanes == [Lane(lower: 228, upper: 792)], "menu padding")
     expect(Habitat.freeLanes(width: 500, obstacles: [Lane(lower: 0, upper: 500)]).isEmpty, "fully occupied")
@@ -37,6 +38,33 @@ func runSelfTests() {
     }
     var seed: UInt64 = 42
     let colony = Colony(random: { seed = seed &* 6364136223846793005 &+ 1; return Double(seed >> 11) / Double(UInt64(1) << 53) })
+    expect(Set(colony.cats.map(\.coat)).count == 3, "random startup selects distinct coats")
+    var seenCoats = Set<Int>(), seenSizes = Set<CatSize>(), startingPoints = Set<Int>()
+    colony.updateLanes([Lane(lower: 50, upper: 850)])
+    for _ in 0..<100 {
+        colony.shuffle()
+        for cat in colony.cats {
+            seenCoats.insert(cat.coat); seenSizes.insert(cat.size); startingPoints.insert(Int(cat.x))
+            expect(colony.lanes.contains { $0.contains(cat.x, margin: cat.radius) }, "random starts respect each cat's size")
+        }
+    }
+    expect(seenCoats.count == 8 && seenSizes.count == 3 && startingPoints.count > 50, "startup randomization covers coats, sizes and positions")
+    for coat in 0..<8 {
+        for size in CatSize.allCases {
+            let chosen = [CatAppearance](repeating: CatAppearance(coat: coat, size: size), count: 3)
+            colony.applyAppearances(chosen)
+            expect(colony.cats.map(\.appearance) == chosen, "custom appearances apply to all slots")
+            let decoded = try! JSONDecoder().decode([CatAppearance].self, from: JSONEncoder().encode(chosen))
+            expect(decoded == chosen, "chosen lineup survives persistence")
+            for i in colony.cats.indices {
+                colony.cats[i].x = 250
+                colony.grab(i); colony.drag(i, to: -100, dt: 0.016)
+                expect(abs(colony.cats[i].x - (50 + colony.cats[i].radius)) < 0.001, "drag uses the actual kitten/young/adult radius")
+                colony.release(i)
+            }
+        }
+    }
+    colony.shuffle()
     var actions = Set<CatAction>()
     var lastFlip = [Double](repeating: -10, count: 3)
     var facing = colony.cats.map(\.direction)
@@ -64,8 +92,8 @@ func runSelfTests() {
                 expect(escapeTicks[i] < 45, "covered cat reaches free space within 1.5 s")
             } else if cat.visible {
                 escapeTicks[i] = 0
-                expect(colony.lanes.contains { $0.contains(cat.x, margin: Habitat.catRadius) }, "cat cannot overlap an obstacle")
-                expect(colony.lanes.contains { $0.contains(cat.x, margin: Habitat.catRadius) && $0.contains(cat.destination, margin: Habitat.catRadius) }, "path stays in one connected interval: x \(cat.x) dest \(cat.destination) \(cat.action) lanes \(colony.lanes) tick \(tick)")
+                expect(colony.lanes.contains { $0.contains(cat.x, margin: cat.radius) }, "cat cannot overlap an obstacle")
+                expect(colony.lanes.contains { $0.contains(cat.x, margin: cat.radius) && $0.contains(cat.destination, margin: cat.radius) }, "path stays in one connected interval: x \(cat.x) dest \(cat.destination) \(cat.action) lanes \(colony.lanes) tick \(tick)")
             }
         }
         if let ball = colony.ball {
@@ -82,9 +110,9 @@ func runSelfTests() {
     if let i = colony.cats.indices.first(where: { colony.cats[$0].visible && !colony.cats[$0].escaping && colony.cats[$0].x < 300 }) {
         colony.grab(i)
         colony.drag(i, to: 650, dt: 0.016); colony.step(1.0 / 30)
-        expect(colony.cats[i].x <= 300 - Habitat.catRadius, "drag stays in its own free interval")
+        expect(colony.cats[i].x <= 300 - colony.cats[i].radius, "drag stays in its own free interval")
         colony.drag(i, to: -50, dt: 0.016)
-        expect(colony.cats[i].x >= 100 + Habitat.catRadius, "drag clamps at the left edge")
+        expect(colony.cats[i].x >= 100 + colony.cats[i].radius, "drag clamps at the left edge")
         colony.release(i)
         expect(colony.cats[i].action != .held, "release puts the cat down")
     } else { expect(false, "a cat is available to drag") }
@@ -104,7 +132,7 @@ func runSelfTests() {
     expect(colony.homeCount == colony.cats.count, "called cats all go into the tower: \(colony.cats.map { $0.action })")
     colony.letOut(at: 700)
     for _ in 0..<300 { colony.step(1.0 / 30) }
-    expect(colony.cats.allSatisfy { $0.visible && !$0.home && colony.lanes[0].contains($0.x, margin: Habitat.catRadius) }, "cats come back out into free space")
+    expect(colony.cats.allSatisfy { $0.visible && !$0.home && colony.lanes[0].contains($0.x, margin: $0.radius) }, "cats come back out into free space")
     // The ball lands somewhere random and every cat sharing that space joins in.
     colony.play()
     expect(colony.ball != nil && colony.cats.allSatisfy { $0.action == .playing }, "everyone in that space plays: \(colony.cats.map { $0.action })")
@@ -177,6 +205,7 @@ func renderPanels(to directory: String) {
     UserDefaults.standard.register(defaults: Pref.defaults)
     let model = AppModel()
     model.catSummary = "3 cats · 840 pt of room"
+    model.lineup = [CatAppearance(coat: 0, size: .adult), CatAppearance(coat: 6, size: .young), CatAppearance(coat: 7, size: .kitten)]
     let system = SystemMonitor()
     system.sample(); Thread.sleep(forTimeInterval: 1); system.sample()
     func save(_ view: NSView, _ name: String) {
@@ -199,4 +228,36 @@ func renderPanels(to directory: String) {
         save(view, "settings-\(tab.0)")
     }
     print("Panels: \(directory)")
+}
+
+
+/// Eight coats at three sizes, plus native-size silhouettes on a menu-bar background.
+func renderLineup(to path: String) {
+    _ = NSApplication.shared
+    let width = 1120, height = 680
+    let bitmap = NSBitmapImageRep(bitmapDataPlanes: nil, pixelsWide: width, pixelsHigh: height, bitsPerSample: 8, samplesPerPixel: 4, hasAlpha: true, isPlanar: false, colorSpaceName: .deviceRGB, bytesPerRow: 0, bitsPerPixel: 0)!
+    NSGraphicsContext.saveGraphicsState()
+    NSGraphicsContext.current = NSGraphicsContext(bitmapImageRep: bitmap)
+    NSColor(calibratedRed: 0.07, green: 0.085, blue: 0.11, alpha: 1).setFill()
+    NSRect(x: 0, y: 0, width: width, height: height).fill()
+    let heading: [NSAttributedString.Key: Any] = [.font: NSFont.systemFont(ofSize: 24, weight: .semibold), .foregroundColor: NSColor.white]
+    let label: [NSAttributedString.Key: Any] = [.font: NSFont.systemFont(ofSize: 12), .foregroundColor: NSColor.lightGray]
+    ("Cats in Menubar · meet the cats" as NSString).draw(at: NSPoint(x: 24, y: 632), withAttributes: heading)
+    ("Kitten 64% / Young 82% / Adult 100% · original approved PNG / unchanged proportions" as NSString).draw(at: NSPoint(x: 24, y: 608), withAttributes: label)
+    for coat in 0..<8 {
+        let left = CGFloat(24 + (coat % 4) * 278), base = CGFloat(coat < 4 ? 375 : 135)
+        (CatAppearance.names[coat] as NSString).draw(at: NSPoint(x: left, y: base + 178), withAttributes: heading.merging([.font: NSFont.systemFont(ofSize: 15, weight: .semibold)]) { _, new in new })
+        for size in CatSize.allCases {
+            let x = left + CGFloat(35 + size.rawValue * 84)
+            var cat = Cat(x: 0, destination: 0, action: .walking, phase: 1.3, visible: true, coat: coat, size: size)
+            cat.velocity = 15; cat.gait = 3
+            CatDrawing.cat(cat, at: NSPoint(x: x, y: base + 60), scale: 2)
+            (size.label as NSString).draw(at: NSPoint(x: x - 19, y: base + 31), withAttributes: label)
+            CatDrawing.cat(cat, at: NSPoint(x: x, y: base))
+        }
+    }
+    ("Native size below each trio · original PNG sprites at every size" as NSString).draw(at: NSPoint(x: 24, y: 72), withAttributes: label)
+    NSGraphicsContext.restoreGraphicsState()
+    try! bitmap.representation(using: .png, properties: [:])!.write(to: URL(fileURLWithPath: path))
+    print("Lineup: \(path)")
 }

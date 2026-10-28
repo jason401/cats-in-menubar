@@ -5,12 +5,13 @@ import SwiftUI
 /// Preference keys in the app's own UserDefaults domain.
 enum Pref {
     static let count = "catCount", paused = "paused", quiet = "quiet"
+    static let fixedLineup = "useCustomLineup", lineup = "catLineup"
     static let activity = "activity", adaptivePower = "adaptivePower", allowDrag = "allowDrag"
     static let nightQuiet = "nightQuiet", nightFrom = "nightFrom", nightTo = "nightTo"
     static let cpuInBar = "showCPUInBar", interval = "monitorInterval"
     static let showCPU = "showCPU", showMemory = "showMemory", showDisk = "showDisk", showBattery = "showBattery", showNetwork = "showNetwork"
     static let defaults: [String: Any] = [
-        count: 3, paused: false, quiet: false, activity: 1, adaptivePower: true, allowDrag: true,
+        count: 3, fixedLineup: false, paused: false, quiet: false, activity: 1, adaptivePower: true, allowDrag: true,
         nightQuiet: false, nightFrom: 23, nightTo: 7, cpuInBar: false, interval: 2.0,
         showCPU: true, showMemory: true, showDisk: true, showBattery: true, showNetwork: true,
     ]
@@ -412,6 +413,34 @@ struct CatsTab: View {
                 SettingsRow(title: "Pick up") {
                     SettingsSwitch(title: "Pick up", isOn: $allowDrag).help("Drag a cat with the mouse. It stays inside its own empty space.")
                 }
+            }
+            SettingsCard(title: "Your cats") {
+                ForEach(model.lineup.indices, id: \.self) { i in
+                    if i > 0 { Divider() }
+                    VStack(alignment: .leading, spacing: 4) {
+                        HStack(spacing: 8) {
+                            Image(nsImage: CatDrawing.thumbnail(model.lineup[i])).frame(width: 46, height: 30)
+                            Text("Cat \(i + 1)").font(.system(size: 11, weight: .medium))
+                            Spacer()
+                        }
+                        HStack(spacing: 6) {
+                            SettingsMenu(options: CatAppearance.names.enumerated().map { ($0.element, $0.offset) }, selection: Binding(
+                                get: { model.lineup[i].coat },
+                                set: { value in var appearance = model.lineup[i]; appearance.coat = value; model.configureCat?(i, appearance) }))
+                                .accessibilityLabel("Cat \(i + 1) color")
+                            SettingsMenu(options: CatSize.allCases.map { ($0.label, $0) }, selection: Binding(
+                                get: { model.lineup[i].size },
+                                set: { value in var appearance = model.lineup[i]; appearance.size = value; model.configureCat?(i, appearance) }))
+                                .frame(width: 91).accessibilityLabel("Cat \(i + 1) size")
+                        }
+                    }.padding(.horizontal, 10).padding(.vertical, 5)
+                }
+                Divider()
+                SettingsRow(title: "Keep my cats") {
+                    SettingsSwitch(title: "Keep my cats at launch", isOn: Binding(get: { model.keepLineup }, set: { model.rememberCats?($0) }))
+                }
+                SettingsNote(text: "Off: new colors and sizes each launch. On: keep this lineup. Positions are always random.")
+                SettingsRow(title: "New lineup") { SettingsAction(title: "Shuffle cats") { model.shuffleCats?() } }
             }
             SettingsCard(title: "Behavior") {
                 SettingsRow(title: "Activity") { SettingsSegments(options: [("Calm", 0), ("Normal", 1), ("Playful", 2)], selection: $activity) }

@@ -6,3 +6,5 @@ zsh tools/build_app.sh
 mkdir -p build/previews
 "build/Cats in Menubar.app/Contents/MacOS/CatsInMenubar" --render-preview "$PWD/build/previews/cats.png"
 "build/Cats in Menubar.app/Contents/MacOS/CatsInMenubar" --render-panels "$PWD/build/previews"
+
+"build/Cats in Menubar.app/Contents/MacOS/CatsInMenubar" --render-lineup "$PWD/build/previews/lineup.png"

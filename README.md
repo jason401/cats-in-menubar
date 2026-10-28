@@ -59,10 +59,22 @@ Status changes are appended to `~/Library/Logs/CatsInMenubar.log`. `open -n "bui
 ## Layout
 
 - `app/macos/Habitat.swift`: interval geometry and behavior simulation.
-- `app/macos/CatDrawing.swift`: original vector cats and overlay drawing.
+- `app/macos/SpriteAtlas.swift`: approved PNG sprite frames, animation timing and cached color variants.
+- `app/macos/CatDrawing.swift`: overlay drawing and cached cat thumbnails.
 - `app/macos/TowerIcon.swift`: cat-tower menu bar and app icon.
 - `app/macos/MenuBarMonitor.swift`: background Accessibility layout scan.
 - `app/macos/App.swift`: app lifecycle, transparent panel, settings and menu.
 - `app/macos/Probe.swift`: development probe of menu bar structure.
 - `app/macos/Verification.swift`: reproducible simulation checks and artwork preview.
 - `tools/`: build and verification scripts.
+
+
+## Cat collection
+
+The app renders the approved `design/cat-animation-concept-v1.png` as actual sprites, copied into the standalone app as `Resources/CatAtlas.png`. Orange uses the original image pixels. The other seven coats are cached color variants of the same silhouettes: black, white, silver tabby, cream tabby, tuxedo, calico and Siamese. There are six walk and six run poses plus sit, loaf, sleep, stretch and grooming poses. Held cats currently reuse the seated illustration with a small swing; a dedicated dangling sprite is future artwork.
+
+Three sizes preserve the original head/body proportions: Kitten 64%, Young 82%, Adult 100%. The adult's tallest standing pose is 24 pt. Movement, dragging, chasing destinations and tower exits respect each cat's scaled collision radius.
+
+By default each launch selects distinct random coats, random sizes and random positions within detected free space. Each launch starts with cats outside the tower; Pause is still respected. In Settings → Cats → Your cats, select each cat's coat and size. Editing a cat enables **Keep my cats** so the chosen appearances survive relaunch. Turn it off for random appearances next launch; **Shuffle cats** randomizes immediately and resumes random launches. Positions are always freshly randomized, including for a saved lineup. Existing count control still allows 1–3 cats (default 3).
+
+`tools/test.sh` renders `build/previews/lineup.png` with all 24 coat/size combinations. Tests cover random coverage, persistent appearance encoding, size-specific dragging, mixed-size chasing and changing obstacles. The approved atlas must load for tests to pass.

@@ -99,3 +99,16 @@ Fixed build identity with a dedicated app-specific local certificate. Verified d
 - Setting: Cats → Behavior → "Save power" (key `adaptivePower`, replaces `reactToCPU`), with the current level shown; panel summary shows it too.
 - Disk free space read every 30 s and battery every 10 s (free-space query was the top cost).
 - Live: switched to Eco at 45 % system CPU. App measured 1-9 % of one core in Eco depending on cat activity; drawing moving cats is now the main cost.
+
+
+## Approved PNG sprites and cat collection (2026-10-28, Codex)
+
+User selected the generated concept PNG and requested eight coats, three sizes, random startup appearance/position and per-cat settings. An initial code-drawn approximation enlarged the head and was rejected by the user as looking different. That approximation was removed: the app now renders the approved PNG itself through `SpriteAtlas.swift`. Orange is unchanged source pixels; other coats are cached recolors. Existing native drawing remains only as a development fallback; the self-test requires the actual bundled atlas.
+
+- 18 orange source frames: 6 walk, 6 run, 6 lifestyle poses. Pose crops retain one source scale and shared floor baselines. Held cats reuse sit with swing for now, not a new dangling illustration. Stretch uses the supplied front stretch.
+- Eight coats and three uniformly scaled sizes (64/82/100%). No extra head enlargement on kittens. Adult max standing height 24 pt. Masks for tuxedo/calico/Siamese are simple image-relative recolor regions, not separately hand-painted frame sets.
+- Startup chooses distinct random coats, random sizes, and safe random positions. A saved lineup changes only appearances, never starting locations. Startup no longer restores cats hidden in the tower; Pause remains preserved.
+- Settings → Cats → Your cats has live thumbnails and per-slot color/size menus. Editing saves the lineup and enables Keep my cats. Turning that off restores random appearance on next launch; Shuffle cats does so immediately. Inactive saved slots survive a temporary count reduction.
+- Individual scaled collision radii are used for dragging, walking, escapes, tower exits and chasing. A mixed-size chasing target bug found by simulation was fixed by clamping the target to the chasing cat's own bounds.
+- Verified optimized build, strict signing, 140,705 assertions over 30,000 simulation steps, artwork and settings renders. All 24 coat/size combinations and persistence round trips tested. New app restarted without new permissions; live overlay screenshot shows three original-PNG cats with unchanged proportions. Generated settings render checked; live control clicking was interrupted by changing UI focus, so do not claim every menu was manually exercised.
+- `build/previews/lineup.png` is the final collection preview; concept and comparison images are in `design/`. No sibling project, signing key or privacy grant was changed.
