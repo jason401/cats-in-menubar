@@ -2,74 +2,28 @@ import Cocoa
 import SwiftUI
 
 final class AppModel: ObservableObject {
-    @Published var paused: Bool { didSet { UserDefaults.standard.set(paused, forKey: "paused"); changed?() } }
-    @Published var quiet: Bool { didSet { UserDefaults.standard.set(quiet, forKey: "quiet"); changed?() } }
-    @Published var count: Int { didSet { UserDefaults.standard.set(count, forKey: "catCount"); changed?() } }
     @Published var debug = false { didSet { changed?() } }
     @Published var status = "Checking menu layout…" { didSet { if status != oldValue { AppModel.log(status) } } }
+    @Published var catSummary = "Looking for empty space…"
     @Published var access = MenuBarMonitor.trusted { didSet { if access != oldValue { AppModel.log("Accessibility: \(access)") } } }
+    static let logURL = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Library/Logs/CatsInMenubar.log")
     // Geometry/status only, so live behavior can be checked without screen capture.
     static func log(_ line: String) {
-        let url = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Library/Logs/CatsInMenubar.log")
         let text = "\(ISO8601DateFormatter().string(from: Date())) \(line)\n"
-        if let handle = try? FileHandle(forWritingTo: url) { handle.seekToEndOfFile(); handle.write(Data(text.utf8)); try? handle.close() }
-        else { try? Data(text.utf8).write(to: url) }
+        if let handle = try? FileHandle(forWritingTo: logURL) { handle.seekToEndOfFile(); handle.write(Data(text.utf8)); try? handle.close() }
+        else { try? Data(text.utf8).write(to: logURL) }
     }
     var changed: (() -> Void)?
     var play: (() -> Void)?
-    init() {
-        let defaults = UserDefaults.standard
-        paused = defaults.bool(forKey: "paused")
-        quiet = defaults.bool(forKey: "quiet")
-        count = defaults.object(forKey: "catCount") == nil ? 3 : max(1, min(3, defaults.integer(forKey: "catCount")))
-    }
 }
 
-struct SettingsView: View {
-    @ObservedObject var model: AppModel
-    var body: some View {
-        VStack(alignment: .leading, spacing: 18) {
-            HStack(spacing: 12) {
-                Image(nsImage: TowerIcon.app(size: 48))
-                VStack(alignment: .leading, spacing: 4) {
-                    Text("Cats in Menubar").font(.title2.bold())
-                    Text("A little life in the empty space.").foregroundStyle(.secondary)
-                }
-            }
-            Divider()
-            HStack { Text("Cats"); Spacer(); Picker("Cats", selection: $model.count) { Text("2").tag(2); Text("3").tag(3) }.labelsHidden().pickerStyle(.segmented).frame(width: 120) }
-            Toggle("Quiet time", isOn: $model.quiet)
-            Text("Let everyone sleep. Turn off to resume their usual routine.").font(.caption).foregroundStyle(.secondary)
-            Toggle("Pause and hide cats", isOn: $model.paused)
-            HStack {
-                Button("Bring out a ball") { model.play?() }.disabled(model.quiet || model.paused || !model.access)
-                Spacer()
-                Toggle("Show safe space", isOn: $model.debug).toggleStyle(.checkbox)
-            }
-            Divider()
-            HStack {
-                Image(systemName: model.access ? "checkmark.shield.fill" : "lock.fill").foregroundStyle(model.access ? .green : .orange)
-                Text(model.access ? "Accessibility access granted" : "Accessibility access required").font(.headline)
-            }
-            Text("The app reads menu item positions to keep cats away from menus and icons. It does not capture your screen or read menu item text.").font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
-            if !model.access {
-                Button("Allow Accessibility Access…") {
-                    MenuBarMonitor.requestAccess()
-                    if let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility") { NSWorkspace.shared.open(url) }
-                }
-            }
-            Text(model.status).font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
-            Text("Preview · Primary display only · Hidden when the menu bar is hidden").font(.caption2).foregroundStyle(.tertiary)
-            HStack { Spacer(); Button("Quit Cats in Menubar") { NSApp.terminate(nil) } }
-        }.padding(24).frame(width: 410)
-    }
-}
-
-final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
+final class AppDelegate: NSObject, NSApplicationDelegate {
     let model = AppModel()
     let colony = Colony()
     let monitor = MenuBarMonitor()
+    let system = SystemMonitor()
     var statusItem: NSStatusItem!
+    let popover = NSPopover()
     var overlay: NSPanel?
     var habitatView: HabitatView?
     var settings: NSWindow?
@@ -80,26 +34,26 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     var lastScreen: NSRect = .zero
     var lastHeight: CGFloat = 0
     var suspended = false
-    var lastScan = 0.0
-    var menuOpen = false
-    var scanStarted = 0.0
     var hovering = false
+    var monitorInterval = 0.0
+    let defaults = UserDefaults.standard
 
     func applicationDidFinishLaunching(_ notification: Notification) {
-        statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
+        defaults.register(defaults: Pref.defaults)
+        statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
         statusItem.button?.image = TowerIcon.menuBar()
+        statusItem.button?.imagePosition = .imageLeft
         statusItem.button?.toolTip = "Cats in Menubar"
-        let menu = NSMenu()
-        menu.delegate = self
-        menu.addItem(withTitle: "Cats in Menubar…", action: #selector(showSettings), keyEquivalent: ",").target = self
-        menu.addItem(withTitle: "Pause / Resume", action: #selector(togglePause), keyEquivalent: "").target = self
-        menu.addItem(withTitle: "Bring out a ball", action: #selector(play), keyEquivalent: "").target = self
-        menu.addItem(.separator())
-        menu.addItem(withTitle: "Quit Cats in Menubar", action: #selector(quit), keyEquivalent: "q").target = self
-        statusItem.menu = menu
+        statusItem.button?.target = self
+        statusItem.button?.action = #selector(togglePanel)
+        popover.behavior = .transient
+        popover.contentViewController = NSHostingController(rootView: DashboardView(model: model, system: system,
+            openSettings: { [weak self] in self?.showSettings() }, play: { [weak self] in self?.play() }))
         AppModel.log("Launched pid \(ProcessInfo.processInfo.processIdentifier), Accessibility: \(MenuBarMonitor.trusted)")
         model.changed = { [weak self] in self?.applyOptions() }
         model.play = { [weak self] in self?.play() }
+        system.updated = { [weak self] stats in self?.systemUpdated(stats) }
+        NotificationCenter.default.addObserver(self, selector: #selector(preferencesChanged), name: UserDefaults.didChangeNotification, object: nil)
         applyOptions()
         let workspace = NSWorkspace.shared.notificationCenter
         workspace.addObserver(self, selector: #selector(layoutChanged), name: NSWorkspace.didActivateApplicationNotification, object: nil)
@@ -112,48 +66,69 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         let layout = Timer(timeInterval: 0.4, repeats: true) { [weak self] _ in self?.scan() }
         RunLoop.main.add(layout, forMode: .common); layoutTimer = layout
         scan()
-        if !UserDefaults.standard.bool(forKey: "hasLaunched") || !MenuBarMonitor.trusted {
-            showSettings(); UserDefaults.standard.set(true, forKey: "hasLaunched")
+        if !defaults.bool(forKey: "hasLaunched") || !MenuBarMonitor.trusted {
+            showSettings(); defaults.set(true, forKey: "hasLaunched")
         }
     }
-    func applyOptions() {
-        colony.setCount(model.count); colony.quiet = model.quiet
-        habitatView?.showLanes = model.debug
-        if model.paused { overlay?.orderOut(nil) }
-        else { scan() }
+    @objc func preferencesChanged() { DispatchQueue.main.async { self.applyOptions() } }
+    var paused: Bool { defaults.bool(forKey: Pref.paused) }
+    /// Manual quiet time, or the nightly schedule when enabled.
+    var quietNow: Bool {
+        if defaults.bool(forKey: Pref.quiet) { return true }
+        guard defaults.bool(forKey: Pref.nightQuiet) else { return false }
+        let hour = Calendar.current.component(.hour, from: Date())
+        let from = defaults.integer(forKey: Pref.nightFrom), to = defaults.integer(forKey: Pref.nightTo)
+        return from <= to ? (hour >= from && hour < to) : (hour >= from || hour < to)
     }
-    @objc func togglePause() { model.paused.toggle() }
-    @objc func play() { guard !model.paused else { return }; colony.play() }
-    @objc func quit() { NSApp.terminate(nil) }
+    func applyOptions() {
+        colony.setCount(defaults.integer(forKey: Pref.count)); colony.quiet = quietNow
+        colony.activity = defaults.integer(forKey: Pref.activity)
+        habitatView?.showLanes = model.debug
+        let interval = defaults.double(forKey: Pref.interval)
+        if interval != monitorInterval { monitorInterval = interval; system.start(interval: interval) }
+        systemUpdated(system.stats)
+        if paused { overlay?.orderOut(nil) } else { scan() }
+    }
+    func systemUpdated(_ stats: SystemStats) {
+        colony.energy = defaults.bool(forKey: Pref.reactToCPU) ? stats.cpu : 0
+        colony.quiet = quietNow
+        let title = defaults.bool(forKey: Pref.cpuInBar) ? String(format: " %d%%", Int((stats.cpu * 100).rounded())) : ""
+        if statusItem.button?.title != title {
+            statusItem.button?.title = title
+            statusItem.button?.font = .monospacedDigitSystemFont(ofSize: 12, weight: .regular)
+        }
+    }
+    @objc func togglePanel() {
+        if popover.isShown { popover.performClose(nil); return }
+        guard let button = statusItem.button else { return }
+        NSApp.activate(ignoringOtherApps: true)
+        popover.show(relativeTo: button.bounds, of: button, preferredEdge: .minY)
+    }
+    @objc func play() { guard !paused else { return }; colony.play() }
     @objc func showSettings() {
+        popover.performClose(nil)
         if settings == nil {
-            let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 458, height: 490), styleMask: [.titled, .closable, .miniaturizable], backing: .buffered, defer: false)
-            window.title = "Cats in Menubar"
-            window.contentView = NSHostingView(rootView: SettingsView(model: model))
+            let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 680, height: 460), styleMask: [.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView], backing: .buffered, defer: false)
+            window.title = "Cats in Menubar Settings"
+            window.contentView = NSHostingView(rootView: SettingsView(model: model, state: SettingsState()))
             window.isReleasedWhenClosed = false
             window.center(); settings = window
         }
         NSApp.activate(ignoringOtherApps: true)
         settings?.makeKeyAndOrderFront(nil)
     }
+    /// Cats stay where they are; the next scan moves any cat that ended up over a menu or icon.
     @objc func layoutChanged() {
-        habitatView?.endDrag()
         epoch += 1
-        colony.updateLanes([])
-        overlay?.orderOut(nil)
         scan()
     }
-    @objc func willSleep() { suspended = true; layoutChanged() }
+    @objc func willSleep() { suspended = true; habitatView?.endDrag(); overlay?.orderOut(nil) }
     @objc func didWake() { suspended = false; lastTick = ProcessInfo.processInfo.systemUptime; layoutChanged() }
-    func menuWillOpen(_ menu: NSMenu) { menuOpen = true; habitatView?.endDrag(); overlay?.orderOut(nil) }
-    func menuDidClose(_ menu: NSMenu) { menuOpen = false; layoutChanged() }
     func tick() {
         let now = ProcessInfo.processInfo.systemUptime
         let dt = now - lastTick; lastTick = now
         updateMouse()
-        // Do not keep using a stale obstacle map when the AX server stalls.
-        if now - lastScan > 1.5 { habitatView?.endDrag(); overlay?.orderOut(nil); return }
-        guard !model.paused, !suspended, !menuOpen, overlay?.isVisible == true else { return }
+        guard !paused, !suspended, overlay?.isVisible == true else { return }
         colony.step(dt)
         habitatView?.needsDisplay = true
     }
@@ -163,14 +138,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         let mouse = NSEvent.mouseLocation
         let inside = overlay.frame.contains(mouse)
         let overCat = inside && colony.catIndex(at: mouse.x - overlay.frame.minX) != nil
-        let catching = view.dragging != nil || overCat
+        let overCatAllowed = overCat && defaults.bool(forKey: Pref.allowDrag)
+        let catching = view.dragging != nil || overCatAllowed
         if overlay.ignoresMouseEvents == catching { overlay.ignoresMouseEvents = !catching }
-        if overCat && view.dragging == nil { NSCursor.openHand.set() }
-        if overCat != hovering { hovering = overCat; if !overCat { NSCursor.arrow.set() } }
+        if overCatAllowed && view.dragging == nil { NSCursor.openHand.set() }
+        if overCatAllowed != hovering { hovering = overCatAllowed; if !overCatAllowed { NSCursor.arrow.set() } }
     }
     func scan() {
         model.access = MenuBarMonitor.trusted
-        guard !suspended, !model.paused, !menuOpen, let screen = NSScreen.screens.first else { return }
+        guard !suspended, !paused, let screen = NSScreen.screens.first else { return }
         let frame = screen.frame
         // The reserved band is the real bar height (30 pt on macOS 27, not NSStatusBar.thickness).
         let height = max(frame.maxY - screen.visibleFrame.maxY, screen.safeAreaInsets.top)
@@ -194,8 +170,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         let generation = epoch
         let ownRect = statusItem.button.flatMap { button in button.window?.convertToScreen(button.convert(button.bounds, to: nil)) }
         monitor.scan(screen: frame, barHeight: height, ownItem: ownRect) { [weak self] snapshot in
-            guard let self, generation == self.epoch, !self.model.paused, !self.suspended, !self.menuOpen else { return }
-            self.lastScan = ProcessInfo.processInfo.systemUptime
+            guard let self, generation == self.epoch, !self.paused, !self.suspended else { return }
+            // An unreadable moment keeps the last good layout instead of making everyone vanish.
+            if !snapshot.reliable && !self.colony.lanes.isEmpty { self.model.status = "Using last layout · \(snapshot.message)"; return }
             var obstacles = snapshot.obstacles
             if screen.safeAreaInsets.top > 0, let left = screen.auxiliaryTopLeftArea, let right = screen.auxiliaryTopRightArea {
                 obstacles.append(Lane(lower: left.maxX - frame.minX, upper: right.minX - frame.minX))
@@ -203,10 +180,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             let lanes = snapshot.reliable ? Habitat.freeLanes(width: frame.width, obstacles: obstacles) : []
             self.colony.updateLanes(lanes)
             self.model.status = lanes.isEmpty ? (snapshot.reliable ? "No room right now. Cats will return when space opens up." : snapshot.message) : "\(lanes.count) safe area(s) · \(Int(lanes.reduce(0) { $0 + $1.width })) pt available"
+            let visible = self.colony.cats.filter(\.visible).count
+            self.model.catSummary = lanes.isEmpty ? (self.model.access ? "Waiting for empty space" : "Needs Accessibility access") :
+                "\(visible) cat\(visible == 1 ? "" : "s") · \(Int(lanes.reduce(0) { $0 + $1.width })) pt of room"
             self.habitatView?.needsDisplay = true
             if lanes.isEmpty { self.overlay?.orderOut(nil) } else { self.overlay?.orderFrontRegardless() }
         }
     }
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool { showSettings(); return true }
+    func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { false }
     func applicationWillTerminate(_ notification: Notification) { animationTimer?.invalidate(); layoutTimer?.invalidate(); overlay?.close() }
 }

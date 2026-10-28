@@ -15,7 +15,7 @@ APP="$STAGING/Cats in Menubar.app"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources" "$PWD/build/module-cache"
 xcrun swiftc -swift-version 5 -O -target "$(uname -m)-apple-macos14.0" \
   -module-cache-path "$PWD/build/module-cache" \
-  -framework Cocoa -framework SwiftUI -framework ApplicationServices \
+  -framework Cocoa -framework SwiftUI -framework ApplicationServices -framework IOKit -framework SystemConfiguration -framework ServiceManagement \
   app/macos/*.swift -o "$APP/Contents/MacOS/CatsInMenubar"
 "$APP/Contents/MacOS/CatsInMenubar" --render-iconset "$STAGING/AppIcon.iconset"
 iconutil -c icns "$STAGING/AppIcon.iconset" -o "$APP/Contents/Resources/AppIcon.icns"

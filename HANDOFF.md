@@ -63,3 +63,11 @@ Fixed build identity with a dedicated app-specific local certificate. Verified d
 - New behaviors: running (gallop with stretching spine and streaming tail), stalking (crouch, creep, butt wiggle) then pouncing, stretching (front then back, often after sleep), loafing. Self-test requires each to occur.
 - Drag: overlay stays click-through except while the pointer is over a cat (`updateMouse` each tick). A held cat dangles, swings with drag speed and is clamped to its own free interval; it is put down when the layout changes or the overlay hides. User confirmed live dragging works.
 - `build/previews/cats.png` shows every pose, the run cycle and actual size.
+
+## Panel, settings, system stats, no more hiding (2026-10-28)
+
+- Status item click opens a popover dashboard (CPU with history, memory, storage, battery/power, network, plus Ball/Pause/Settings/Quit). Readings come from `SystemMonitor.swift` (mach host statistics, sysctl, IOKit power sources, getifaddrs, SystemConfiguration). Matches RunCat Neo on the user's Mac.
+- Settings window with sidebar: General (open at login via SMAppService, CPU % in menu bar), Cats, Behavior (activity, livelier with CPU, quiet time and night schedule), System Monitor, Permissions, About. Preferences use `Pref` keys and `@AppStorage`; `@State` is avoided because the Command Line Tools lack the SwiftUI macro plugin.
+- Menu owner uses `menuBarOwningApplication`, so clicking another status app no longer hides cats (not yet confirmed live).
+- User asked to stop hiding cats on uncertainty: app switches keep cats, unreliable scans keep the last good lanes, and a covered cat escapes to the nearest free spot (self-test bounds it to 1.5 s).
+- `tools/test.sh` also renders `build/previews/dashboard.png` and `settings-*.png`.

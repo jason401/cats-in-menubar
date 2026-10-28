@@ -1,4 +1,5 @@
 import Cocoa
+import SwiftUI
 
 func runSelfTests() {
     var checks = 0
@@ -17,6 +18,7 @@ func runSelfTests() {
     var lastFlip = [Double](repeating: -10, count: 3)
     var facing = colony.cats.map(\.direction)
     var jitter: [String: Int] = [:]
+    var escapeTicks = [0, 0, 0]
     let configurations: [[Lane]] = [lanes, [Lane(lower: 280, upper: 380), Lane(lower: 500, upper: 740)], [], [Lane(lower: 10, upper: 100)], [Lane(lower: 100, upper: 900)]]
     for tick in 0..<30000 {
         if tick % 173 == 0 { colony.updateLanes(configurations[(tick / 173) % configurations.count]) }
@@ -25,15 +27,20 @@ func runSelfTests() {
         for (i, cat) in colony.cats.enumerated() {
             actions.insert(cat.action)
             let time = Double(tick) / 30
-            if cat.visible && cat.direction != facing[i] {
+            if cat.visible && !cat.escaping && cat.direction != facing[i] {
                 // Turning back within half a second reads as frantic left-right shaking.
                 if time - lastFlip[i] < 0.5 { jitter[cat.action.rawValue, default: 0] += 1 }
                 lastFlip[i] = time
             }
             facing[i] = cat.direction
-            if cat.visible {
+            if cat.visible && cat.escaping {
+                // A covered cat must head for the nearest free spot and get there quickly.
+                escapeTicks[i] += 1
+                expect(escapeTicks[i] < 45, "covered cat reaches free space within 1.5 s")
+            } else if cat.visible {
+                escapeTicks[i] = 0
                 expect(colony.lanes.contains { $0.contains(cat.x, margin: Habitat.catRadius) }, "cat cannot overlap an obstacle")
-                expect(colony.lanes.contains { $0.contains(cat.x, margin: Habitat.catRadius) && $0.contains(cat.destination, margin: Habitat.catRadius) }, "path stays in one connected interval")
+                expect(colony.lanes.contains { $0.contains(cat.x, margin: Habitat.catRadius) && $0.contains(cat.destination, margin: Habitat.catRadius) }, "path stays in one connected interval: x \(cat.x) dest \(cat.destination) \(cat.action) lanes \(colony.lanes) tick \(tick)")
             }
         }
         if let ball = colony.ball {
@@ -46,7 +53,8 @@ func runSelfTests() {
     // Dragging never carries a cat past the edge of its free interval.
     colony.quiet = false
     colony.updateLanes([Lane(lower: 100, upper: 300), Lane(lower: 400, upper: 700)])
-    if let i = colony.cats.indices.first(where: { colony.cats[$0].visible && colony.cats[$0].x < 300 }) {
+    for _ in 0..<90 { colony.step(1.0 / 30) }  // let covered cats reach free space first
+    if let i = colony.cats.indices.first(where: { colony.cats[$0].visible && !colony.cats[$0].escaping && colony.cats[$0].x < 300 }) {
         colony.grab(i)
         colony.drag(i, to: 650, dt: 0.016); colony.step(1.0 / 30)
         expect(colony.cats[i].x <= 300 - Habitat.catRadius, "drag stays in its own free interval")
@@ -106,4 +114,35 @@ func renderPreview(to path: String) {
     NSGraphicsContext.restoreGraphicsState()
     try! bitmap.representation(using: .png, properties: [:])!.write(to: URL(fileURLWithPath: path))
     print("Preview: \(path)")
+}
+
+/// Renders the dashboard and settings pages to PNG files for visual review.
+func renderPanels(to directory: String) {
+    let app = NSApplication.shared
+    app.setActivationPolicy(.accessory)
+    UserDefaults.standard.register(defaults: Pref.defaults)
+    let model = AppModel()
+    model.catSummary = "3 cats · 840 pt of room"
+    let system = SystemMonitor()
+    system.sample(); Thread.sleep(forTimeInterval: 1); system.sample()
+    func save(_ view: NSView, _ name: String) {
+        let window = NSWindow(contentRect: view.frame, styleMask: [.titled], backing: .buffered, defer: false)
+        window.contentView = view
+        view.layoutSubtreeIfNeeded()
+        RunLoop.main.run(until: Date(timeIntervalSinceNow: 0.3))
+        guard let rep = view.bitmapImageRepForCachingDisplay(in: view.bounds) else { return }
+        view.cacheDisplay(in: view.bounds, to: rep)
+        try? rep.representation(using: .png, properties: [:])?.write(to: URL(fileURLWithPath: "\(directory)/\(name).png"))
+    }
+    try? FileManager.default.createDirectory(atPath: directory, withIntermediateDirectories: true)
+    let dashboard = NSHostingView(rootView: DashboardView(model: model, system: system, openSettings: {}, play: {}).background(Color(nsColor: .windowBackgroundColor)))
+    dashboard.frame = NSRect(origin: .zero, size: dashboard.fittingSize)
+    save(dashboard, "dashboard")
+    for page in SettingsPage.allCases {
+        let state = SettingsState(); state.page = page
+        let view = NSHostingView(rootView: SettingsView(model: model, state: state))
+        view.frame = NSRect(x: 0, y: 0, width: 680, height: 460)
+        save(view, "settings-\(page.rawValue.replacingOccurrences(of: " ", with: ""))")
+    }
+    print("Panels: \(directory)")
 }

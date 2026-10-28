@@ -7,8 +7,8 @@ Native macOS app in Swift/AppKit/SwiftUI, built with Command Line Tools; no thir
 - Preserve bundle ID `local.catsinmenubar` and preferences.
 - Do not change sibling AI Face / AI Illuminati projects, installed apps, identities or data.
 - Keep menu text and screen contents private. Only read Accessibility geometry and structure.
-- Treat untrusted/unreadable/stale layout as unavailable. Hide cats instead of inventing safe bounds.
-- Every cat's full rendered bounds, toy, and movement path must stay within a connected free interval.
+- Never invent free space. While a layout is briefly unreadable, keep the last good one (user's choice, 2026-10-28) instead of hiding cats.
+- Cats walk, play and are dragged only inside a connected free interval. If space is taken over a cat, it stays visible and dashes to the nearest free spot within about a second.
 - Build: `zsh tools/build_app.sh`. Verify: `zsh tools/test.sh`.
 - Build outputs and generated preview images belong in ignored `build/`.
 - This is a development bundle. Do not add automatic installation, login registration, updates or public releases without user scope.

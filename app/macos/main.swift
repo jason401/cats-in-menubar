@@ -3,6 +3,9 @@ import Cocoa
 if let index = CommandLine.arguments.firstIndex(of: "--render-iconset"), CommandLine.arguments.count > index + 1 {
     TowerIcon.writeIconset(to: CommandLine.arguments[index + 1]); exit(0)
 }
+if let index = CommandLine.arguments.firstIndex(of: "--render-panels"), CommandLine.arguments.count > index + 1 {
+    renderPanels(to: CommandLine.arguments[index + 1]); exit(0)
+}
 if CommandLine.arguments.contains("--probe") { runProbe(); exit(0) }
 if CommandLine.arguments.contains("--self-test") { runSelfTests(); exit(0) }
 if let index = CommandLine.arguments.firstIndex(of: "--render-preview"), CommandLine.arguments.count > index + 1 {

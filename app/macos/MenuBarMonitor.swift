@@ -29,7 +29,8 @@ final class MenuBarMonitor {
         let apps = NSWorkspace.shared.runningApplications.filter {
             !$0.isTerminated && ($0.bundleURL?.pathExtension == "app" || Self.systemBars.contains($0.bundleIdentifier ?? ""))
         }
-        let front = NSWorkspace.shared.frontmostApplication?.processIdentifier
+        // Clicking a status item activates an agent app that has no menus; the bar keeps the previous app's menus.
+        let front = (NSWorkspace.shared.menuBarOwningApplication ?? NSWorkspace.shared.frontmostApplication)?.processIdentifier
         // AX x coordinates match AppKit; y uses a top-left origin. Every display mirrors the menu bar,
         // and AX may report items on any of them: app menus align left, status items align right.
         let screens = NSScreen.screens.map(\.frame)

@@ -43,6 +43,7 @@ struct Cat {
     var target = 0.0        // where a hunt ends
     var wiggle = 0.0        // butt wiggle before a pounce
     var swing = 0.0         // horizontal speed while carried by the mouse
+    var escaping = false    // covered by a menu or icon, hurrying to the nearest free space
     var action: CatAction = .sitting
     var remaining = 5.0
     var phase = 0.0
@@ -63,6 +64,8 @@ final class Colony {
     var ball: ToyBall?
     var lanes: [Lane] = []
     var quiet = false
+    var energy = 0.0        // 0...1, e.g. CPU load; busier Mac, livelier cats
+    var activity = 1        // 0 calm, 1 normal, 2 playful
     var random: () -> Double
     init(count: Int = 3, random: @escaping () -> Double = { Double.random(in: 0..<1) }) {
         self.random = random
@@ -86,6 +89,9 @@ final class Colony {
             if let lane = lanes.first(where: { $0.contains(cats[i].x, margin: Habitat.catRadius) }) {
                 cats[i].destination = min(lane.upper - Habitat.catRadius, max(lane.lower + Habitat.catRadius, cats[i].destination))
                 cats[i].visible = true
+            } else if !lanes.isEmpty && cats[i].visible && cats[i].hiddenFor <= 0 {
+                // Space was taken over the cat: it stays visible and scurries out instead of vanishing.
+                if cats[i].action == .held { start(i, .sitting, for: 1) }
             } else if !lanes.isEmpty {
                 let lane = lanes[i % lanes.count]
                 cats[i].x = lane.lower + Habitat.catRadius + (lane.width - 2 * Habitat.catRadius) * (Double(i + 1) / Double(cats.count + 1))
@@ -110,7 +116,8 @@ final class Colony {
     }
     func choose(_ i: Int, lane: Lane) {
         let previous = cats[i].action
-        let r = random()
+        // Calm/playful setting and a busy Mac shift the choice from naps toward running and hunting.
+        let r = min(0.999, max(0, random() + Double(activity - 1) * 0.12 + energy * 0.2))
         if quiet { start(i, .sleeping, for: 18 + random() * 50); return }
         if previous == .pouncing { start(i, .sitting, for: 3 + random() * 4); return }
         // Waking up usually comes with a good stretch.
@@ -163,7 +170,9 @@ final class Colony {
             ball = toy.lifetime > 0 ? toy : nil
         }
         for i in cats.indices {
-            guard cats[i].visible, let lane = lanes.first(where: { $0.contains(cats[i].x, margin: Habitat.catRadius) }) else { continue }
+            guard cats[i].visible else { continue }
+            guard let lane = lanes.first(where: { $0.contains(cats[i].x, margin: Habitat.catRadius) }) else { escape(i, dt); continue }
+            cats[i].escaping = false
             cats[i].hiddenFor = max(0, cats[i].hiddenFor - dt)
             cats[i].phase += dt
             cats[i].elapsed += dt
@@ -234,6 +243,26 @@ final class Colony {
             if cats[i].x == lane.lower + Habitat.catRadius || cats[i].x == lane.upper - Habitat.catRadius { cats[i].velocity = 0 }
             cats[i].gait += abs(cats[i].x - before)
         }
+    }
+    /// Runs straight to the closest free spot; only used while the cat is already covered.
+    func escape(_ i: Int, _ dt: Double) {
+        guard !lanes.isEmpty else { cats[i].visible = false; return }
+        let x = cats[i].x
+        let spots = lanes.map { clamp(x, to: $0) }
+        guard let spot = spots.min(by: { abs($0 - x) < abs($1 - x) }) else { return }
+        if cats[i].action != .running { start(i, .running, for: 3) }
+        let fresh = !cats[i].escaping
+        cats[i].escaping = true
+        cats[i].direction = spot > x ? 1 : -1
+        if fresh { cats[i].velocity = 0 }
+        // Farther escapes are quicker dashes, so a covered cat is always out within about a second.
+        if !cats[i].escaping || cats[i].velocity == 0 { cats[i].velocity = cats[i].direction * max(90, abs(spot - x)) }
+        let step = min(abs(spot - x), abs(cats[i].velocity) * dt)
+        cats[i].x += cats[i].direction * step
+        cats[i].gait += step
+        cats[i].phase += dt
+        if abs(spot - cats[i].x) < 0.01 { cats[i].x = spot; cats[i].velocity = 0; start(i, .sitting, for: 1 + random() * 2) }
+        cats[i].destination = cats[i].x
     }
     // Mouse handling: a held cat stays inside its own free interval and is never carried over menus or icons.
     func catIndex(at x: Double) -> Int? {

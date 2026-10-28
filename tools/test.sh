@@ -5,3 +5,4 @@ zsh tools/build_app.sh
 "build/Cats in Menubar.app/Contents/MacOS/CatsInMenubar" --self-test
 mkdir -p build/previews
 "build/Cats in Menubar.app/Contents/MacOS/CatsInMenubar" --render-preview "$PWD/build/previews/cats.png"
+"build/Cats in Menubar.app/Contents/MacOS/CatsInMenubar" --render-panels "$PWD/build/previews"
