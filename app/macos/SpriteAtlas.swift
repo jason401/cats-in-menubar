@@ -61,6 +61,34 @@ enum SpriteAtlas {
         default: frame
         }
     }
+    private static func offsetFor(_ cat: Cat, _ scale: CGFloat) -> CGFloat { cat.action == .held ? 0 : 9 * scale }
+    /// Pixels per point of the menu bar display (the overlay lives on the primary screen).
+    static var screenScale: CGFloat { NSScreen.screens.first?.backingScaleFactor ?? 2 }
+
+    // MARK: Shrink once, reuse
+    private static var small: [String: NSImage] = [:]
+    /// The frame reduced to exactly `width` x `height` pixels, made once and kept.
+    /// Halving step by step keeps thin outlines clean instead of losing them in one big jump.
+    static func shrunk(_ index: Int, coat: Int, width: Int, height: Int) -> NSImage? {
+        guard width > 0, height > 0 else { return nil }
+        let key = "\(coat)-\(index)-\(width)x\(height)"
+        if let cached = small[key] { return cached }
+        guard let source = image(index, coat: coat)?.cgImage(forProposedRect: nil, context: nil, hints: nil) else { return nil }
+        var current = source
+        while current.width / 2 >= width * 2 && current.height / 2 >= height * 2,
+              let half = resample(current, width: current.width / 2, height: current.height / 2) { current = half }
+        guard let final = resample(current, width: width, height: height) else { return nil }
+        let result = NSImage(cgImage: final, size: NSSize(width: CGFloat(width) / screenScale, height: CGFloat(height) / screenScale))
+        small[key] = result
+        return result
+    }
+    private static func resample(_ image: CGImage, width: Int, height: Int) -> CGImage? {
+        guard let context = CGContext(data: nil, width: width, height: height, bitsPerComponent: 8, bytesPerRow: 0,
+                                      space: CGColorSpace(name: CGColorSpace.sRGB)!, bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue) else { return nil }
+        context.interpolationQuality = .high
+        context.draw(image, in: CGRect(x: 0, y: 0, width: width, height: height))
+        return context.makeImage()
+    }
     @discardableResult static func draw(_ cat: Cat, at point: NSPoint, scale: CGFloat, frame override: Int? = nil, direction: Double? = nil, alpha: CGFloat = 1) -> Bool {
         let index = override ?? frameIndex(cat)
         guard metadata.indices.contains(cat.coat), metadata[cat.coat].indices.contains(index), let image = image(index, coat: cat.coat) else { return false }
@@ -74,16 +102,25 @@ enum SpriteAtlas {
         } else if cat.action == .pouncing { lift = sin(min(1, cat.elapsed / 0.45) * .pi) * 4.5 }
         let factor = cat.action == .held ? 24 * scale / Double(frame.height) : Self.sourceScale * scale
         let breathing: CGFloat = [.sleeping, .loafing].contains(cat.action) ? 1 + sin(cat.phase * 1.5) * 0.015 : 1
+        // In the menu bar (scale 1) draw a copy shrunk once to the exact pixel size and snap it to the pixel grid;
+        // previews at other scales and the brief tower hop draw the original.
+        let pixels = scale == cat.size.scale && cat.action != .hopping ? screenScale : 0
+        func snap(_ value: CGFloat) -> CGFloat { pixels > 0 ? (value * pixels).rounded() / pixels : value }
+        var rect = NSRect(x: snap(offsetFor(cat, scale) - frame.headX * factor), y: snap(frame.footLift * factor),
+                          width: Double(frame.width) * factor, height: Double(frame.height) * factor)
+        var drawn = image
+        if pixels > 0, let small = shrunk(index, coat: cat.coat, width: Int((rect.width * pixels).rounded()), height: Int((rect.height * pixels).rounded())) {
+            drawn = small
+            rect.size = NSSize(width: small.size.width, height: small.size.height)
+        }
+        rect.size.height *= breathing
         NSGraphicsContext.saveGraphicsState()
         let transform = NSAffineTransform()
-        transform.translateX(by: point.x, yBy: point.y + lift * scale)
+        transform.translateX(by: snap(point.x), yBy: snap(point.y + lift * scale))
         transform.scaleX(by: direction ?? cat.direction, yBy: 1)
         transform.concat()
         NSGraphicsContext.current?.imageInterpolation = .high
-        let offset = cat.action == .held ? 0 : 9 * scale
-        image.draw(in: NSRect(x: offset - frame.headX * factor, y: frame.footLift * factor,
-                             width: Double(frame.width) * factor, height: Double(frame.height) * factor * breathing),
-                   from: .zero, operation: .sourceOver, fraction: alpha)
+        drawn.draw(in: rect, from: .zero, operation: .sourceOver, fraction: alpha)
         NSGraphicsContext.restoreGraphicsState()
         return true
     }

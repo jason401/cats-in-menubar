@@ -3,6 +3,7 @@
 Native macOS app in Swift/AppKit/SwiftUI, built with Command Line Tools; no third-party dependencies.
 
 - Read README.md and HANDOFF.md before changing behavior.
+- Cat artwork: read `design/ART_GUIDE.md` before drawing, generating or importing any cat images, and update it when the art changes. Check strips with `tools/onion_strip.swift`.
 - Answer the user in Korean; keep technical names in English.
 - Preserve bundle ID `local.catsinmenubar` and preferences.
 - Do not change sibling AI Face / AI Illuminati projects, installed apps, identities or data.
