@@ -84,3 +84,4 @@ Fixed build identity with a dedicated app-specific local certificate. Verified d
 - Held cats now trail behind the drag like a pendulum.
 - Settings window rebuilt to match AI Face / AI Illuminati: `NSTabViewController` toolbar tabs (General, Cats, Monitor), 334 x 460, compact cards (`SettingsCard/Row/Switch/Segments/Menu`, copied pattern, sibling projects untouched).
 - Panel position verified from the log: top edge sits just under the menu bar.
+- User confirmed live: calling home works.
