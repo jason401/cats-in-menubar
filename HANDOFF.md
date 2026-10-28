@@ -71,3 +71,8 @@ Fixed build identity with a dedicated app-specific local certificate. Verified d
 - Menu owner uses `menuBarOwningApplication`, so clicking another status app no longer hides cats (not yet confirmed live).
 - User asked to stop hiding cats on uncertainty: app switches keep cats, unreliable scans keep the last good lanes, and a covered cat escapes to the nearest free spot (self-test bounds it to 1.5 s).
 - `tools/test.sh` also renders `build/previews/dashboard.png` and `settings-*.png`.
+
+## Gallop rework from RunCat reference (2026-10-28)
+
+- Studied the user's screen recording frame by frame. Natural feel comes from body pitch (nose-up push off, nose-down landing), strong squash/stretch, tail follow-through (straight back when stretched, curled over the back when gathered), held key poses and a steadier head, not from frame count.
+- `run(cycle:)` now does all of these; stride 20 pt. Cat envelope widened to 38 pt (`Habitat.catRadius = 19`) for the long stretch.

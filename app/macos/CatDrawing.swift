@@ -14,7 +14,7 @@ enum CatDrawing {
     private enum Piece { case fill(NSBezierPath), line(NSBezierPath, CGFloat, Bool) }
     enum Eyes { case open, wide, half, closed }
     struct Leg { var hip: NSPoint; var knee: NSPoint; var foot: NSPoint; var near: Bool }
-    /// A tiny skeleton in points, facing right, feet on y = 0, inside a 34 pt wide envelope.
+    /// A tiny skeleton in points, facing right, feet on y = 0, inside a 38 pt wide envelope.
     struct Pose {
         var shoulder = NSPoint(x: 5, y: 9.4)
         var hip = NSPoint(x: -6.5, y: 9.6)
@@ -63,10 +63,10 @@ enum CatDrawing {
             return pose
         case .held: return held(cat, t)
         case .running, .chasing:
-            return speed > 18 ? run(cycle: CGFloat(cat.gait) / 26 * 2 * .pi, strength: min(1, speed / 40), t: t) : walk(cat, t, seed)
+            return speed > 18 ? run(cycle: CGFloat(cat.gait) / 20 * 2 * .pi, strength: min(1, speed / 40), t: t) : walk(cat, t, seed)
         case .playing:
             if speed < 4 { var pose = stalk(cat, t); pose.eyes = .wide; return pose }
-            return speed > 20 ? run(cycle: CGFloat(cat.gait) / 26 * 2 * .pi, strength: min(1, speed / 40), t: t) : walk(cat, t, seed)
+            return speed > 20 ? run(cycle: CGFloat(cat.gait) / 20 * 2 * .pi, strength: min(1, speed / 40), t: t) : walk(cat, t, seed)
         case .walking: return walk(cat, t, seed)
         }
     }
@@ -88,25 +88,41 @@ enum CatDrawing {
         pose.head = p(10.4, 13.6 + bob * 0.5)
         return pose
     }
-    /// Gallop: the spine stretches and gathers, front and back legs work in pairs, the tail streams behind.
-    private static func run(cycle c: CGFloat, strength s: CGFloat, t: CGFloat) -> Pose {
-        let e = sin(c) * s
-        let air = max(0, cos(c)) * 1.6 * s
-        let half = 6 + 1.6 * e
-        var pose = Pose()
-        pose.shoulder = p(half - 0.5, 9.4 + air + 0.9 * e)
-        pose.hip = p(-half - 0.5, 9.4 + air - 0.6 * e)
-        for (offset, near) in [(CGFloat(0), false), (0.45, true)] {
-            let reach = sin(c + offset) * s
-            let front = p(pose.shoulder.x + 1 + 4.5 * reach, 0.9 + max(0, -cos(c + offset)) * 2.2 * s + air * 0.6)
-            let back = p(pose.hip.x - 0.5 - 4.5 * reach, 0.9 + max(0, cos(c + offset)) * 2.2 * s + air * 0.6)
-            pose.legs.append(leg(p(pose.shoulder.x, pose.shoulder.y - 2), front, bend: 0.8, near: near))
-            pose.legs.append(leg(p(pose.hip.x, pose.hip.y - 2), back, bend: -1.6, near: near))
+    /// Gallop, keyed like a hand-drawn cycle: push off nose-up, stretch flat with the tail straight back,
+    /// land nose-down, gather into a ball with the tail curled over the back. Big poses hold a moment,
+    /// the tail lags behind the body, and the head stays steadier than the spine.
+    private static func run(cycle raw: CGFloat, strength s: CGFloat, t: CGFloat) -> Pose {
+        let c = raw + 0.35 * sin(2 * raw) * s                // linger at full stretch and full gather
+        let e = sin(c) * s                                    // +1 stretched, -1 gathered
+        let pitch = 0.24 * cos(c) * s                         // + nose up (push off), - nose down (landing)
+        let center = p(0, 9.4 + 1.3 * abs(sin(c)) * s)
+        let half = 5.6 + 2.6 * e
+        func rotate(_ point: NSPoint, _ angle: CGFloat) -> NSPoint {
+            let dx = point.x - center.x, dy = point.y - center.y
+            return p(center.x + dx * cos(angle) - dy * sin(angle), center.y + dx * sin(angle) + dy * cos(angle))
         }
-        pose.head = p(pose.shoulder.x + 4.8, pose.shoulder.y + 3.4 - 0.5 * e)
-        pose.earBack = 0.9 * s
-        let y = pose.hip.y
-        pose.tail = [p(pose.hip.x - 2.5, y + 1), p(-12.5, y + 2 + 1.5 * sin(c + 1)), p(-14.5, y + 3 + 2.5 * sin(c + 2)), p(-16.5, y + 4 + 2 * sin(c + 2.8))]
+        var pose = Pose()
+        pose.body = 8 - 0.5 * e                               // squash when gathered, slimmer when stretched
+        pose.shoulder = rotate(p(half, center.y + 0.4), pitch)
+        pose.hip = rotate(p(-half, center.y), pitch)
+        for (offset, near) in [(CGFloat(0), false), (0.3, true)] {
+            let a = c + offset
+            let frontHip = rotate(p(half - 0.4, center.y - 2.2), pitch)
+            let backHip = rotate(p(-half + 0.4, center.y - 2.2), pitch)
+            let front = p(frontHip.x + 0.5 + 4.6 * sin(a) * s, 0.9 + max(0, cos(a)) * 2.6 * s)
+            let back = p(backHip.x - 0.5 - 4.6 * sin(a) * s, 0.9 + max(0, -cos(a)) * 2.6 * s)
+            pose.legs.append(leg(frontHip, front, bend: 0.9, near: near))
+            pose.legs.append(leg(backHip, back, bend: -1.7, near: near))
+        }
+        // The head rides on the shoulder but only takes a little of the pitch.
+        pose.head = rotate(p(half + 4.4, center.y + 3.6), pitch * 0.35)
+        pose.earBack = 1.0 * s
+        // Tail follow-through: shape is driven by a lagging phase, straight back when stretched, curled up when gathered.
+        let u = (1 - sin(c - 0.9) * s) / 2
+        let base = rotate(p(-half - 2.2, center.y + 0.6), pitch)
+        let wave = sin(t * 3) * 0.4
+        pose.tail = [base, p(base.x - 4, base.y + 1 + 3 * u), p(base.x - 8 + 3 * u, base.y + 1.2 + 7 * u + wave),
+                     p(max(-18.5, base.x - 10.5 + 7 * u), min(21.5, base.y + 1.5 + 8.5 * u + wave))]
         return pose
     }
     /// Hunting crouch: belly low, elbows up, eyes wide; the rear wiggles before a pounce.

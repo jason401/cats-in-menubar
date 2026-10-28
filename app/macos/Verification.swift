@@ -10,7 +10,7 @@ func runSelfTests() {
     let lanes = Habitat.freeLanes(width: 1000, obstacles: [Lane(lower: 0, upper: 220), Lane(lower: 800, upper: 1000)])
     expect(lanes == [Lane(lower: 228, upper: 792)], "menu padding")
     expect(Habitat.freeLanes(width: 500, obstacles: [Lane(lower: 0, upper: 500)]).isEmpty, "fully occupied")
-    expect(Habitat.freeLanes(width: 500, obstacles: [Lane(lower: 20, upper: 300), Lane(lower: 200, upper: 450)]) == [Lane(lower: 458, upper: 500)], "overlapping obstacles merge")
+    expect(Habitat.freeLanes(width: 520, obstacles: [Lane(lower: 20, upper: 300), Lane(lower: 200, upper: 450)]) == [Lane(lower: 458, upper: 520)], "overlapping obstacles merge")
     expect(Habitat.freeLanes(width: 500, obstacles: [Lane(lower: -100, upper: 600)]).isEmpty, "out of bounds clipping")
     var seed: UInt64 = 42
     let colony = Colony(random: { seed = seed &* 6364136223846793005 &+ 1; return Double(seed >> 11) / Double(UInt64(1) << 53) })
@@ -98,16 +98,16 @@ func renderPreview(to path: String) {
     ]
     for (i, (name, cat)) in poses.enumerated() {
         let x = CGFloat(100 + (i % 6) * 190), y = CGFloat(i < 6 ? 440 : 250)
-        // Guide box: the 34 pt collision envelope and the 26 pt usable height.
+        // Guide box: the 38 pt collision envelope and the 26 pt usable height.
         NSColor(white: 1, alpha: 0.08).setStroke()
-        NSBezierPath(rect: NSRect(x: x - 17 * 4, y: y, width: 34 * 4, height: 26 * 4)).stroke()
+        NSBezierPath(rect: NSRect(x: x - 19 * 4, y: y, width: 38 * 4, height: 26 * 4)).stroke()
         CatDrawing.cat(cat, at: NSPoint(x: x, y: y), scale: 4)
         (name as NSString).draw(at: NSPoint(x: x - 30, y: y - 22), withAttributes: label)
     }
-    ("run cycle, actual size ×2" as NSString).draw(at: NSPoint(x: 24, y: 160), withAttributes: label)
+    ("run cycle, actual size ×3" as NSString).draw(at: NSPoint(x: 24, y: 175), withAttributes: label)
     for frame in 0..<10 {
-        let cat = sample(.running, coat: frame % 3, velocity: 58, gait: Double(frame) * 2.6)
-        CatDrawing.cat(cat, at: NSPoint(x: CGFloat(80 + frame * 110), y: 100), scale: 2)
+        let cat = sample(.running, coat: 2, velocity: 58, gait: Double(frame) * 2.0)
+        CatDrawing.cat(cat, at: NSPoint(x: CGFloat(70 + frame * 115), y: 95), scale: 3)
     }
     ("actual size" as NSString).draw(at: NSPoint(x: 24, y: 40), withAttributes: label)
     for (i, (_, cat)) in poses.enumerated() { CatDrawing.cat(cat, at: NSPoint(x: CGFloat(140 + i * 85), y: 20)) }
