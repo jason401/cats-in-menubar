@@ -53,6 +53,7 @@ struct Cat {
     var elapsed = 0.0       // time in the current action, drives one-shot poses like stretching
     var target = 0.0        // where a hunt ends
     var wiggle = 0.0        // butt wiggle before a pounce
+    var stuck = 0.0         // time spent playing without moving or batting
     var heldLean = 0.0
     var heldLeanVelocity = 0.0
     var swing = 0.0         // horizontal speed while carried by the mouse
@@ -257,16 +258,24 @@ final class Colony {
                 if var toy = ball, lane.contains(toy.x, margin: 5) {
                     // Side is taken from where the ball is, not where the cat faces, so it cannot oscillate.
                     let side = toy.x >= cats[i].x ? 1.0 : -1.0
+                    let spot = clamp(toy.x - side * 11 * cats[i].size.scale, to: lane, for: i)
+                    // Near the end of the free space the cat cannot get closer than its own body allows;
+                    // once it is as close as it can be, it bats from there.
+                    let reach = abs(spot - cats[i].x) < 0.5 ? cats[i].radius + 10 : 14 * cats[i].size.scale
                     if cats[i].pounceCooldown > 0 {
                         cats[i].destination = cats[i].x
-                    } else if abs(toy.x - cats[i].x) < 14 && abs(cats[i].velocity) < 12 {
+                    } else if abs(toy.x - cats[i].x) < reach && abs(cats[i].velocity) < 12 {
                         toy.velocity = side * (40 + random() * 35)
                         ball = toy
                         cats[i].pounceCooldown = 0.9 + random() * 1.4
                         cats[i].destination = cats[i].x
+                        cats[i].stuck = 0
                     } else {
-                        cats[i].destination = clamp(toy.x - side * 11 * cats[i].size.scale, to: lane, for: i)
+                        cats[i].destination = spot
                     }
+                    // Never hold a pose forever: a cat that can neither move nor bat loses interest.
+                    if abs(cats[i].velocity) < 0.5 && cats[i].pounceCooldown <= 0 { cats[i].stuck += dt } else { cats[i].stuck = 0 }
+                    if cats[i].stuck > 2.5 { start(i, .sitting, for: 3 + random() * 3); cats[i].stuck = 0 }
                 } else { cats[i].action = .sitting; cats[i].remaining = 3 }
             }
             if cats[i].action == .goingHome, let homeX {

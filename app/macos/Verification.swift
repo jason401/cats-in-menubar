@@ -179,6 +179,24 @@ func runSelfTests() {
     var pounced = false
     for _ in 0..<600 where !pounced { colony.step(1.0 / 30); pounced = colony.cats[0].action == .pouncing }
     expect(pounced, "stalking leads to a pounce")
+    // A ball resting at the very end of the free space is still batted, and no cat freezes while playing.
+    do {
+        let edge = Colony(count: 1, random: { 0.5 })
+        edge.updateLanes([Lane(lower: 0, upper: 400)])
+        for _ in 0..<30 { edge.step(1.0 / 30) }
+        edge.cats[0].x = 200; edge.cats[0].velocity = 0; edge.cats[0].escaping = false
+        edge.ball = ToyBall(x: 5, velocity: 0, lifetime: 30, lane: edge.lanes[0])
+        edge.start(0, .playing, for: 30)
+        var batted = false, stillFor = 0.0, longest = 0.0
+        for _ in 0..<600 {
+            edge.step(1.0 / 30)
+            if let toy = edge.ball, abs(toy.velocity) > 20 { batted = true }
+            stillFor = abs(edge.cats[0].velocity) < 0.5 && edge.cats[0].action == .playing && edge.cats[0].pounceCooldown <= 0 ? stillFor + 1.0 / 30 : 0
+            longest = max(longest, stillFor)
+        }
+        expect(batted, "ball at the edge gets batted")
+        expect(longest < 2.7, "a playing cat never stands still for long: \(longest)")
+    }
     // Calling the cats home: everyone ends up in the tower, then comes back out into free space.
     colony.updateLanes([Lane(lower: 0, upper: 600)])
     for _ in 0..<60 { colony.step(1.0 / 30) }

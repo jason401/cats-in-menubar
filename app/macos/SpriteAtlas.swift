@@ -37,7 +37,11 @@ enum SpriteAtlas {
         case .pouncing, .hopping: return 6 + min(5, Int(cat.elapsed / 0.55 * 6))
         case .walking: return walking
         case .running, .chasing, .goingHome: return abs(cat.velocity) > 18 * cat.size.scale ? running : walking
-        case .playing: return abs(cat.velocity) > 20 * cat.size.scale ? running : (abs(cat.velocity) > 2 * cat.size.scale ? walking : 10)
+        case .playing:
+            if abs(cat.velocity) > 20 * cat.size.scale { return running }
+            if abs(cat.velocity) > 2 * cat.size.scale { return walking }
+            // After a bat it sits and watches; it crouches only just before the next one.
+            return cat.pounceCooldown > 0.35 ? 12 : 10
         }
     }
     private static func image(_ frame: Int, coat: Int) -> NSImage? {
