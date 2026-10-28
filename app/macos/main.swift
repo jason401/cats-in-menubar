@@ -10,6 +10,12 @@ if CommandLine.arguments.contains("--probe") { runProbe(); exit(0) }
 if let index = CommandLine.arguments.firstIndex(of: "--render-lineup"), CommandLine.arguments.count > index + 1 {
     renderLineup(to: CommandLine.arguments[index + 1]); exit(0)
 }
+if let index = CommandLine.arguments.firstIndex(of: "--render-motion"), CommandLine.arguments.count > index + 1 {
+    renderMotion(to: CommandLine.arguments[index + 1]); exit(0)
+}
+if let index = CommandLine.arguments.firstIndex(of: "--render-held"), CommandLine.arguments.count > index + 1 {
+    renderHeld(to: CommandLine.arguments[index + 1]); exit(0)
+}
 if CommandLine.arguments.contains("--self-test") { runSelfTests(); exit(0) }
 if let index = CommandLine.arguments.firstIndex(of: "--render-preview"), CommandLine.arguments.count > index + 1 {
     renderPreview(to: CommandLine.arguments[index + 1]); exit(0)

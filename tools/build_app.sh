@@ -13,7 +13,7 @@ STAGING=$(mktemp -d "$PWD/build/.candidate.XXXXXX")
 trap 'rm -rf "$STAGING"' EXIT
 APP="$STAGING/Cats in Menubar.app"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources" "$PWD/build/module-cache"
-cp design/cat-animation-concept-v1.png "$APP/Contents/Resources/CatAtlas.png"
+xcrun swift -module-cache-path "$PWD/build/module-cache" tools/prepare_assets.swift "$APP/Contents/Resources/Cats"
 xcrun swiftc -swift-version 5 -O -target "$(uname -m)-apple-macos14.0" \
   -module-cache-path "$PWD/build/module-cache" \
   -framework Cocoa -framework SwiftUI -framework ApplicationServices -framework IOKit -framework SystemConfiguration -framework ServiceManagement \

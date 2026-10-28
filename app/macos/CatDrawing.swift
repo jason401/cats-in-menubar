@@ -360,8 +360,8 @@ final class HabitatView: NSView {
     override func mouseDown(with event: NSEvent) {
         let point = convert(event.locationInWindow, from: nil)
         guard let i = colony.catIndex(at: point.x) else { return }
-        dragging = i; grabOffset = colony.cats[i].x - point.x; lastDrag = event.timestamp
-        colony.grab(i); NSCursor.closedHand.set(); needsDisplay = true
+        dragging = i; grabOffset = 0; lastDrag = event.timestamp
+        colony.grab(i); colony.drag(i, to: point.x, dt: 1.0 / 30); NSCursor.closedHand.set(); needsDisplay = true
     }
     override func mouseDragged(with event: NSEvent) {
         guard let i = dragging else { return }

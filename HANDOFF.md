@@ -112,3 +112,19 @@ User selected the generated concept PNG and requested eight coats, three sizes, 
 - Individual scaled collision radii are used for dragging, walking, escapes, tower exits and chasing. A mixed-size chasing target bug found by simulation was fixed by clamping the target to the chasing cat's own bounds.
 - Verified optimized build, strict signing, 140,705 assertions over 30,000 simulation steps, artwork and settings renders. All 24 coat/size combinations and persistence round trips tested. New app restarted without new permissions; live overlay screenshot shows three original-PNG cats with unchanged proportions. Generated settings render checked; live control clicking was interrupted by changing UI focus, so do not claim every menu was manually exercised.
 - `build/previews/lineup.png` is the final collection preview; concept and comparison images are in `design/`. No sibling project, signing key or privacy grant was changed.
+
+
+## Independent artwork, scaled movement, restored pickup (2026-10-28, Codex)
+
+Supersedes the previous recoloring/sitting-placeholder implementation. User reported the calico's blocky pattern, kitten frame speed, and awkward walk transitions; then explicitly requested independent cat images and restoring dangling/sway artwork when dragging.
+
+- Replaced runtime recoloring with eight independent PNG sheets in `app/macos/Resources/Cats/`. Orange is the approved original. The other seven were generated separately with the built-in ImageGen tool. The calico now has actual organic coat patches in the artwork; no rectangular pixel masks remain.
+- Added a dedicated held atlas with 8 identities × 3 poses (neutral, trail left, trail right). Corrected the black row so it has no tuxedo bib. Very low-alpha red/yellow pixels in source previews are alpha 1–2/255, not opaque painted artifacts; alpha component detection excludes them from sprite bounds.
+- `tools/prepare_assets.swift` runs during build, crops alpha components into eight independent 21-frame folders, and writes head/foot metadata. Bundle owns all runtime images. No Python/image libraries are required to build.
+- Sprite origins use a head landmark instead of the changing tail-inclusive bounding-box center. Walking feet use the same ground plane. Moving speeds and acceleration scale by 0.64/0.82/1.0 (walk 9.6/12.3/15 pt/s); the distance-based frame clock uses the matching stride scale, so kittens no longer have a faster normal walk cycle.
+- `Cat.heldLean` and `heldLeanVelocity` provide damped spring response to drag speed. Pickup uses frames 18–20, never sitting. Right drag → left-trailing pose, left drag → right-trailing pose. Mouse grab offset attaches to the held pose's head; release uses existing grooming behavior. Existing safe-space clamping is preserved.
+- Verified optimized build, all 168 bundled sprite files, 140,809 assertions, random/mixed-size simulation, size-specific travel distances, equal normal walk cadence at all sizes, directional sway and settling/release for every coat. Collection/pose/settings images and motion GIF rendered and inspected.
+- Restarted new app with existing permissions intact and saw PNG cats in the live overlay. CUA mouse targeting of the borderless click-through panel returned AXError.notImplemented, so actual pointer dragging was not automated successfully; only drag/event wiring and state transitions were exercised in tests. Do not claim a successful manual end-to-end drag observation.
+- Further art work: six illustrated walk/run key poses can still benefit from hand-authored in-betweens. Do not promise that automatic frame sequencing alone produces a perfect gait.
+
+- Final timing check: physics now advances with 30 Hz substeps independently of drawing frequency. Equal real-time travel verified at 8/15/30 fps; low-power idle updates no longer discard elapsed time.

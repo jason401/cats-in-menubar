@@ -53,6 +53,8 @@ struct Cat {
     var elapsed = 0.0       // time in the current action, drives one-shot poses like stretching
     var target = 0.0        // where a hunt ends
     var wiggle = 0.0        // butt wiggle before a pounce
+    var heldLean = 0.0
+    var heldLeanVelocity = 0.0
     var swing = 0.0         // horizontal speed while carried by the mouse
     var escaping = false    // covered by a menu or icon, hurrying to the nearest free space
     var homeBound = false   // called back to the cat tower
@@ -210,8 +212,16 @@ final class Colony {
             cats[i].destination = clamp(cats[friend].x, to: lane, for: i)
         }
     }
-    func step(_ dt: Double) {
-        let dt = min(max(dt, 0), 0.1)
+    func step(_ elapsed: Double) {
+        // Drawing can slow to 8 fps (2 fps at rest), but movement and sway still advance in real time.
+        var remaining = min(max(elapsed, 0), 0.5)
+        while remaining > 0.000000001 {
+            let dt = min(remaining, 1.0 / 30)
+            advance(dt)
+            remaining -= dt
+        }
+    }
+    private func advance(_ dt: Double) {
         if quiet { ball = nil }
         if var toy = ball {
             toy.lifetime -= dt
@@ -231,7 +241,13 @@ final class Colony {
             cats[i].hiddenFor = max(0, cats[i].hiddenFor - dt)
             cats[i].phase += dt
             cats[i].elapsed += dt
-            if cats[i].action == .held { cats[i].swing *= exp(-6 * dt); continue }
+            if cats[i].action == .held {
+                let target = -max(-1, min(1, cats[i].swing / 100))
+                cats[i].heldLeanVelocity += ((target - cats[i].heldLean) * 80 - cats[i].heldLeanVelocity * 8) * dt
+                cats[i].heldLean = max(-1.1, min(1.1, cats[i].heldLean + cats[i].heldLeanVelocity * dt))
+                cats[i].swing *= exp(-6 * dt)
+                continue
+            }
             cats[i].remaining -= dt
             if quiet && !cats[i].homeBound && cats[i].action != .sleeping { start(i, .sleeping, for: 30) }
             if cats[i].remaining <= 0 { choose(i, lane: lane) }
@@ -272,7 +288,7 @@ final class Colony {
             let moving: Set<CatAction> = [.walking, .running, .chasing, .playing, .stalking, .pouncing, .goingHome]
             let holding = cats[i].action == .stalking && cats[i].wiggle > 0
             let delta = moving.contains(cats[i].action) && !holding ? cats[i].destination - cats[i].x : 0
-            let (maxSpeed, accel): (Double, Double) = switch cats[i].action {
+            let (baseSpeed, baseAccel): (Double, Double) = switch cats[i].action {
             case .walking: (15, 30)
             case .goingHome: (55, 90)
             case .running: (58, 90)
@@ -282,6 +298,8 @@ final class Colony {
             case .pouncing: (75, 400)
             default: (0, 70)  // idle actions also stop quickly
             }
+            let maxSpeed = baseSpeed * cats[i].size.scale
+            let accel = baseAccel * cats[i].size.scale
             var desired = 0.0
             if abs(delta) > 0.5 {
                 let wanted = delta > 0 ? 1.0 : -1.0
@@ -387,7 +405,7 @@ final class Colony {
     }
     func grab(_ i: Int) {
         guard cats.indices.contains(i), cats[i].visible else { return }
-        start(i, .held, for: .infinity); cats[i].velocity = 0; cats[i].swing = 0
+        start(i, .held, for: .infinity); cats[i].velocity = 0; cats[i].swing = 0; cats[i].heldLean = 0; cats[i].heldLeanVelocity = 0
     }
     func drag(_ i: Int, to x: Double, dt: Double) {
         guard cats.indices.contains(i), cats[i].action == .held,
