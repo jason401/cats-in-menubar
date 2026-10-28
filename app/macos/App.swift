@@ -5,6 +5,8 @@ final class AppModel: ObservableObject {
     @Published var debug = false { didSet { changed?() } }
     @Published var status = "Checking menu layout…" { didSet { if status != oldValue { AppModel.log(status) } } }
     @Published var catSummary = "Looking for empty space…"
+    @Published var catsAway = false     // called into the cat tower
+    var home: (() -> Void)?
     @Published var access = MenuBarMonitor.trusted { didSet { if access != oldValue { AppModel.log("Accessibility: \(access)") } } }
     static let logURL = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Library/Logs/CatsInMenubar.log")
     // Geometry/status only, so live behavior can be checked without screen capture.
@@ -26,7 +28,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     let popover = NSPopover()
     var overlay: NSPanel?
     var habitatView: HabitatView?
-    var settings: NSWindow?
+    lazy var settings = SettingsWindowController(model: model)
     var animationTimer: Timer?
     var layoutTimer: Timer?
     var lastTick = ProcessInfo.processInfo.systemUptime
@@ -54,6 +56,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         AppModel.log("Launched pid \(ProcessInfo.processInfo.processIdentifier), Accessibility: \(MenuBarMonitor.trusted)")
         model.changed = { [weak self] in self?.applyOptions() }
         model.play = { [weak self] in self?.play() }
+        model.home = { [weak self] in self?.toggleHome() }
+        if defaults.bool(forKey: "catsHome") {
+            for i in colony.cats.indices { colony.cats[i].home = true; colony.cats[i].homeBound = true }
+            model.catsAway = true
+        }
         system.updated = { [weak self] stats in self?.systemUpdated(stats) }
         NotificationCenter.default.addObserver(self, selector: #selector(preferencesChanged), name: UserDefaults.didChangeNotification, object: nil)
         applyOptions()
@@ -115,17 +122,27 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
     @objc func play() { guard !paused else { return }; colony.play() }
+    /// Overlay x of the tower icon's center.
+    var towerX: Double? {
+        guard let button = statusItem.button, let window = button.window, let overlay else { return nil }
+        return window.convertToScreen(button.convert(button.bounds, to: nil)).midX - overlay.frame.minX
+    }
+    func toggleHome() {
+        guard let x = towerX else { return }
+        if model.catsAway { colony.letOut(at: x) } else { colony.callHome(at: x) }
+        model.catsAway.toggle()
+        defaults.set(model.catsAway, forKey: "catsHome")
+    }
+    var shownHomeCount = -1
+    func updateTowerIcon() {
+        let count = colony.homeCount
+        guard count != shownHomeCount else { return }
+        shownHomeCount = count
+        statusItem.button?.image = TowerIcon.menuBar(cats: count)
+    }
     @objc func showSettings() {
         popover.performClose(nil)
-        if settings == nil {
-            let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 680, height: 460), styleMask: [.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView], backing: .buffered, defer: false)
-            window.title = "Cats in Menubar Settings"
-            window.contentView = NSHostingView(rootView: SettingsView(model: model, state: SettingsState()))
-            window.isReleasedWhenClosed = false
-            window.center(); settings = window
-        }
-        NSApp.activate(ignoringOtherApps: true)
-        settings?.makeKeyAndOrderFront(nil)
+        settings.show()
     }
     /// Cats stay where they are; the next scan moves any cat that ended up over a menu or icon.
     @objc func layoutChanged() {
@@ -138,6 +155,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let now = ProcessInfo.processInfo.systemUptime
         let dt = now - lastTick; lastTick = now
         updateMouse()
+        updateTowerIcon()
+        if colony.homeX == nil, let x = towerX { colony.homeX = x }
         guard !paused, !suspended, overlay?.isVisible == true else { return }
         colony.step(dt)
         habitatView?.needsDisplay = true

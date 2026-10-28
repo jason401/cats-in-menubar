@@ -76,3 +76,11 @@ Fixed build identity with a dedicated app-specific local certificate. Verified d
 
 - Studied the user's screen recording frame by frame. Natural feel comes from body pitch (nose-up push off, nose-down landing), strong squash/stretch, tail follow-through (straight back when stretched, curled over the back when gathered), held key poses and a steadier head, not from frame count.
 - `run(cycle:)` now does all of these; stride 20 pt. Cat envelope widened to 38 pt (`Habitat.catRadius = 19`) for the long stretch.
+
+## Cat tower, shared ball, unified settings (2026-10-28)
+
+- "Call home" (panel and Settings → Cats): cats run to the free-space edge nearest the tower icon, then hop in one at a time (shrinking arc, drawn unclipped). The menu bar icon shows 1-3 cats at home. "Let out" hops them back out 0.7 s apart. State persists in `catsHome`.
+- Ball button drops the ball at a random spot (preferring a free space that has cats); every cat in that space plays, with staggered reactions.
+- Held cats now trail behind the drag like a pendulum.
+- Settings window rebuilt to match AI Face / AI Illuminati: `NSTabViewController` toolbar tabs (General, Cats, Monitor), 334 x 460, compact cards (`SettingsCard/Row/Switch/Segments/Menu`, copied pattern, sibling projects untouched).
+- Panel position verified from the log: top edge sits just under the menu bar.

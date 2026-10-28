@@ -62,7 +62,13 @@ enum CatDrawing {
             pose.lift = sin(q * .pi) * 4.5; pose.eyes = .wide
             return pose
         case .held: return held(cat, t)
-        case .running, .chasing:
+        case .hopping:
+            // A gathered spring, stretched in the air, tucked on landing.
+            let q = min(1, e / CGFloat(Colony.hopTime))
+            var pose = run(cycle: -.pi / 2 + q * 2 * .pi * 0.75, strength: 1, t: t)
+            pose.lift = sin(q * .pi) * 7
+            return pose
+        case .running, .chasing, .goingHome:
             return speed > 18 ? run(cycle: CGFloat(cat.gait) / 20 * 2 * .pi, strength: min(1, speed / 40), t: t) : walk(cat, t, seed)
         case .playing:
             if speed < 4 { var pose = stalk(cat, t); pose.eyes = .wide; return pose }
@@ -216,7 +222,8 @@ enum CatDrawing {
     }
     /// Carried by the scruff: hanging body, dangling legs and tail that swing with the drag.
     private static func held(_ cat: Cat, _ t: CGFloat) -> Pose {
-        let sw = max(-1, min(1, CGFloat(cat.swing) / 80)) * CGFloat(cat.direction)
+        // Like a pendulum: the scruff leads, the body and legs trail behind the drag.
+        let sw = -max(-1, min(1, CGFloat(cat.swing) / 80)) * CGFloat(cat.direction)
         var pose = Pose()
         pose.shoulder = p(1 - sw * 1.5, 12.6); pose.hip = p(-1.2 + sw * 2, 5.8)
         let dangle = sin(t * 3) * 0.4
@@ -234,6 +241,12 @@ enum CatDrawing {
     /// Faces right, centered on `point`; `cat.direction` mirrors it.
     static func cat(_ cat: Cat, at point: NSPoint, scale: CGFloat = 1) {
         guard cat.visible && cat.hiddenFor <= 0 else { return }
+        var scale = scale
+        if cat.action == .hopping {
+            // Shrinks into the tower icon, grows back on the way out.
+            let q = CGFloat(min(1, cat.elapsed / Colony.hopTime))
+            scale *= cat.hopIn ? 1 - 0.55 * q * q : 0.45 + 0.55 * q
+        }
         let pose = pose(cat)
         NSGraphicsContext.saveGraphicsState()
         let transform = NSAffineTransform()
@@ -354,8 +367,12 @@ final class HabitatView: NSView {
             for lane in colony.lanes { NSRect(x: lane.lower, y: 0, width: lane.width, height: bounds.height).fill() }
         }
         let baseline = max(0, floor((bounds.height - 22) / 2))
-        for cat in colony.cats { CatDrawing.cat(cat, at: NSPoint(x: cat.x, y: baseline)) }
+        for cat in colony.cats where !cat.escaping && cat.action != .hopping { CatDrawing.cat(cat, at: NSPoint(x: cat.x, y: baseline)) }
         if let toy = colony.ball { CatDrawing.ball(toy, baseline: baseline) }
         NSGraphicsContext.restoreGraphicsState()
+        // Cats leaving covered space or hopping into the tower may briefly pass over icons.
+        for cat in colony.cats where cat.visible && (cat.escaping || cat.action == .hopping) {
+            CatDrawing.cat(cat, at: NSPoint(x: cat.x, y: baseline))
+        }
     }
 }

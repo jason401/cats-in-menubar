@@ -16,10 +16,29 @@ enum TowerIcon {
         body.fill()
         if let door { door.set(); hole.fill() }
     }
-    /// Monochrome template image for the menu bar.
-    static func menuBar() -> NSImage {
+    /// Little cat silhouettes for the tower: a head with two ears, optionally on a body.
+    private static func catShape(head: NSPoint, radius r: CGFloat, body: NSRect?) -> NSBezierPath {
+        let path = NSBezierPath(ovalIn: NSRect(x: head.x - r, y: head.y - r * 0.9, width: r * 2, height: r * 1.8))
+        for side in [-1.0, 1.0] as [CGFloat] {
+            let ear = NSBezierPath()
+            ear.move(to: NSPoint(x: head.x + side * r * 0.95, y: head.y + r * 0.2))
+            ear.line(to: NSPoint(x: head.x + side * r * 0.75, y: head.y + r * 1.55))
+            ear.line(to: NSPoint(x: head.x + side * r * 0.1, y: head.y + r * 0.75)); ear.close()
+            path.append(ear)
+        }
+        if let body { path.append(NSBezierPath(roundedRect: body, xRadius: body.height / 2, yRadius: body.height / 2)) }
+        return path
+    }
+    /// Monochrome template image for the menu bar; cats that came home show up in the tower.
+    static func menuBar(cats: Int = 0) -> NSImage {
         let image = NSImage(size: NSSize(width: 18, height: 18), flipped: false) { _ in
-            draw(wood: .black, house: .black, post: .black, door: nil); return true
+            draw(wood: .black, house: .black, post: .black, door: nil)
+            NSColor.black.set()
+            // 1: peeking out of the door, 2: sitting under the house, 3: loafing under the shelf.
+            if cats >= 1 { catShape(head: NSPoint(x: 8.5, y: 12.9), radius: 1.55, body: nil).fill() }
+            if cats >= 2 { catShape(head: NSPoint(x: 4.2, y: 7.6), radius: 1.45, body: NSRect(x: 2.6, y: 3.1, width: 3.6, height: 4.2)).fill() }
+            if cats >= 3 { catShape(head: NSPoint(x: 14.3, y: 4.9), radius: 1.3, body: NSRect(x: 10.6, y: 3.1, width: 4.6, height: 2.2)).fill() }
+            return true
         }
         image.isTemplate = true
         image.accessibilityDescription = "Cats in Menubar"

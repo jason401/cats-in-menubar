@@ -90,7 +90,9 @@ struct DashboardView: View {
                 Label("Your Mac is running hot", systemImage: "thermometer.high").font(.caption).foregroundStyle(.orange)
             }
             HStack(spacing: 6) {
-                PanelButton(icon: "circle.fill", label: "Ball", action: play).disabled(paused || !model.access)
+                PanelButton(icon: model.catsAway ? "door.left.hand.open" : "house.fill", label: model.catsAway ? "Let out" : "Call home") { model.home?() }
+                    .disabled(paused || !model.access)
+                PanelButton(icon: "circle.fill", label: "Ball", action: play).disabled(paused || !model.access || model.catsAway)
                 PanelButton(icon: paused ? "play.fill" : "pause.fill", label: paused ? "Resume" : "Pause") { paused.toggle() }
                 PanelButton(icon: "gearshape", label: "Settings", action: openSettings)
                 PanelButton(icon: "power", label: "Quit") { NSApp.terminate(nil) }
@@ -182,97 +184,214 @@ private struct PanelButton: View {
 }
 
 // MARK: Settings window
+// Same look as AI Face and AI Illuminati: toolbar tabs, titled cards of one-line rows, small text.
 
-enum SettingsPage: String, CaseIterable, Identifiable {
-    case general = "General", cats = "Cats", behavior = "Behavior", monitor = "System Monitor", permissions = "Permissions", about = "About"
-    var id: String { rawValue }
-    var icon: String {
-        switch self {
-        case .general: "gearshape"
-        case .cats: "pawprint"
-        case .behavior: "figure.run"
-        case .monitor: "gauge.with.dots.needle.33percent"
-        case .permissions: "lock.shield"
-        case .about: "info.circle"
+struct SettingsPage<Content: View>: View {
+    @ViewBuilder var content: Content
+    var body: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 12) { content }
+                .padding(12).frame(maxWidth: .infinity, alignment: .topLeading)
         }
+        .font(.system(size: 12))
+        .controlSize(.small)
+        .background(Color(nsColor: .windowBackgroundColor))
+    }
+}
+
+struct SettingsCard<Content: View>: View {
+    let title: String
+    @ViewBuilder var content: Content
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text(title).font(.system(size: 11, weight: .semibold)).foregroundStyle(.secondary).padding(.horizontal, 2)
+            VStack(spacing: 0) { content }
+                .background(Color(nsColor: .controlBackgroundColor))
+                .clipShape(RoundedRectangle(cornerRadius: 8))
+                .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(Color.primary.opacity(0.07)))
+        }
+    }
+}
+
+struct SettingsRow<Content: View>: View {
+    let title: String
+    @ViewBuilder var content: Content
+    var body: some View {
+        HStack(spacing: 10) {
+            Text(title).frame(width: 96, alignment: .leading)
+            HStack(spacing: 6) { content }.frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .padding(.horizontal, 10).padding(.vertical, 6)
+        .frame(minHeight: 32)
+    }
+}
+
+/// A short gray line under a row; the long version goes in `help`.
+struct SettingsNote: View {
+    let text: String
+    var body: some View {
+        Text(text).font(.system(size: 10)).foregroundStyle(.secondary)
+            .lineLimit(3).fixedSize(horizontal: false, vertical: true)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.horizontal, 10).padding(.bottom, 7)
+    }
+}
+
+struct SettingsAction: View {
+    let title: String
+    let action: () -> Void
+    var body: some View {
+        Button(action: action) {
+            Text(title).lineLimit(1).frame(maxWidth: .infinity, minHeight: 24)
+                .background(RoundedRectangle(cornerRadius: 5).fill(Color.primary.opacity(0.07)))
+        }.buttonStyle(.plain)
+    }
+}
+
+/// An on/off switch at the right end of its row.
+struct SettingsSwitch: View {
+    let title: String
+    @Binding var isOn: Bool
+    var body: some View {
+        HStack {
+            Spacer(minLength: 0)
+            Toggle(title, isOn: $isOn).labelsHidden().toggleStyle(.switch)
+        }
+    }
+}
+
+struct SettingsSegments<Value: Hashable>: View {
+    let options: [(String, Value)]
+    @Binding var selection: Value
+    var body: some View {
+        HStack(spacing: 2) {
+            ForEach(options.indices, id: \.self) { index in
+                Button { selection = options[index].1 } label: {
+                    Text(options[index].0).lineLimit(1)
+                        .frame(maxWidth: .infinity, minHeight: 22)
+                        .foregroundStyle(selection == options[index].1 ? Color.white : Color.primary)
+                        .background(RoundedRectangle(cornerRadius: 4).fill(selection == options[index].1 ? Color.accentColor : Color.clear))
+                        .contentShape(Rectangle())
+                }.buttonStyle(.plain)
+            }
+        }
+        .padding(2).background(RoundedRectangle(cornerRadius: 6).fill(Color.primary.opacity(0.06)))
+    }
+}
+
+// A popup filling the control column; SwiftUI's Picker sizes itself to its widest item.
+struct SettingsMenu<Value: Hashable>: View {
+    let options: [(String, Value)]
+    @Binding var selection: Value
+    var body: some View {
+        SettingsPopup(titles: options.map { $0.0 }, selection: Binding(
+            get: { options.firstIndex { $0.1 == selection } ?? 0 },
+            set: { if options.indices.contains($0) { selection = options[$0].1 } }))
+            .frame(maxWidth: .infinity).frame(height: 24)
+    }
+}
+
+struct SettingsPopup: NSViewRepresentable {
+    let titles: [String]
+    @Binding var selection: Int
+    final class Coordinator: NSObject {
+        var parent: SettingsPopup
+        init(_ parent: SettingsPopup) { self.parent = parent }
+        @objc func select(_ sender: NSPopUpButton) { parent.selection = sender.indexOfSelectedItem }
+    }
+    func makeCoordinator() -> Coordinator { Coordinator(self) }
+    func makeNSView(context: Context) -> NSPopUpButton {
+        let button = NSPopUpButton(frame: .zero, pullsDown: false)
+        button.controlSize = .small
+        button.font = .systemFont(ofSize: 11)
+        button.target = context.coordinator
+        button.action = #selector(Coordinator.select(_:))
+        button.setContentHuggingPriority(.defaultLow, for: .horizontal)
+        return button
+    }
+    func updateNSView(_ button: NSPopUpButton, context: Context) {
+        context.coordinator.parent = self
+        if button.itemTitles != titles { button.removeAllItems(); button.addItems(withTitles: titles) }
+        button.selectItem(at: selection)
+    }
+    func sizeThatFits(_ proposal: ProposedViewSize, nsView: NSPopUpButton, context: Context) -> CGSize? {
+        CGSize(width: proposal.width ?? 184, height: 24)
+    }
+}
+
+/// A status word in the control column: green when things are fine, gray otherwise.
+struct SettingsStatus: View {
+    let text: String
+    var ok = false
+    var body: some View {
+        Text(text).lineLimit(1).foregroundStyle(ok ? Color.green : Color.secondary).frame(maxWidth: .infinity, alignment: .leading)
     }
 }
 
 /// Window state lives in a class: the Command Line Tools toolchain lacks the macro plugin behind SwiftUI's @State.
 final class SettingsState: ObservableObject {
-    @Published var page: SettingsPage? = .general
     @Published var launchAtLogin = SMAppService.mainApp.status == .enabled
     @Published var loginError: String?
 }
 
-struct SettingsView: View {
-    @ObservedObject var model: AppModel
-    @ObservedObject var state: SettingsState
-    var body: some View {
-        let page = state.page
-        NavigationSplitView {
-            List(SettingsPage.allCases, selection: $state.page) { item in
-                Label(item.rawValue, systemImage: item.icon).tag(item)
-            }
-            .navigationSplitViewColumnWidth(180)
-        } detail: {
-            Form {
-                switch page ?? .general {
-                case .general: GeneralPage(state: state)
-                case .cats: CatsPage(model: model)
-                case .behavior: BehaviorPage()
-                case .monitor: MonitorPage()
-                case .permissions: PermissionsPage(model: model)
-                case .about: AboutPage()
-                }
-            }
-            .formStyle(.grouped)
-            .navigationTitle((page ?? .general).rawValue)
-        }
-        .frame(minWidth: 640, minHeight: 440)
-    }
-}
+private let hours = (0..<24).map { (String(format: "%02d:00", $0), $0) }
 
-private struct GeneralPage: View {
+struct GeneralTab: View {
+    @ObservedObject var model: AppModel
     @ObservedObject var state: SettingsState
     @AppStorage(Pref.cpuInBar) private var cpuInBar = false
     var body: some View {
-        Section {
-            Toggle("Open at login", isOn: Binding(get: { state.launchAtLogin }, set: { enabled in
-                do {
-                    if enabled { try SMAppService.mainApp.register() } else { try SMAppService.mainApp.unregister() }
-                    state.loginError = nil
-                } catch { state.loginError = error.localizedDescription }
-                state.launchAtLogin = SMAppService.mainApp.status == .enabled
-            }))
-            if let error = state.loginError { Text(error).font(.caption).foregroundStyle(.red) }
-        }
-        Section("Menu bar") {
-            Toggle("Show CPU usage next to the icon", isOn: $cpuInBar)
+        SettingsPage {
+            SettingsCard(title: "App") {
+                SettingsRow(title: "Open at login") {
+                    SettingsSwitch(title: "Open at login", isOn: Binding(get: { state.launchAtLogin }, set: { enabled in
+                        do {
+                            if enabled { try SMAppService.mainApp.register() } else { try SMAppService.mainApp.unregister() }
+                            state.loginError = nil
+                        } catch { state.loginError = error.localizedDescription }
+                        state.launchAtLogin = SMAppService.mainApp.status == .enabled
+                    }))
+                }
+                if let error = state.loginError { SettingsNote(text: error) }
+                Divider()
+                SettingsRow(title: "CPU in menu bar") {
+                    SettingsSwitch(title: "CPU in menu bar", isOn: $cpuInBar).help("Shows the CPU percentage next to the cat tower icon.")
+                }
+            }
+            SettingsCard(title: "Access") {
+                SettingsRow(title: "Accessibility") {
+                    SettingsStatus(text: model.access ? "Allowed" : "Not allowed", ok: model.access)
+                    if !model.access {
+                        SettingsAction(title: "Allow…") {
+                            MenuBarMonitor.requestAccess()
+                            if let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility") { NSWorkspace.shared.open(url) }
+                        }
+                    }
+                }
+                SettingsNote(text: "Only reads where menus and icons are. No screen capture, no menu text.")
+                Divider()
+                SettingsRow(title: "Safe space") {
+                    SettingsSwitch(title: "Show safe space", isOn: $model.debug).help("Tints the empty menu bar space the cats may use.")
+                }
+                Divider()
+                SettingsRow(title: "Log") { SettingsAction(title: "Open log") { NSWorkspace.shared.open(AppModel.logURL) } }
+                SettingsNote(text: model.status)
+            }
+            SettingsCard(title: "About") {
+                SettingsRow(title: "Version") {
+                    Text(Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "–").foregroundStyle(.secondary)
+                }
+                SettingsNote(text: "Everything stays on this Mac: no network requests, no analytics.")
+            }
         }
     }
 }
 
-private struct CatsPage: View {
+struct CatsTab: View {
     @ObservedObject var model: AppModel
     @AppStorage(Pref.count) private var count = 3
     @AppStorage(Pref.paused) private var paused = false
     @AppStorage(Pref.allowDrag) private var allowDrag = true
-    var body: some View {
-        Section {
-            Picker("Number of cats", selection: $count) { Text("1").tag(1); Text("2").tag(2); Text("3").tag(3) }.pickerStyle(.segmented)
-            Toggle("Pause and hide cats", isOn: $paused)
-            Toggle("Let me pick cats up and move them", isOn: $allowDrag)
-        }
-        Section {
-            Button("Bring out a ball") { model.play?() }.disabled(paused || !model.access)
-        } footer: {
-            Text("Cats only use empty menu bar space. A carried cat stays within its own free space.").font(.caption).foregroundStyle(.secondary)
-        }
-    }
-}
-
-private struct BehaviorPage: View {
     @AppStorage(Pref.activity) private var activity = 1
     @AppStorage(Pref.reactToCPU) private var reactToCPU = true
     @AppStorage(Pref.quiet) private var quiet = false
@@ -280,24 +399,44 @@ private struct BehaviorPage: View {
     @AppStorage(Pref.nightFrom) private var nightFrom = 23
     @AppStorage(Pref.nightTo) private var nightTo = 7
     var body: some View {
-        Section {
-            Picker("Activity", selection: $activity) { Text("Calm").tag(0); Text("Normal").tag(1); Text("Playful").tag(2) }.pickerStyle(.segmented)
-            Toggle("Livelier when the Mac is busy", isOn: $reactToCPU)
-        } footer: {
-            Text("With this on, high CPU use makes the cats run around more, like a little load meter.").font(.caption).foregroundStyle(.secondary)
-        }
-        Section("Quiet time") {
-            Toggle("Quiet time now", isOn: $quiet)
-            Toggle("Sleep at night", isOn: $nightQuiet)
-            if nightQuiet {
-                Picker("From", selection: $nightFrom) { ForEach(0..<24, id: \.self) { Text(String(format: "%02d:00", $0)).tag($0) } }
-                Picker("Until", selection: $nightTo) { ForEach(0..<24, id: \.self) { Text(String(format: "%02d:00", $0)).tag($0) } }
+        SettingsPage {
+            SettingsCard(title: "Cats") {
+                SettingsRow(title: "Cats") { SettingsSegments(options: [("1", 1), ("2", 2), ("3", 3)], selection: $count) }
+                Divider()
+                SettingsRow(title: "At home") {
+                    SettingsAction(title: model.catsAway ? "Let them out" : "Call them home") { model.home?() }.disabled(!model.access)
+                }
+                Divider()
+                SettingsRow(title: "Pause") { SettingsSwitch(title: "Pause", isOn: $paused) }
+                Divider()
+                SettingsRow(title: "Pick up") {
+                    SettingsSwitch(title: "Pick up", isOn: $allowDrag).help("Drag a cat with the mouse. It stays inside its own empty space.")
+                }
+            }
+            SettingsCard(title: "Behavior") {
+                SettingsRow(title: "Activity") { SettingsSegments(options: [("Calm", 0), ("Normal", 1), ("Playful", 2)], selection: $activity) }
+                Divider()
+                SettingsRow(title: "Busy Mac") {
+                    SettingsSwitch(title: "Busy Mac", isOn: $reactToCPU).help("High CPU use makes the cats run around more, like a little load meter.")
+                }
+                SettingsNote(text: "Livelier cats when the CPU is busy.")
+            }
+            SettingsCard(title: "Quiet time") {
+                SettingsRow(title: "Sleep now") { SettingsSwitch(title: "Sleep now", isOn: $quiet) }
+                Divider()
+                SettingsRow(title: "Every night") { SettingsSwitch(title: "Every night", isOn: $nightQuiet) }
+                if nightQuiet {
+                    Divider()
+                    SettingsRow(title: "From") { SettingsMenu(options: hours, selection: $nightFrom) }
+                    Divider()
+                    SettingsRow(title: "Until") { SettingsMenu(options: hours, selection: $nightTo) }
+                }
             }
         }
     }
 }
 
-private struct MonitorPage: View {
+struct MonitorTab: View {
     @AppStorage(Pref.interval) private var interval = 2.0
     @AppStorage(Pref.showCPU) private var showCPU = true
     @AppStorage(Pref.showMemory) private var showMemory = true
@@ -305,55 +444,68 @@ private struct MonitorPage: View {
     @AppStorage(Pref.showBattery) private var showBattery = true
     @AppStorage(Pref.showNetwork) private var showNetwork = true
     var body: some View {
-        Section {
-            Picker("Update every", selection: $interval) { Text("1 second").tag(1.0); Text("2 seconds").tag(2.0); Text("5 seconds").tag(5.0) }
-        }
-        Section("Show in the panel") {
-            Toggle("CPU", isOn: $showCPU); Toggle("Memory", isOn: $showMemory); Toggle("Storage", isOn: $showDisk)
-            Toggle("Battery / power", isOn: $showBattery); Toggle("Network", isOn: $showNetwork)
+        SettingsPage {
+            SettingsCard(title: "Update") {
+                SettingsRow(title: "Every") { SettingsSegments(options: [("1 s", 1.0), ("2 s", 2.0), ("5 s", 5.0)], selection: $interval) }
+            }
+            SettingsCard(title: "Show in the panel") {
+                SettingsRow(title: "CPU") { SettingsSwitch(title: "CPU", isOn: $showCPU) }
+                Divider()
+                SettingsRow(title: "Memory") { SettingsSwitch(title: "Memory", isOn: $showMemory) }
+                Divider()
+                SettingsRow(title: "Storage") { SettingsSwitch(title: "Storage", isOn: $showDisk) }
+                Divider()
+                SettingsRow(title: "Power") { SettingsSwitch(title: "Power", isOn: $showBattery) }
+                Divider()
+                SettingsRow(title: "Network") { SettingsSwitch(title: "Network", isOn: $showNetwork) }
+            }
         }
     }
 }
 
-private struct PermissionsPage: View {
-    @ObservedObject var model: AppModel
-    var body: some View {
-        Section {
-            HStack {
-                Image(systemName: model.access ? "checkmark.shield.fill" : "lock.fill").foregroundStyle(model.access ? .green : .orange)
-                Text(model.access ? "Accessibility access granted" : "Accessibility access required")
-            }
-            if !model.access {
-                Button("Allow Accessibility Access…") {
-                    MenuBarMonitor.requestAccess()
-                    if let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility") { NSWorkspace.shared.open(url) }
-                }
-            }
-        } footer: {
-            Text("Used only to read where menus and icons are, so cats stay out of their way. The app never captures the screen or reads menu text.").font(.caption).foregroundStyle(.secondary)
-        }
-        Section("Troubleshooting") {
-            Toggle("Show safe space", isOn: $model.debug)
-            Text(model.status).font(.caption).foregroundStyle(.secondary).textSelection(.enabled)
-            Button("Open log") { NSWorkspace.shared.open(AppModel.logURL) }
+/// Toolbar tabs at a fixed size, like AI Face's settings window.
+final class SettingsWindowController: NSObject {
+    static let size = NSSize(width: 334, height: 460)
+    static let tabs: [(String, String)] = [("General", "gearshape"), ("Cats", "pawprint"), ("Monitor", "gauge.with.dots.needle.33percent")]
+    let model: AppModel
+    let state = SettingsState()
+    private(set) var window: NSWindow?
+    init(model: AppModel) { self.model = model }
+
+    func view(for index: Int) -> AnyView {
+        switch index {
+        case 0: AnyView(GeneralTab(model: model, state: state))
+        case 1: AnyView(CatsTab(model: model))
+        default: AnyView(MonitorTab())
         }
     }
-}
-
-private struct AboutPage: View {
-    var body: some View {
-        Section {
-            HStack(spacing: 14) {
-                Image(nsImage: TowerIcon.app(size: 64))
-                VStack(alignment: .leading, spacing: 4) {
-                    Text("Cats in Menubar").font(.title3.bold())
-                    Text("Version \(Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "–")").foregroundStyle(.secondary)
-                    Text("A little life in the empty space.").foregroundStyle(.secondary)
-                }
-            }
+    private func tab(_ index: Int) -> NSTabViewItem {
+        let size = SettingsWindowController.size
+        let (title, symbol) = SettingsWindowController.tabs[index]
+        let host = NSHostingController(rootView: view(for: index).frame(width: size.width, height: size.height))
+        // A fixed size: otherwise the hosting view sizes itself from its content's ideal width.
+        host.sizingOptions = []
+        host.view.frame = NSRect(origin: .zero, size: size)
+        host.preferredContentSize = size
+        host.title = title
+        let item = NSTabViewItem(viewController: host)
+        item.label = title
+        item.image = NSImage(systemSymbolName: symbol, accessibilityDescription: title)
+        return item
+    }
+    func show() {
+        if window == nil {
+            let tabs = NSTabViewController()
+            tabs.tabStyle = .toolbar
+            for index in SettingsWindowController.tabs.indices { tabs.addTabViewItem(tab(index)) }
+            let w = NSWindow(contentViewController: tabs)
+            w.styleMask = [.titled, .closable, .miniaturizable]
+            w.setContentSize(SettingsWindowController.size)
+            w.isReleasedWhenClosed = false
+            w.center()
+            window = w
         }
-        Section {
-            Text("Everything stays on this Mac: no network requests, no screen capture, no analytics.").font(.callout)
-        }
+        NSApp.activate(ignoringOtherApps: true)
+        window?.makeKeyAndOrderFront(nil)
     }
 }

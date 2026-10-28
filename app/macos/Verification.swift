@@ -27,13 +27,15 @@ func runSelfTests() {
         for (i, cat) in colony.cats.enumerated() {
             actions.insert(cat.action)
             let time = Double(tick) / 30
-            if cat.visible && !cat.escaping && cat.direction != facing[i] {
+            if cat.visible && !cat.escaping && cat.action != .hopping && cat.direction != facing[i] {
                 // Turning back within half a second reads as frantic left-right shaking.
                 if time - lastFlip[i] < 0.5 { jitter[cat.action.rawValue, default: 0] += 1 }
                 lastFlip[i] = time
             }
             facing[i] = cat.direction
-            if cat.visible && cat.escaping {
+            if cat.visible && cat.action == .hopping {
+                expect(colony.cats[i].elapsed <= Colony.hopTime + 0.1, "tower hops are short")
+            } else if cat.visible && cat.escaping {
                 // A covered cat must head for the nearest free spot and get there quickly.
                 escapeTicks[i] += 1
                 expect(escapeTicks[i] < 45, "covered cat reaches free space within 1.5 s")
@@ -48,7 +50,7 @@ func runSelfTests() {
         }
     }
     expect(jitter.isEmpty, "no rapid direction flips: \(jitter)")
-    let expected: [CatAction] = [.sleeping, .walking, .playing, .grooming, .running, .stalking, .pouncing, .stretching, .loafing]
+    let expected: [CatAction] = [.sleeping, .walking, .playing, .grooming, .running, .stalking, .stretching, .loafing]
     expect(expected.allSatisfy(actions.contains), "routine covers every behavior: missing \(expected.filter { !actions.contains($0) })")
     // Dragging never carries a cat past the edge of its free interval.
     colony.quiet = false
@@ -63,8 +65,28 @@ func runSelfTests() {
         colony.release(i)
         expect(colony.cats[i].action != .held, "release puts the cat down")
     } else { expect(false, "a cat is available to drag") }
+    // A hunt always ends in a pounce at the prey.
+    colony.updateLanes([Lane(lower: 0, upper: 600)])
+    for _ in 0..<60 { colony.step(1.0 / 30) }
+    colony.cats[0].x = 200; colony.cats[0].velocity = 0; colony.cats[0].escaping = false
+    colony.start(0, .stalking, for: 30); colony.cats[0].target = 300; colony.cats[0].destination = 280
+    var pounced = false
+    for _ in 0..<600 where !pounced { colony.step(1.0 / 30); pounced = colony.cats[0].action == .pouncing }
+    expect(pounced, "stalking leads to a pounce")
+    // Calling the cats home: everyone ends up in the tower, then comes back out into free space.
+    colony.updateLanes([Lane(lower: 0, upper: 600)])
+    for _ in 0..<60 { colony.step(1.0 / 30) }
+    colony.callHome(at: 700)
+    for _ in 0..<900 { colony.step(1.0 / 30) }
+    expect(colony.homeCount == colony.cats.count, "called cats all go into the tower: \(colony.cats.map { $0.action })")
+    colony.letOut(at: 700)
+    for _ in 0..<300 { colony.step(1.0 / 30) }
+    expect(colony.cats.allSatisfy { $0.visible && !$0.home && colony.lanes[0].contains($0.x, margin: Habitat.catRadius) }, "cats come back out into free space")
+    // The ball lands somewhere random and every cat sharing that space joins in.
+    colony.play()
+    expect(colony.ball != nil && colony.cats.allSatisfy { $0.action == .playing }, "everyone in that space plays: \(colony.cats.map { $0.action })")
     colony.updateLanes([Lane(lower: 0, upper: 400)])
-    colony.quiet = true; colony.step(0.1)
+    colony.quiet = true; for _ in 0..<60 { colony.step(1.0 / 30) }  // covered cats first reach free space
     expect(colony.ball == nil && colony.cats.allSatisfy { $0.action == .sleeping }, "quiet time stops play")
     colony.updateLanes([])
     expect(colony.cats.allSatisfy { !$0.visible } && colony.ball == nil, "unreadable or absent space hides everyone")
@@ -109,6 +131,15 @@ func renderPreview(to path: String) {
         let cat = sample(.running, coat: 2, velocity: 58, gait: Double(frame) * 2.0)
         CatDrawing.cat(cat, at: NSPoint(x: CGFloat(70 + frame * 115), y: 95), scale: 3)
     }
+    // Menu bar icon with 0-3 cats at home, enlarged and at actual size.
+    for n in 0...3 {
+        let icon = TowerIcon.menuBar(cats: n)
+        let tinted = NSImage(size: icon.size, flipped: false) { rect in
+            icon.draw(in: rect); NSColor.white.set(); rect.fill(using: .sourceAtop); return true
+        }
+        tinted.draw(in: NSRect(x: 640 + n * 140, y: 540, width: 72, height: 72))
+        tinted.draw(in: NSRect(x: 720 + n * 140, y: 545, width: 18, height: 18))
+    }
     ("actual size" as NSString).draw(at: NSPoint(x: 24, y: 40), withAttributes: label)
     for (i, (_, cat)) in poses.enumerated() { CatDrawing.cat(cat, at: NSPoint(x: CGFloat(140 + i * 85), y: 20)) }
     NSGraphicsContext.restoreGraphicsState()
@@ -138,11 +169,11 @@ func renderPanels(to directory: String) {
     let dashboard = NSHostingView(rootView: DashboardView(model: model, system: system, openSettings: {}, play: {}).background(Color(nsColor: .windowBackgroundColor)))
     dashboard.frame = NSRect(origin: .zero, size: dashboard.fittingSize)
     save(dashboard, "dashboard")
-    for page in SettingsPage.allCases {
-        let state = SettingsState(); state.page = page
-        let view = NSHostingView(rootView: SettingsView(model: model, state: state))
-        view.frame = NSRect(x: 0, y: 0, width: 680, height: 460)
-        save(view, "settings-\(page.rawValue.replacingOccurrences(of: " ", with: ""))")
+    let controller = SettingsWindowController(model: model)
+    for (index, tab) in SettingsWindowController.tabs.enumerated() {
+        let view = NSHostingView(rootView: controller.view(for: index))
+        view.frame = NSRect(origin: .zero, size: SettingsWindowController.size)
+        save(view, "settings-\(tab.0)")
     }
     print("Panels: \(directory)")
 }
