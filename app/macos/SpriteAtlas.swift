@@ -2,16 +2,27 @@ import Cocoa
 
 /// Each cat owns its artwork. No runtime recoloring or rectangular coat masks.
 enum SpriteAtlas {
-    private struct Frame: Decodable { var headX: Double; var footLift: Double; var width: Int; var height: Int }
-    private static let names = ["orange", "black", "white", "silver", "cream", "tuxedo", "calico", "siamese"]
+    /// One sprite sheet per artwork set: 64 equal cells (8 x 8), frame n at column n % 8, row n / 8, unused cells empty.
+    /// The build also writes copies already shrunk for the menu bar: `sheet-<density>x-<size>.png`.
+    struct Sheet: Decodable {
+        struct Frame: Decodable { var lift: Double; var left: Double; var right: Double }
+        var columns: Int, rows: Int, cellWidth: Int, cellHeight: Int
+        var headX: Double, ground: Double
+        var frames: [Frame]
+        var variants: [String: [Int]]
+    }
     private static let folder = Bundle.main.resourceURL?.appendingPathComponent("Cats")
-    private static let metadata: [[Frame]] = {
-        guard let url = folder?.appendingPathComponent("metadata.json"), let data = try? Data(contentsOf: url),
-              let frames = try? JSONDecoder().decode([[Frame]].self, from: data) else { return [] }
-        return frames
-    }()
-    private static var images: [Int: NSImage] = [:]
+    private static var sheets: [String: Sheet] = [:]
+    static func sheet(_ name: String) -> Sheet? {
+        if let known = sheets[name] { return known }
+        guard let url = folder?.appendingPathComponent("\(name)/sheet.json"), let data = try? Data(contentsOf: url),
+              let sheet = try? JSONDecoder().decode(Sheet.self, from: data) else { return nil }
+        sheets[name] = sheet
+        return sheet
+    }
+    private static func sheet(for coat: Int) -> Sheet? { artworkName(for: coat).flatMap(sheet) }
     static let frameCount = 62
+    static let cellCount = 64
     private static let resolvedCoats: [String] = {
         guard let url = folder?.appendingPathComponent("coats.json"), let data = try? Data(contentsOf: url),
               let names = try? JSONDecoder().decode([String].self, from: data), names.count == 8 else { return [] }
@@ -19,9 +30,12 @@ enum SpriteAtlas {
     }()
     static func artworkName(for coat: Int) -> String? { resolvedCoats.indices.contains(coat) ? resolvedCoats[coat] : nil }
     static var available: Bool {
-        guard let folder, metadata.count == 8, resolvedCoats.count == 8 else { return false }
-        return metadata.allSatisfy { $0.count == frameCount } && Set(resolvedCoats).allSatisfy { name in
-            (0..<frameCount).allSatisfy { FileManager.default.fileExists(atPath: folder.appendingPathComponent("\(name)/\($0).png").path) }
+        guard let folder, resolvedCoats.count == 8 else { return false }
+        return Set(resolvedCoats).allSatisfy { name in
+            guard let sheet = sheet(name), sheet.frames.count == frameCount, sheet.columns * sheet.rows == cellCount else { return false }
+            return (["sheet.png"] + sheet.variants.keys.map { "sheet-\($0).png" }).allSatisfy {
+                FileManager.default.fileExists(atPath: folder.appendingPathComponent("\(name)/\($0)").path)
+            }
         }
     }
     static let sourceScale: CGFloat = 24.0 / 180.0
@@ -89,12 +103,30 @@ enum SpriteAtlas {
         if a < b { return (a..<b).flatMap { links[$0] } }
         return (b..<a).reversed().flatMap { Array(links[$0].reversed()) }
     }
-    private static func image(_ frame: Int, coat: Int) -> NSImage? {
-        let key = coat * frameCount + frame
-        if let image = images[key] { return image }
-        guard let name = artworkName(for: coat), let url = folder?.appendingPathComponent("\(name)/\(frame).png"),
-              let image = NSImage(contentsOf: url) else { return nil }
-        images[key] = image
+    /// Screen pixels per point of the menu bar display, as one of the two baked densities.
+    static var density: Int { screenScale >= 1.5 ? 2 : 1 }
+    static func variant(for size: CatSize, density: Int) -> String { "\(density)x-\(size.rawValue)" }
+    private static var sheetImages: [String: CGImage] = [:]
+    private static var cells: [String: NSImage] = [:]
+    /// One cell of a sheet: the original (`variant` nil) in source pixels, or a menu bar copy sized in points.
+    static func cell(_ index: Int, coat: Int, variant: String? = nil) -> NSImage? {
+        guard let name = artworkName(for: coat), let sheet = sheet(name), index >= 0, index < sheet.columns * sheet.rows else { return nil }
+        let key = "\(name)/\(variant ?? "full")/\(index)"
+        if let known = cells[key] { return known }
+        let file = variant.map { "sheet-\($0).png" } ?? "sheet.png"
+        let size = variant.flatMap { sheet.variants[$0] } ?? [sheet.cellWidth, sheet.cellHeight]
+        guard size.count == 2, let image = sheetImage("\(name)/\(file)"),
+              let cut = image.cropping(to: CGRect(x: index % sheet.columns * size[0], y: index / sheet.columns * size[1], width: size[0], height: size[1]))
+        else { return nil }
+        let pixelsPerPoint = variant == nil ? 1 : CGFloat(Int(variant!.prefix(1)) ?? 1)
+        let result = NSImage(cgImage: cut, size: NSSize(width: CGFloat(size[0]) / pixelsPerPoint, height: CGFloat(size[1]) / pixelsPerPoint))
+        cells[key] = result
+        return result
+    }
+    private static func sheetImage(_ path: String) -> CGImage? {
+        if let known = sheetImages[path] { return known }
+        guard let url = folder?.appendingPathComponent(path), let image = NSImage(contentsOf: url)?.cgImage(forProposedRect: nil, context: nil, hints: nil) else { return nil }
+        sheetImages[path] = image
         return image
     }
     /// Frames in the same cycle step through each other; anything else is a pose change worth blending.
@@ -117,84 +149,26 @@ enum SpriteAtlas {
         default: return 60
         }
     }
-    // MARK: Ground and body position measured from the art
-    /// Visible extent of a frame in source pixels: lowest solid row (from the top) and left/right edges.
-    private struct Extent { var bottom: Double; var left: Double; var right: Double }
-    private static var extents: [Int: Extent] = [:]
-    private static func extent(_ index: Int, coat: Int) -> Extent? {
-        let key = coat * frameCount + index
-        if let known = extents[key] { return known }
-        guard let cg = image(index, coat: coat)?.cgImage(forProposedRect: nil, context: nil, hints: nil),
-              let context = CGContext(data: nil, width: cg.width, height: cg.height, bitsPerComponent: 8, bytesPerRow: cg.width * 4,
-                                      space: CGColorSpace(name: CGColorSpace.sRGB)!, bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue),
-              let pixels = context.data?.assumingMemoryBound(to: UInt8.self) else { return nil }
-        context.draw(cg, in: CGRect(x: 0, y: 0, width: cg.width, height: cg.height))
-        var bottom = 0, left = cg.width, right = 0
-        for row in 0..<cg.height {          // the first row in memory is the top of the image
-            for x in 0..<cg.width where pixels[(row * cg.width + x) * 4 + 3] > 100 {
-                bottom = max(bottom, row); left = min(left, x); right = max(right, x)
-            }
-        }
-        // The art was scaled into the canvas; express it in the same source pixels as the metadata.
-        let unit = Double(metadata[coat][index].height) / Double(cg.height)
-        let result = Extent(bottom: Double(bottom) * unit, left: Double(left) * unit, right: Double(right) * unit)
-        extents[key] = result
-        return result
-    }
-    /// Source pixels to raise a frame so its lowest paw stands on the ground line (232 px from the canvas top).
-    /// Grounded poses snap one by one; a gallop or pounce moves as a whole, so only its true flight frames leave the ground.
+    // MARK: Ground and body position, measured from the art when the sheet is built
+    /// Source pixels to raise a frame so its lowest paw stands on the ground line (232 px from the cell top).
     static func groundFix(_ index: Int, coat: Int) -> Double {
-        let ground = 232.0
-        func lowest(_ frames: ClosedRange<Int>) -> Double {
-            frames.compactMap { extent($0, coat: coat)?.bottom }.max() ?? ground
-        }
-        switch index {
-        case 12...19: return lowest(12...19) - ground
-        case 54...57: return lowest(54...57) - ground
-        case 60...61: return 0
-        default: return (extent(index, coat: coat)?.bottom ?? ground) - ground
-        }
+        guard let sheet = sheet(for: coat), sheet.frames.indices.contains(index) else { return 0 }
+        return sheet.frames[index].lift
     }
     /// Where the visible body's middle is drawn, in points from the cat's position, for a given facing.
     static func bodyCenter(_ index: Int, cat: Cat, direction: Double) -> CGFloat {
-        guard metadata.indices.contains(cat.coat), metadata[cat.coat].indices.contains(index),
-              let extent = extent(index, coat: cat.coat) else { return 0 }
-        let factor = sourceScale * cat.size.scale
-        let middle = (extent.left + extent.right) / 2 - metadata[cat.coat][index].headX
-        return CGFloat(direction) * (offsetFor(cat, cat.size.scale) + middle * factor)
+        guard let sheet = sheet(for: cat.coat), sheet.frames.indices.contains(index) else { return 0 }
+        let frame = sheet.frames[index]
+        let middle = (frame.left + frame.right) / 2 - sheet.headX
+        return CGFloat(direction) * (offsetFor(cat, cat.size.scale) + middle * sourceScale * cat.size.scale)
     }
     private static func offsetFor(_ cat: Cat, _ scale: CGFloat) -> CGFloat { cat.action == .held ? 0 : 9 * scale }
     /// Pixels per point of the menu bar display (the overlay lives on the primary screen).
     static var screenScale: CGFloat { NSScreen.screens.first?.backingScaleFactor ?? 2 }
 
-    // MARK: Shrink once, reuse
-    private static var small: [String: NSImage] = [:]
-    /// The frame reduced to exactly `width` x `height` pixels, made once and kept.
-    /// Halving step by step keeps thin outlines clean instead of losing them in one big jump.
-    static func shrunk(_ index: Int, coat: Int, width: Int, height: Int) -> NSImage? {
-        guard width > 0, height > 0 else { return nil }
-        let key = "\(coat)-\(index)-\(width)x\(height)"
-        if let cached = small[key] { return cached }
-        guard let source = image(index, coat: coat)?.cgImage(forProposedRect: nil, context: nil, hints: nil) else { return nil }
-        var current = source
-        while current.width / 2 >= width * 2 && current.height / 2 >= height * 2,
-              let half = resample(current, width: current.width / 2, height: current.height / 2) { current = half }
-        guard let final = resample(current, width: width, height: height) else { return nil }
-        let result = NSImage(cgImage: final, size: NSSize(width: CGFloat(width) / screenScale, height: CGFloat(height) / screenScale))
-        small[key] = result
-        return result
-    }
-    private static func resample(_ image: CGImage, width: Int, height: Int) -> CGImage? {
-        guard let context = CGContext(data: nil, width: width, height: height, bitsPerComponent: 8, bytesPerRow: 0,
-                                      space: CGColorSpace(name: CGColorSpace.sRGB)!, bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue) else { return nil }
-        context.interpolationQuality = .high
-        context.draw(image, in: CGRect(x: 0, y: 0, width: width, height: height))
-        return context.makeImage()
-    }
     @discardableResult static func draw(_ cat: Cat, at point: NSPoint, scale: CGFloat, frame override: Int? = nil, direction: Double? = nil, alpha: CGFloat = 1) -> Bool {
         let index = override ?? frameIndex(cat)
-        guard metadata.indices.contains(cat.coat), metadata[cat.coat].indices.contains(index), let image = image(index, coat: cat.coat) else { return false }
-        let frame = metadata[cat.coat][index]
+        guard let sheet = sheet(for: cat.coat), sheet.frames.indices.contains(index), var drawn = cell(index, coat: cat.coat) else { return false }
         var scale = scale * cat.size.scale
         var lift: CGFloat = 0
         if cat.action == .hopping {
@@ -204,16 +178,17 @@ enum SpriteAtlas {
         } else if cat.action == .pouncing { lift = sin(min(1, cat.elapsed / 0.45) * .pi) * 4.5 }
         let factor = Self.sourceScale * scale
         let breathing: CGFloat = [.sleeping, .loafing].contains(cat.action) ? 1 + sin(cat.phase * 1.5) * 0.015 : 1
-        // In the menu bar (scale 1) draw a copy shrunk once to the exact pixel size and snap it to the pixel grid;
-        // previews at other scales and the brief tower hop draw the original.
-        let pixels = scale == cat.size.scale && cat.action != .hopping ? screenScale : 0
+        // In the menu bar (scale 1) draw the cell from the sheet shrunk at build time for this screen and cat size,
+        // snapped to the pixel grid; previews at other scales and the brief tower hop draw the original.
+        let pixels = scale == cat.size.scale && cat.action != .hopping ? CGFloat(density) : 0
         func snap(_ value: CGFloat) -> CGFloat { pixels > 0 ? (value * pixels).rounded() / pixels : value }
-        var rect = NSRect(x: snap(offsetFor(cat, scale) - frame.headX * factor), y: snap((frame.footLift + groundFix(index, coat: cat.coat)) * factor),
-                          width: Double(frame.width) * factor, height: Double(frame.height) * factor)
-        var drawn = image
-        if pixels > 0, let small = shrunk(index, coat: cat.coat, width: Int((rect.width * pixels).rounded()), height: Int((rect.height * pixels).rounded())) {
+        // The cell bottom sits 24 source px below the ground line.
+        let bottom = sheet.ground - Double(sheet.cellHeight) + sheet.frames[index].lift
+        var rect = NSRect(x: snap(offsetFor(cat, scale) - sheet.headX * factor), y: snap(bottom * factor),
+                          width: Double(sheet.cellWidth) * factor, height: Double(sheet.cellHeight) * factor)
+        if pixels > 0, let small = cell(index, coat: cat.coat, variant: variant(for: cat.size, density: density)) {
             drawn = small
-            rect.size = NSSize(width: small.size.width, height: small.size.height)
+            rect.size = small.size
         }
         rect.size.height *= breathing
         NSGraphicsContext.saveGraphicsState()

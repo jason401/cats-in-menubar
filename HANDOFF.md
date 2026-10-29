@@ -174,3 +174,18 @@ V5 final verification: 152,406 assertions and 30,000 changing-obstacle steps pas
 - Dragging also goes through: `carryLane(for:)` joins the two sides through the notch for a held cat (hidden while behind it), and a layout refresh does not drop it there. Let go behind the notch, it walks out of the nearer side.
 - A crossing cat cannot be picked up, keeps crossing if called home (then goes home), and escapes to the nearest free spot if the notch or far side disappears.
 - Status/log shows `notch tunnel open`. Live log confirmed it open on this Mac. Self-test: 60,000 notched steps, crossings end on the other side within 12 s, closed-tunnel escape. Not yet watched live by the user.
+
+## Behavior document (2026-10-29, Claude)
+
+- `design/cat-behaviors.docx` (Korean, for the user): every behavior with start/end conditions, durations, speeds, frames and playback; next-behavior probability tables (also per activity/power setting); connection graphs (hub, fixed chains, interrupts, rest ladder, motion links); each frame group in high quality plus real app pixels at 2x and 1x.
+- Numbers were copied from `Colony.choose`/`advance`, `SpriteAtlas.frameIndex`/`transition` and `HabitatView.drawCat` at a35c35a. Update the document when behavior changes.
+- Regenerate (needs a Python venv with python-docx, pillow, matplotlib, numpy; not app dependencies): run `tools/behavior_doc/strips.py <orange frames> build/behavior-doc`, then `graphs.py` with the same arguments, then `make_doc.py build/behavior-doc design/cat-behaviors.docx`. Frames come from `build/Cats in Menubar.app/Contents/Resources/Cats/orange`.
+- Checked through Quick Look only (Pages/Word automation was not authorized); final layout in Word not yet seen.
+
+## 64-cell sprite sheets (2026-10-29, Claude)
+
+- User direction: frames live in sprite sheets, and the menu bar uses low-resolution sheets made once at build time, not runtime shrinking; dozens of cat designs will be added later.
+- `prepare_assets.swift` now writes, per artwork set, `sheet.png` (8 x 8 cells of 384 x 256, frames 0-61, cells 62-63 empty), `sheet-<1|2>x-<size>.png` (pre-shrunk with the same halving method, per screen density and CatSize) and `sheet.json` (cell size, head anchor 300, ground 232, per-frame `lift`, `left`, `right`). Per-frame PNGs and `metadata.json` are gone; ground fixes and body extents are measured at build time.
+- `SpriteAtlas` crops cells from cached sheet images; the menu bar picks the variant from `backingScaleFactor` (>=1.5 → 2x) and cat size. `shrunk`, runtime extents and per-frame files were removed. Ground fixes are identical to before; scenario/lineup/pose renders match the previous build except rounding-level pixel differences.
+- Tests: 8 x 8 layout, 62 filled / 2 empty cells, every variant's cell size equals the menu bar pixel size, 1x cells drawable. `tools/behavior_doc/` reads `sheet.png`. Live app relaunched with Accessibility intact; the live overlay itself was not visually inspected in this pass.
+- Coat names are still a fixed list of 8 in `prepare_assets.swift`, Settings and `CatAppearance`; scaling to dozens of designs needs that list made data-driven.

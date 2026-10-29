@@ -1,7 +1,82 @@
 import Cocoa
 
 struct Registration: Decodable { var eyeX: Double; var eyeY: Double; var scale: Double; var baselineEye: Double?; var rootX: Double? }
-struct SpriteInfo: Codable { var headX: Double; var footLift: Double; var width: Int; var height: Int }
+// One sheet per artwork set: 64 equal cells (8 x 8), frames in order from the top left, unused cells transparent.
+struct SheetFrame: Codable { var lift: Double; var left: Double; var right: Double }
+struct SheetInfo: Codable {
+    var columns = 8, rows = 8, cellWidth = 384, cellHeight = 256
+    var headX = 300.0, ground = 232.0
+    var frames: [SheetFrame]
+    var variants: [String: [Int]]   // "<density>x-<size>": cell width and height in screen pixels
+}
+// Menu bar copies are shrunk here once, for 1x and 2x screens and every cat size (CatSize.scale).
+let sizeScales = [0.64, 0.82, 1.0]
+let sourceScale = 24.0 / 180.0
+let cell = (width: 384, height: 256)
+func rgbaContext(_ width: Int, _ height: Int) -> CGContext {
+    CGContext(data: nil, width: width, height: height, bitsPerComponent: 8, bytesPerRow: 0,
+              space: CGColorSpace(name: CGColorSpace.sRGB)!, bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)!
+}
+func resample(_ image: CGImage, _ width: Int, _ height: Int) -> CGImage {
+    let context = rgbaContext(width, height)
+    context.interpolationQuality = .high
+    context.draw(image, in: CGRect(x: 0, y: 0, width: width, height: height))
+    return context.makeImage()!
+}
+/// Halving step by step keeps thin outlines clean instead of losing them in one big jump.
+func shrink(_ image: CGImage, _ width: Int, _ height: Int) -> CGImage {
+    var current = image
+    while current.width / 2 >= width * 2 && current.height / 2 >= height * 2 { current = resample(current, current.width / 2, current.height / 2) }
+    return resample(current, width, height)
+}
+/// Lowest solid row (from the top) and left/right edges of a cell, in source pixels.
+func extent(_ image: CGImage) -> (bottom: Double, left: Double, right: Double) {
+    let context = rgbaContext(image.width, image.height)
+    context.draw(image, in: CGRect(x: 0, y: 0, width: image.width, height: image.height))
+    let pixels = context.data!.assumingMemoryBound(to: UInt8.self), stride = context.bytesPerRow
+    var bottom = 0, left = image.width, right = 0
+    for row in 0..<image.height { for x in 0..<image.width where pixels[row * stride + x * 4 + 3] > 100 {
+        bottom = max(bottom, row); left = min(left, x); right = max(right, x)
+    }}
+    return (Double(bottom), Double(left), Double(right))
+}
+func writePNG(_ image: CGImage, _ url: URL) throws {
+    try NSBitmapImageRep(cgImage: image).representation(using: .png, properties: [:])!.write(to: url)
+}
+func writeSheet(_ frames: [CGImage], to folder: URL) throws {
+    let info0 = SheetInfo(frames: [], variants: [:])
+    precondition(frames.count <= info0.columns * info0.rows, "More frames than sheet cells")
+    // Paws go on the ground line per frame; a gallop or pounce moves as a whole, so only true flight frames leave the ground.
+    let extents = frames.map(extent)
+    func lowest(_ range: ClosedRange<Int>) -> Double { range.map { extents[$0].bottom }.max()! }
+    let frameInfo = extents.enumerated().map { index, e -> SheetFrame in
+        let lift = switch index {
+        case 12...19: lowest(12...19) - info0.ground
+        case 54...57: lowest(54...57) - info0.ground
+        case 60...61: 0.0
+        default: e.bottom - info0.ground
+        }
+        return SheetFrame(lift: lift, left: e.left, right: e.right)
+    }
+    var variants: [String: [Int]] = [:]
+    for density in [0, 1, 2] {   // 0 = the original, high quality
+        for (size, scale) in sizeScales.enumerated() where density > 0 || size == 0 {
+            let factor = density == 0 ? 1 : sourceScale * scale * Double(density)
+            let w = Int((Double(cell.width) * factor).rounded()), h = Int((Double(cell.height) * factor).rounded())
+            let sheet = rgbaContext(w * info0.columns, h * info0.rows)
+            for (index, frame) in frames.enumerated() {
+                let column = index % info0.columns, row = index / info0.columns
+                let image = density == 0 ? frame : shrink(frame, w, h)
+                sheet.draw(image, in: CGRect(x: column * w, y: (info0.rows - 1 - row) * h, width: w, height: h))
+            }
+            let name = density == 0 ? "sheet.png" : "sheet-\(density)x-\(size).png"
+            try writePNG(sheet.makeImage()!, folder.appendingPathComponent(name))
+            if density > 0 { variants["\(density)x-\(size)"] = [w, h] }
+        }
+    }
+    var info = info0; info.frames = frameInfo; info.variants = variants
+    try JSONEncoder().encode(info).write(to: folder.appendingPathComponent("sheet.json"))
+}
 let names = ["orange", "black", "white", "silver", "cream", "tuxedo", "calico", "siamese"]
 let root = URL(fileURLWithPath: FileManager.default.currentDirectoryPath)
 let input = root.appendingPathComponent("app/macos/Resources/Cats")
@@ -69,20 +144,19 @@ let sheets: [(String, Int, Int, Double)] = [
     ("16-pounce",4,4,160), ("17-bat",2,2,160), ("18-held-kick",2,2,180)
 ]
 let v3 = input.appendingPathComponent("v3")
-var metadata: [[SpriteInfo]] = []
-var prepared: [String: [SpriteInfo]] = [:]
+var prepared = Set<String>()
 var resolved: [String] = []
 for name in names {
     let own = v3.appendingPathComponent(name)
     let coat = sheets.allSatisfy { FileManager.default.fileExists(atPath: own.appendingPathComponent($0.0 + ".png").path) } ? name : "orange"
     resolved.append(coat)
-    if let cached = prepared[coat] { metadata.append(cached); continue }
+    if prepared.contains(coat) { continue }
     let folder = output.appendingPathComponent(coat)
     try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
     let registrationURL = v3.appendingPathComponent(coat).appendingPathComponent("registration.json")
     let registration = FileManager.default.fileExists(atPath: registrationURL.path)
         ? try JSONDecoder().decode([String: [Registration]].self, from: Data(contentsOf: registrationURL)) : [:]
-    var frames: [SpriteInfo] = []
+    var frames: [CGImage] = []
     for (sheet, count, columns, targetHeight) in sheets {
         let data = try Data(contentsOf: v3.appendingPathComponent(coat).appendingPathComponent(sheet + ".png"))
         let decoded = NSBitmapImageRep(data: data)!.cgImage!
@@ -131,14 +205,15 @@ for name in names {
                          "Authored pose exceeds canvas: \(sheet) frame \(index)")
             context.interpolationQuality = .high
             context.draw(isolated(source.cropping(to: crop)!), in: CGRect(x: x, y: y, width: w, height: h))
-            let out = NSBitmapImageRep(cgImage: context.makeImage()!)
-            try out.representation(using: .png, properties: [:])!.write(to: folder.appendingPathComponent("\(frames.count).png"))
-            frames.append(SpriteInfo(headX: headX, footLift: -24, width: canvasWidth, height: 256))
+            // Every frame goes into the same 384 x 256 cell with the head anchor at x = 300.
+            let padded = rgbaContext(cell.width, cell.height)
+            padded.draw(context.makeImage()!, in: CGRect(x: 300 - Int(headX), y: 0, width: canvasWidth, height: 256))
+            frames.append(padded.makeImage()!)
         }
     }
     precondition(frames.count == 62)
-    prepared[coat] = frames; metadata.append(frames)
+    try writeSheet(frames, to: folder)
+    prepared.insert(coat)
 }
-try JSONEncoder().encode(metadata).write(to: output.appendingPathComponent("metadata.json"))
 try JSONEncoder().encode(resolved).write(to: output.appendingPathComponent("coats.json"))
-print("Prepared v3: 62 frames per artwork set; coat fallback: \(resolved)")
+print("Prepared v3: 62 frames in a 64-cell sheet per artwork set; coat fallback: \(resolved)")

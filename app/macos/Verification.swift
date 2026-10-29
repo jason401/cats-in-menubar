@@ -11,7 +11,7 @@ func runSelfTests() {
     expect(SpriteAtlas.available, "approved sprite atlas is bundled; never substitute the old drawing")
     for coat in 0..<8 {
         let slug = ["orange", "black", "white", "silver", "cream", "tuxedo", "calico", "siamese"][coat]
-        let ownExists = FileManager.default.fileExists(atPath: Bundle.main.resourceURL!.appendingPathComponent("Cats/\(slug)/0.png").path)
+        let ownExists = FileManager.default.fileExists(atPath: Bundle.main.resourceURL!.appendingPathComponent("Cats/\(slug)/sheet.json").path)
         expect(SpriteAtlas.artworkName(for: coat) == (ownExists ? slug : "orange"), "missing v3 coats share orange without changing preferences")
         for action in CatAction.allCases {
             for tick in 0..<100 {
@@ -23,10 +23,34 @@ func runSelfTests() {
     }
     expect(SpriteAtlas.transition(from: 0, to: 33) == [24,25,26,27,28,29,30,31,32], "rest transition reaches sleep through sitting and loaf")
     expect(SpriteAtlas.transition(from: 33, to: 0) == [32,31,30,29,28,27,26,25,24], "waking reverses the transition art")
+    // Every artwork set is one 64-cell sprite sheet, plus copies shrunk for 1x/2x screens and each cat size.
+    for name in Set((0..<8).compactMap(SpriteAtlas.artworkName)) {
+        let sheet = SpriteAtlas.sheet(name)!
+        expect(sheet.columns == 8 && sheet.rows == 8 && sheet.frames.count == SpriteAtlas.frameCount, "\(name) sheet is 8 x 8 cells")
+        for density in [1, 2] { for size in CatSize.allCases {
+            let cells = sheet.variants[SpriteAtlas.variant(for: size, density: density)]
+            let expected = [sheet.cellWidth, sheet.cellHeight].map { Int((Double($0) * Double(SpriteAtlas.sourceScale) * size.scale * Double(density)).rounded()) }
+            expect(cells == expected, "\(name) \(density)x \(size) cells are the menu bar pixel size: \(String(describing: cells))")
+        }}
+    }
+    func coverage(_ image: NSImage?) -> Int {
+        guard let cg = image?.cgImage(forProposedRect: nil, context: nil, hints: nil) else { return -1 }
+        let rep = NSBitmapImageRep(cgImage: cg)
+        var solid = 0
+        for y in Swift.stride(from: 0, to: cg.height, by: 2) { for x in Swift.stride(from: 0, to: cg.width, by: 2) where rep.colorAt(x: x, y: y)!.alphaComponent > 0.4 { solid += 1 } }
+        return solid
+    }
+    for index in 0..<SpriteAtlas.cellCount {
+        let filled = coverage(SpriteAtlas.cell(index, coat: 0)) > 0
+        expect(filled == (index < SpriteAtlas.frameCount), "cell \(index) is \(index < SpriteAtlas.frameCount ? "a frame" : "empty, reserved for new art")")
+    }
+    for index in [0, 6, 26, 33, 60] {
+        let small = SpriteAtlas.cell(index, coat: 0, variant: SpriteAtlas.variant(for: .adult, density: 1))
+        expect(small?.size.width == CGFloat(Int((384 * 24.0 / 180).rounded())) && coverage(small) > 20, "1x adult cell \(index) is drawn and sized in points")
+    }
     // Inspect rendered assets, not just metadata: switching to run must keep the eye scale and anchor.
     for index in 4...19 {
-        let url = Bundle.main.resourceURL!.appendingPathComponent("Cats/orange/\(index).png")
-        let image = NSBitmapImageRep(data: try! Data(contentsOf: url))!.cgImage!
+        let image = SpriteAtlas.cell(index, coat: 0)!.cgImage(forProposedRect: nil, context: nil, hints: nil)!
         let ctx = CGContext(data: nil, width: image.width, height: image.height, bitsPerComponent: 8, bytesPerRow: image.width * 4,
             space: CGColorSpace(name: CGColorSpace.sRGB)!, bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)!
         ctx.draw(image, in: CGRect(x: 0, y: 0, width: image.width, height: image.height))
