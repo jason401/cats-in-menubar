@@ -472,6 +472,18 @@ func runSelfTests() {
     colony.updateLanes([])
     expect(colony.cats.allSatisfy { !$0.visible } && colony.ball == nil, "unreadable or absent space hides everyone")
     colony.setCount(2); expect(colony.cats.count == 2, "count control")
+    // Top apps: this process shows up, values are sane and the lists are ranked.
+    let sampler = AppUsageSampler()
+    _ = sampler.sample(now: Date())
+    var spin = 0.0; let until = Date().addingTimeInterval(0.3); while Date() < until { spin += sin(spin) + 1 }
+    let started = Date()
+    let usage = sampler.sample(now: Date())
+    let cost = Date().timeIntervalSince(started)
+    expect(spin > 0 && !usage.cpu.isEmpty && !usage.memory.isEmpty && usage.cpu.count <= 3, "top apps are read: \(usage)")
+    expect(usage.cpu.allSatisfy { $0.value >= 0 && $0.value <= 1.01 }, "CPU shares are fractions of the Mac: \(usage.cpu)")
+    expect(zip(usage.memory, usage.memory.dropFirst()).allSatisfy { $0.value >= $1.value }, "memory list is ranked")
+    expect(cost < 0.25, "one app sample is cheap: \(cost) s")
+    print("App sample: \(Int(cost * 1000)) ms; CPU \(usage.cpu.map { "\($0.name) \(Int($0.value * 1000) / 10)%" }); memory \(usage.memory.map { "\($0.name) \(Int($0.value / 1e6)) MB" })")
     print("PASS: \(checks) assertions; 30,000 simulation steps with changing obstacles")
 }
 
@@ -537,6 +549,7 @@ func renderPanels(to directory: String) {
     model.catSummary = "3 cats · 840 pt of room"
     model.lineup = [CatAppearance(coat: 0, size: .adult), CatAppearance(coat: 6, size: .young), CatAppearance(coat: 7, size: .kitten)]
     let system = SystemMonitor()
+    system.detailed = true
     system.sample(); Thread.sleep(forTimeInterval: 1); system.sample()
     func save(_ view: NSView, _ name: String) {
         let window = NSWindow(contentRect: view.frame, styleMask: [.titled], backing: .buffered, defer: false)

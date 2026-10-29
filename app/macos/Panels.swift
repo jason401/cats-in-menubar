@@ -8,11 +8,11 @@ enum Pref {
     static let fixedLineup = "useCustomLineup", lineup = "catLineup"
     static let activity = "activity", adaptivePower = "adaptivePower", allowDrag = "allowDrag"
     static let nightQuiet = "nightQuiet", nightFrom = "nightFrom", nightTo = "nightTo"
-    static let interval = "monitorInterval"
+    static let interval = "monitorInterval", topApps = "topApps"
     static let showCPU = "showCPU", showMemory = "showMemory", showDisk = "showDisk", showBattery = "showBattery", showNetwork = "showNetwork"
     static let defaults: [String: Any] = [
         count: 3, fixedLineup: false, paused: false, quiet: false, activity: 1, adaptivePower: true, allowDrag: true,
-        nightQuiet: false, nightFrom: 23, nightTo: 7, interval: 2.0,
+        nightQuiet: false, nightFrom: 23, nightTo: 7, interval: 2.0, topApps: 2,
         showCPU: true, showMemory: true, showDisk: true, showBattery: true, showNetwork: true,
     ]
 }
@@ -36,6 +36,7 @@ struct DashboardView: View {
     @AppStorage(Pref.showDisk) private var showDisk = true
     @AppStorage(Pref.showBattery) private var showBattery = true
     @AppStorage(Pref.showNetwork) private var showNetwork = true
+    @AppStorage(Pref.topApps) private var topApps = 2
     var openSettings: () -> Void
     var play: () -> Void
 
@@ -53,15 +54,18 @@ struct DashboardView: View {
             VStack(spacing: 0) {
                 if showCPU {
                     StatSection(icon: "gauge.with.dots.needle.67percent", title: "CPU: \(percent(s.cpu))", open: openActivityMonitor) {
-                        Detail("System", percent(s.cpuSystem)); Detail("User", percent(s.cpuUser)); Detail("Idle", percent(s.cpuIdle))
+                        Detail("System", percent(s.cpuSystem)); Detail("User", percent(s.cpuUser))
                         Sparkline(values: system.cpuHistory).frame(height: 22).padding(.top, 2)
+                        TopApps(title: "Most CPU, last minute", apps: s.topCPU, count: topApps, value: percent)
                     }
                 }
                 if showMemory {
                     StatSection(icon: "square.stack.3d.up.fill", title: "Memory: \(percent(s.memoryUsed / max(1, s.memoryTotal)))", open: openActivityMonitor) {
-                        Detail("Pressure", percent(s.memoryPressure)); Detail("App Memory", bytes(s.memoryApp))
+                        Pressure(level: s.pressureLevel, value: s.memoryPressure)
+                        Detail("App Memory", bytes(s.memoryApp))
                         Detail("Wired Memory", bytes(s.memoryWired)); Detail("Compressed", bytes(s.memoryCompressed))
                         Meter(value: s.memoryUsed / max(1, s.memoryTotal))
+                        TopApps(title: "Most memory", apps: s.topMemory, count: topApps, value: bytes)
                     }
                 }
                 if showDisk {
@@ -80,8 +84,23 @@ struct DashboardView: View {
                     }
                 }
                 if showNetwork {
-                    StatSection(icon: s.networkName.localizedCaseInsensitiveContains("wi-fi") ? "wifi" : (s.networkName == "Offline" ? "wifi.slash" : "cable.connector"), title: "Network: \(s.networkName)") {
-                        Detail("Local IP", s.localIP); Detail("Upload", rate(s.upload)); Detail("Download", rate(s.download))
+                    if let wifi = s.wifi {
+                        StatSection(icon: "wifi", title: wifi.name.map { "Wi-Fi: \($0)" } ?? "Wi-Fi") {
+                            HStack(spacing: 4) {
+                                Text("Security:").foregroundStyle(.secondary)
+                                Text(wifi.security).foregroundStyle(wifi.secure ? Color.primary : Color.orange)
+                                if !wifi.secure { Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(.orange) }
+                            }.font(.system(size: 11))
+                            Detail("Signal", "\(wifi.signal) (\(wifi.rssi) dBm)")
+                            Detail("Band", wifi.rate > 0 ? "\(wifi.band) · \(Int(wifi.rate)) Mbps" : wifi.band)
+                            Detail("Local IP", s.localIP)
+                            Traffic(up: s.upload, down: s.download)
+                        }
+                    } else {
+                        StatSection(icon: s.networkName == "Offline" ? "wifi.slash" : "cable.connector", title: "Network: \(s.networkName)") {
+                            Detail("Local IP", s.localIP)
+                            Traffic(up: s.upload, down: s.download)
+                        }
                     }
                 }
             }
@@ -184,6 +203,61 @@ private struct Detail: View {
             if let name { Text("\(name):").foregroundStyle(.secondary) }
             Text(value).monospacedDigit()
         }.font(.system(size: 11))
+    }
+}
+
+/// Upload and download on one line, each with its own arrow and color.
+private struct Traffic: View {
+    let up: Double
+    let down: Double
+    var body: some View {
+        HStack(spacing: 10) {
+            Label { Text("Up \(rate(up))") } icon: { Image(systemName: "arrow.up").foregroundStyle(.orange) }
+            Label { Text("Down \(rate(down))") } icon: { Image(systemName: "arrow.down").foregroundStyle(.blue) }
+        }
+        .labelStyle(TightLabel()).font(.system(size: 11)).monospacedDigit().padding(.top, 1)
+    }
+}
+
+private struct TightLabel: LabelStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        HStack(spacing: 2) { configuration.icon.font(.system(size: 9, weight: .bold)); configuration.title }
+    }
+}
+
+/// The kernel's own pressure level in words, with the percentage.
+private struct Pressure: View {
+    let level: Int
+    let value: Double
+    var body: some View {
+        let (word, color): (String, Color) = level >= 4 ? ("Critical", .red) : level >= 2 ? ("Warning", .orange) : ("Normal", .green)
+        HStack(spacing: 4) {
+            Text("Pressure:").foregroundStyle(.secondary)
+            Text(word).foregroundStyle(color)
+            Text(percent(value)).foregroundStyle(.secondary).monospacedDigit()
+        }.font(.system(size: 11))
+    }
+}
+
+/// The heaviest apps, name on the left and amount on the right.
+private struct TopApps: View {
+    let title: String
+    let apps: [AppUsage]
+    let count: Int
+    let value: (Double) -> String
+    var body: some View {
+        if count > 0 && !apps.isEmpty {
+            VStack(alignment: .leading, spacing: 1) {
+                Text(title).font(.system(size: 10)).foregroundStyle(.tertiary).padding(.top, 5)
+                ForEach(Array(apps.prefix(count).enumerated()), id: \.offset) { _, app in
+                    HStack {
+                        Text(app.name).lineLimit(1).truncationMode(.tail)
+                        Spacer(minLength: 8)
+                        Text(value(app.value)).monospacedDigit()
+                    }.font(.system(size: 11))
+                }
+            }
+        }
     }
 }
 
@@ -580,6 +654,7 @@ struct CatsTab: View {
 
 struct MonitorTab: View {
     @AppStorage(Pref.interval) private var interval = 2.0
+    @AppStorage(Pref.topApps) private var topApps = 2
     @AppStorage(Pref.showCPU) private var showCPU = true
     @AppStorage(Pref.showMemory) private var showMemory = true
     @AppStorage(Pref.showDisk) private var showDisk = true
@@ -589,6 +664,10 @@ struct MonitorTab: View {
         SettingsPage {
             SettingsCard(title: "Update") {
                 SettingsRow(title: "Every") { SettingsSegments(options: [("1 s", 1.0), ("2 s", 2.0), ("5 s", 5.0)], selection: $interval) }
+            }
+            SettingsCard(title: "Top apps") {
+                SettingsRow(title: "Show") { SettingsSegments(options: [("Off", 0), ("1", 1), ("2", 2), ("3", 3)], selection: $topApps) }
+                SettingsNote(text: "Apps using the most CPU over the last minute and the most memory now. Helpers count toward their app.")
             }
             SettingsCard(title: "Show in the panel") {
                 SettingsRow(title: "CPU") { SettingsSwitch(title: "CPU", isOn: $showCPU) }
@@ -600,6 +679,7 @@ struct MonitorTab: View {
                 SettingsRow(title: "Power") { SettingsSwitch(title: "Power", isOn: $showBattery) }
                 Divider()
                 SettingsRow(title: "Network") { SettingsSwitch(title: "Network", isOn: $showNetwork) }
+                SettingsNote(text: "The Wi-Fi name needs Location Services (a macOS rule). Your location is never read.")
             }
         }
     }

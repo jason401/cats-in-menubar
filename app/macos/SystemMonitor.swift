@@ -2,13 +2,17 @@ import Foundation
 import IOKit.ps
 import SystemConfiguration
 
-// Local system readings from public macOS APIs. Nothing is sent anywhere and no permission is needed.
+// Local system readings from public macOS APIs. Nothing is sent anywhere. Only the Wi-Fi name needs a
+// permission (Location Services); everything else works without one.
 struct SystemStats {
     var cpuUser = 0.0, cpuSystem = 0.0, cpuIdle = 1.0
     var cpu: Double { cpuUser + cpuSystem }
     var memoryTotal = Double(ProcessInfo.processInfo.physicalMemory)
     var memoryApp = 0.0, memoryWired = 0.0, memoryCompressed = 0.0, memoryPressure = 0.0
     var memoryUsed: Double { memoryApp + memoryWired + memoryCompressed }
+    var pressureLevel = 1                       // 1 normal, 2 warning, 4 critical (kernel's levels)
+    var topCPU: [AppUsage] = [], topMemory: [AppUsage] = []
+    var wifi: WiFiInfo?
     var diskTotal = 0.0, diskFree = 0.0
     var diskUsed: Double { max(0, diskTotal - diskFree) }
     var hasBattery = false, batteryLevel = 0.0, charging = false, onAC = true
@@ -28,6 +32,14 @@ final class SystemMonitor: ObservableObject {
     private var lastDisk = Date.distantPast
     private var lastBattery = Date.distantPast
     private var namedInterface: String?? = .none
+    private let apps = AppUsageSampler()
+    private var lastApps = Date.distantPast
+    private var lastWiFi = Date.distantPast
+    /// True while the panel is open: app lists and Wi-Fi details refresh every sample. Closed, apps are
+    /// read every 5 s (so the one-minute average is ready when the panel opens) and Wi-Fi every 10 s
+    /// (so the panel opens at its final size).
+    var detailed = false
+    var wantsApps = true, wantsWiFi = true
 
     func start(interval: Double) {
         timer?.invalidate()
@@ -48,6 +60,12 @@ final class SystemMonitor: ObservableObject {
         if now.timeIntervalSince(lastDisk) > 30 { readDisk(into: &next); lastDisk = now }
         if now.timeIntervalSince(lastBattery) > 10 { readBattery(into: &next); lastBattery = now }
         readNetwork(into: &next, elapsed: elapsed)
+        if wantsApps && (detailed || now.timeIntervalSince(lastApps) >= 5) {
+            (next.topCPU, next.topMemory) = apps.sample(now: now)
+            lastApps = now
+        } else if !wantsApps { next.topCPU = []; next.topMemory = [] }
+        if !wantsWiFi { next.wifi = nil }
+        else if detailed || now.timeIntervalSince(lastWiFi) >= 10 { next.wifi = WiFiInfo.read(); lastWiFi = now }
         next.thermal = ProcessInfo.processInfo.thermalState
         stats = next
         cpuHistory.append(next.cpu)
@@ -88,6 +106,7 @@ final class SystemMonitor: ObservableObject {
         var level: Int32 = 0
         var size = MemoryLayout<Int32>.size
         if sysctlbyname("kern.memorystatus_level", &level, &size, nil, 0) == 0 { stats.memoryPressure = Double(100 - level) / 100 }
+        if sysctlbyname("kern.memorystatus_vm_pressure_level", &level, &size, nil, 0) == 0 { stats.pressureLevel = Int(level) }
     }
 
     private func readDisk(into stats: inout SystemStats) {

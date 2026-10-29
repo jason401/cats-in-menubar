@@ -61,6 +61,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             openSettings: { [weak self] in self?.showSettings() }, play: { [weak self] in self?.play() }))
         host.sizingOptions = [.preferredContentSize]
         popover.contentViewController = host
+        NotificationCenter.default.addObserver(forName: NSPopover.didCloseNotification, object: popover, queue: .main) { [weak self] _ in
+            self?.system.detailed = false
+        }
+        WiFiNamePermission.shared.changed = { [weak self] in self?.system.sample() }
         AppModel.log("Launched pid \(ProcessInfo.processInfo.processIdentifier), Accessibility: \(MenuBarMonitor.trusted)")
         model.changed = { [weak self] in self?.applyOptions() }
         model.play = { [weak self] in self?.play() }
@@ -124,6 +128,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         syncLineup()
         colony.activity = defaults.integer(forKey: Pref.activity)
         habitatView?.showLanes = model.debug
+        system.wantsApps = defaults.integer(forKey: Pref.topApps) > 0 && (defaults.bool(forKey: Pref.showCPU) || defaults.bool(forKey: Pref.showMemory))
+        system.wantsWiFi = defaults.bool(forKey: Pref.showNetwork)
         systemUpdated(system.stats)
         let interval = max(defaults.double(forKey: Pref.interval), model.power.sampleFloor)
         if interval != monitorInterval { monitorInterval = interval; system.start(interval: interval) }
@@ -188,6 +194,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     @objc func togglePanel() {
         if popover.isShown { popover.performClose(nil); return }
         guard let button = statusItem.button else { return }
+        // Fresh app lists and Wi-Fi details while the panel is open. The Wi-Fi name needs Location
+        // Services, asked once, the first time the panel opens on Wi-Fi.
+        system.detailed = true
+        system.sample()
+        if system.stats.wifi != nil && defaults.bool(forKey: Pref.showNetwork) { WiFiNamePermission.shared.askIfNeeded() }
         // Size the panel before showing it; growing after it opens pushes it up behind the menu bar.
         if let view = popover.contentViewController?.view {
             view.layoutSubtreeIfNeeded()

@@ -16,7 +16,7 @@ mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources" "$PWD/build/module-cach
 xcrun swift -module-cache-path "$PWD/build/module-cache" tools/prepare_assets.swift "$APP/Contents/Resources/Cats"
 xcrun swiftc -swift-version 5 -O -target "$(uname -m)-apple-macos14.0" \
   -module-cache-path "$PWD/build/module-cache" \
-  -framework Cocoa -framework SwiftUI -framework ApplicationServices -framework IOKit -framework SystemConfiguration -framework ServiceManagement \
+  -framework Cocoa -framework SwiftUI -framework ApplicationServices -framework IOKit -framework SystemConfiguration -framework ServiceManagement -framework CoreWLAN -framework CoreLocation \
   app/macos/*.swift -o "$APP/Contents/MacOS/CatsInMenubar"
 "$APP/Contents/MacOS/CatsInMenubar" --render-iconset "$STAGING/AppIcon.iconset"
 iconutil -c icns "$STAGING/AppIcon.iconset" -o "$APP/Contents/Resources/AppIcon.icns"
@@ -41,6 +41,8 @@ cat > "$APP/Contents/Info.plist" <<PLIST
 <key>LSMinimumSystemVersion</key><string>14.0</string>
 <key>LSUIElement</key><true/>
 <key>NSHighResolutionCapable</key><true/>
+<key>NSLocationUsageDescription</key><string>Only to show the name of your Wi-Fi network in the panel. Your location is never read.</string>
+<key>NSLocationWhenInUseUsageDescription</key><string>Only to show the name of your Wi-Fi network in the panel. Your location is never read.</string>
 </dict></plist>
 PLIST
 codesign --force --sign "$IDENTITY" --identifier local.catsinmenubar "$APP"

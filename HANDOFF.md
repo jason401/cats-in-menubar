@@ -35,6 +35,8 @@ Native macOS 14+ development app. Standalone bundle at `build/Cats in Menubar.ap
 - macOS 27 status icons belong to `com.apple.MenuBarAgent`; AX frames on other displays are mapped back to the primary display. Real bar height comes from `screen.frame.maxY - visibleFrame.maxY` (30 pt).
 - Unreliable scans keep the last good layout; app switches do not hide cats.
 - Power levels (`Power.swift`): full/eco/low by smoothed CPU (eco above 45 %, low above 75 %, back below 30 %), Low Power Mode or heat. Animation 30/15/8 fps, scan 1/2/4 s. Measured about 2–5 % of one core.
+- Panel top apps (`AppUsage.swift`): CPU over the last minute and current memory per app, helpers counted toward their responsible app (Activity Monitor's rule via `responsibility_get_pid_responsible_for_pid`). Only this user's processes are readable. Sampled every 5 s with the panel closed, every sample while open; about 1 ms each. Count 0–3 in Settings → Monitor (default 2).
+- Wi-Fi (CoreWLAN): security, signal, band and rate without permission; the network name needs Location Services, asked once when the panel first opens on Wi-Fi. Location is never read. Up and down speeds share one line.
 - Dedicated signing identity **Cats in Menubar Local Signing** (`tools/setup_signing.sh`) keeps the Accessibility grant across rebuilds. Status log: `~/Library/Logs/CatsInMenubar.log`.
 
 ## Verification
