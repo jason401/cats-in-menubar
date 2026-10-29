@@ -425,6 +425,17 @@ struct GeneralTab: View {
                 SettingsNote(text: model.status)
             }
             UpdatesCard(updater: Updater.shared)
+            SettingsCard(title: "Folders") {
+                SettingsRow(title: "Open") {
+                    SettingsAction(title: "App data") { DataFolders.open(Updater.support) }
+                        .help("Update copy of the source and update state")
+                    SettingsAction(title: "Logs") { DataFolders.reveal(AppModel.logURL) }
+                        .help("CatsInMenubar.log")
+                    SettingsAction(title: "App") { DataFolders.reveal(Bundle.main.bundleURL) }
+                        .help(Bundle.main.bundlePath)
+                }
+                SettingsNote(text: "Settings themselves live in macOS preferences (local.catsinmenubar).")
+            }
             SettingsCard(title: "About") {
                 SettingsRow(title: "Version") {
                     Text(version).foregroundStyle(.secondary)
@@ -439,6 +450,19 @@ private var version: String {
     let short = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "–"
     let revision = (Bundle.main.object(forInfoDictionaryKey: "CatsSourceRevision") as? String ?? "").prefix(7)
     return revision.isEmpty ? short : "\(short) (\(revision))"
+}
+
+// The places the app keeps things, opened in Finder from Settings (as in AI Illuminati).
+enum DataFolders {
+    static func open(_ folder: URL) {
+        try? FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        NSWorkspace.shared.open(folder)
+    }
+    /// Opens the enclosing folder with the item selected.
+    static func reveal(_ item: URL) {
+        if FileManager.default.fileExists(atPath: item.path) { NSWorkspace.shared.activateFileViewerSelecting([item]) }
+        else { open(item.deletingLastPathComponent()) }
+    }
 }
 
 /// Like AI Illuminati's "Updates & storage": checks run on their own, installing waits for the button.
