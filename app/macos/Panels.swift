@@ -90,6 +90,7 @@ struct DashboardView: View {
             if s.thermal == .serious || s.thermal == .critical {
                 Label("Your Mac is running hot", systemImage: "thermometer.high").font(.caption).foregroundStyle(.orange)
             }
+            UpdateBanner(updater: Updater.shared)
             HStack(spacing: 6) {
                 PanelButton(icon: model.catsAway ? "door.left.hand.open" : "house.fill", label: model.catsAway ? "Let out" : "Call home") { model.home?() }
                     .disabled(paused || !model.access)
@@ -101,6 +102,19 @@ struct DashboardView: View {
         }
         .padding(14)
         .frame(width: 300)
+    }
+}
+
+private struct UpdateBanner: View {
+    @ObservedObject var updater: Updater
+    var body: some View {
+        if updater.available != nil {
+            HStack {
+                Label("New version available", systemImage: "arrow.down.circle.fill").font(.caption)
+                Spacer()
+                Button("Update Now") { updater.install() }.controlSize(.small).disabled(updater.checking)
+            }
+        }
     }
 }
 
@@ -378,12 +392,44 @@ struct GeneralTab: View {
                 SettingsRow(title: "Log") { SettingsAction(title: "Open log") { NSWorkspace.shared.open(AppModel.logURL) } }
                 SettingsNote(text: model.status)
             }
+            UpdatesCard(updater: Updater.shared)
             SettingsCard(title: "About") {
                 SettingsRow(title: "Version") {
-                    Text(Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "–").foregroundStyle(.secondary)
+                    Text(version).foregroundStyle(.secondary)
                 }
-                SettingsNote(text: "Everything stays on this Mac: no network requests, no analytics.")
+                SettingsNote(text: "No analytics. The only network request is the update check against the public GitHub repository.")
             }
+        }
+    }
+}
+
+private var version: String {
+    let short = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "–"
+    let revision = (Bundle.main.object(forInfoDictionaryKey: "CatsSourceRevision") as? String ?? "").prefix(7)
+    return revision.isEmpty ? short : "\(short) (\(revision))"
+}
+
+/// Like AI Illuminati's "Updates & storage": checks run on their own, installing waits for the button.
+struct UpdatesCard: View {
+    @ObservedObject var updater: Updater
+    var body: some View {
+        SettingsCard(title: "Updates") {
+            if updater.installed {
+                SettingsRow(title: "Check automatically") {
+                    SettingsSwitch(title: "Check automatically", isOn: $updater.enabled).help("Checks the stable branch 60 seconds after launch and every 3 hours. Never installs on its own.")
+                }
+                Divider()
+                SettingsRow(title: "New version") {
+                    if updater.available != nil {
+                        SettingsAction(title: "Update Now") { updater.install() }.disabled(updater.checking)
+                    } else {
+                        SettingsAction(title: "Check Now") { updater.check() }.disabled(updater.checking)
+                    }
+                }
+            }
+            if !updater.installed {
+                SettingsNote(text: "This development copy does not update. The copy in /Applications checks the stable branch.")
+            } else if !updater.status.isEmpty { SettingsNote(text: updater.status) }
         }
     }
 }

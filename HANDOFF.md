@@ -6,6 +6,12 @@ Current state only. Earlier iterations (procedural cats, 21-frame and 62-frame s
 
 Native macOS 14+ development app. Standalone bundle at `build/Cats in Menubar.app`; nothing is installed. Private repository https://github.com/jason401/cats-in-menubar (commit and push to `main` after passing tests). 1–3 cats live in empty menu bar space, never deliberately enter menu or icon regions, react when space is taken, and mostly rest or play rather than move constantly.
 
+## Releases and updates
+
+- Repository is public (2026-10-29). `main` is development; `stable` is what installed apps follow (`git push origin main:stable`, fast-forward only).
+- `Updater.swift` and `tools/install_app.py` are adapted from AI Illuminati: check stable (60 s, then 3 h), Update Now runs `tools/test.sh` in the app-owned checkout, then the installer verifies the signature against the running app, swaps `/Applications/Cats in Menubar.app`, starts it and rolls back unless it acknowledges. Builds record `CatsSourceRevision` in Info.plist. Waits while a cat is being dragged; restores the login item.
+- Development builds in `build/` never update; `--install-self` moves one into `/Applications` explicitly.
+
 ## Artwork
 
 - One authored sheet per coat: `app/macos/Resources/Cats/sheets/<coat>.png|json`, 8 × 16 cells of 102 × 68 px (adult at 2x), 70 poses, 58 empty cells. Orange, white, black, silver and cream exist; tuxedo, calico and Siamese fall back to orange. Their GPT drafts in `design/coat-drafts/` were not installed because the markings change between poses (ART_GUIDE 7).

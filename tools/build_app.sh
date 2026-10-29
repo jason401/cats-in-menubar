@@ -20,7 +20,12 @@ xcrun swiftc -swift-version 5 -O -target "$(uname -m)-apple-macos14.0" \
   app/macos/*.swift -o "$APP/Contents/MacOS/CatsInMenubar"
 "$APP/Contents/MacOS/CatsInMenubar" --render-iconset "$STAGING/AppIcon.iconset"
 iconutil -c icns "$STAGING/AppIcon.iconset" -o "$APP/Contents/Resources/AppIcon.icns"
-cat > "$APP/Contents/Info.plist" <<'PLIST'
+# The updater runs this bundled installer to swap /Applications safely.
+cp tools/install_app.py "$APP/Contents/Resources/"
+# The built commit is how the updater compares this app with the stable branch.
+REVISION=$(git rev-parse HEAD)
+BUILD=$(git rev-list --count HEAD)
+cat > "$APP/Contents/Info.plist" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0"><dict>
@@ -31,7 +36,8 @@ cat > "$APP/Contents/Info.plist" <<'PLIST'
 <key>CFBundleDisplayName</key><string>Cats in Menubar</string>
 <key>CFBundlePackageType</key><string>APPL</string>
 <key>CFBundleShortVersionString</key><string>0.1.0</string>
-<key>CFBundleVersion</key><string>1</string>
+<key>CFBundleVersion</key><string>$BUILD</string>
+<key>CatsSourceRevision</key><string>$REVISION</string>
 <key>LSMinimumSystemVersion</key><string>14.0</string>
 <key>LSUIElement</key><true/>
 <key>NSHighResolutionCapable</key><true/>

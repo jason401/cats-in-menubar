@@ -18,6 +18,21 @@ Create the dedicated local signing identity once, then build:
 zsh tools/setup_signing.sh
 ```
 
+To install, build once and move it to `/Applications` (the installed copy updates itself afterwards):
+
+```sh
+zsh tools/build_app.sh
+open "build/Cats in Menubar.app" --args --install-self
+```
+
+### Updates
+
+Settings → General → **Updates**. The copy in `/Applications` checks the public repository's `stable` branch 60 seconds after launch and every 3 hours, and only *checks*. When a new version exists, **Update Now** appears in Settings and in the panel; nothing installs until you click it. It then tests, builds and signs that version on this Mac (`~/Library/Application Support/Cats in Menubar/source`; your development folder is never touched), swaps the app, and keeps the previous app if anything fails or the new app does not start. If you are holding a cat, it waits until you put it down. Log: `~/Library/Application Support/Cats in Menubar/updates/install.log`.
+
+Developers commit to `main`; only tested commits go to stable with `git push origin main:stable`.
+
+### Development build
+
 Double-click **Build Cats in Menubar.command**, or run:
 
 ```sh

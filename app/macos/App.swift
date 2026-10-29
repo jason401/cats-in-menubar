@@ -83,6 +83,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         NotificationCenter.default.addObserver(self, selector: #selector(powerStateChanged), name: .NSProcessInfoPowerStateDidChange, object: nil)
         startTimers()
         scan()
+        let updater = Updater.shared
+        updater.isBusy = { [weak self] in self?.habitatView?.dragging != nil }
+        updater.start()
+        if CommandLine.arguments.contains("--install-self") { updater.installSelf() }
         if !defaults.bool(forKey: "hasLaunched") || !MenuBarMonitor.trusted {
             showSettings(); defaults.set(true, forKey: "hasLaunched")
         }
