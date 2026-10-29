@@ -363,6 +363,8 @@ struct SettingsPopup: NSViewRepresentable {
         context.coordinator.parent = self
         if button.itemTitles != titles { button.removeAllItems(); button.addItems(withTitles: titles) }
         button.selectItem(at: selection)
+        // Exactly one checkmark: a reused popup must not keep the check from the row it showed before.
+        for (index, item) in button.itemArray.enumerated() { item.state = index == selection ? .on : .off }
     }
     func sizeThatFits(_ proposal: ProposedViewSize, nsView: NSPopUpButton, context: Context) -> CGSize? {
         CGSize(width: proposal.width ?? 184, height: 24)
@@ -491,22 +493,30 @@ struct CatsTab: View {
                 }
             }
             SettingsCard(title: "Your cats") {
+                // Bindings read the lineup by row, and the lineup can shrink before SwiftUI drops the row:
+                // every access is bounds-checked (an out-of-range read crashed the app).
                 ForEach(model.lineup.indices, id: \.self) { i in
                     if i > 0 { Divider() }
                     VStack(alignment: .leading, spacing: 4) {
                         HStack(spacing: 8) {
-                            Image(nsImage: CatDrawing.thumbnail(model.lineup[i])).frame(width: 46, height: 30)
+                            if model.lineup.indices.contains(i) { Image(nsImage: CatDrawing.thumbnail(model.lineup[i])).frame(width: 46, height: 30) }
                             Text("Cat \(i + 1)").font(.system(size: 11, weight: .medium))
                             Spacer()
                         }
                         HStack(spacing: 6) {
                             SettingsMenu(options: CatAppearance.names.enumerated().map { ($0.element, $0.offset) }, selection: Binding(
-                                get: { model.lineup[i].coat },
-                                set: { value in var appearance = model.lineup[i]; appearance.coat = value; model.configureCat?(i, appearance) }))
+                                get: { model.lineup.indices.contains(i) ? model.lineup[i].coat : 0 },
+                                set: { value in
+                                    guard model.lineup.indices.contains(i) else { return }
+                                    var appearance = model.lineup[i]; appearance.coat = value; model.configureCat?(i, appearance)
+                                }))
                                 .accessibilityLabel("Cat \(i + 1) color")
                             SettingsMenu(options: CatSize.allCases.map { ($0.label, $0) }, selection: Binding(
-                                get: { model.lineup[i].size },
-                                set: { value in var appearance = model.lineup[i]; appearance.size = value; model.configureCat?(i, appearance) }))
+                                get: { model.lineup.indices.contains(i) ? model.lineup[i].size : .adult },
+                                set: { value in
+                                    guard model.lineup.indices.contains(i) else { return }
+                                    var appearance = model.lineup[i]; appearance.size = value; model.configureCat?(i, appearance)
+                                }))
                                 .frame(width: 91).accessibilityLabel("Cat \(i + 1) size")
                         }
                     }.padding(.horizontal, 10).padding(.vertical, 5)
