@@ -427,6 +427,24 @@ func runSelfTests() {
         }
         expect(firstSpeed < 40 && ticks < 45, "an escape accelerates and is out within 1.5 s: first \(firstSpeed) pt/s, \(ticks) ticks")
         expect(fastestLegs <= Colony.runSpeed * 1.01, "escape strides lengthen instead of the legs blurring: \(fastestLegs)")
+        // Space shrinking by a few points: no nudge. A cat facing the menu turns in place first,
+        // then runs a few strides clear of the edge.
+        let nudge = Colony(count: 1, random: { 0.5 })
+        nudge.updateLanes([Lane(lower: 0, upper: 1000)])
+        let r = nudge.cats[0].radius
+        nudge.cats[0].x = 300; nudge.cats[0].destination = 300; nudge.cats[0].direction = -1
+        nudge.cats[0].visible = true; nudge.cats[0].hiddenFor = 0
+        nudge.updateLanes([Lane(lower: 300 - r + 4, upper: 1000)])
+        var slidWhileTurning = false, facedOut = false, farthest = 0.0
+        for _ in 0..<60 {
+            let before = nudge.cats[0].x, turning = nudge.cats[0].escaping && nudge.cats[0].turnHold > 0
+            nudge.step(1.0 / 30)
+            if turning && nudge.cats[0].x != before { slidWhileTurning = true }
+            if nudge.cats[0].escaping && nudge.cats[0].turnHold <= 0 { facedOut = nudge.cats[0].direction == 1 }
+            farthest = max(farthest, nudge.cats[0].x)
+        }
+        expect(!slidWhileTurning && facedOut, "a cat facing the shrinking side turns before it moves")
+        expect(farthest - (300 + 4) > 30 * nudge.cats[0].size.scale, "a small shrink makes the cat run clear, not get nudged: \(farthest)")
         // A far tower is run to over the icons, with the jump only at the tower.
         let far = Colony(count: 1, random: { 0.5 })
         far.updateLanes([Lane(lower: 0, upper: 300)])

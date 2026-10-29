@@ -430,23 +430,34 @@ final class Colony {
     func escape(_ i: Int, _ dt: Double) {
         guard !lanes.isEmpty else { cats[i].visible = false; return }
         let x = cats[i].x
-        let spots = lanes.map { clamp(x, to: $0, for: i) }
-        guard let spot = spots.min(by: { abs($0 - x) < abs($1 - x) }) else { return }
+        guard let lane = lanes.min(by: { abs(clamp(x, to: $0, for: i) - x) < abs(clamp(x, to: $1, for: i) - x) }) else { return }
+        let spot = clamp(x, to: lane, for: i), way: Double = spot > x ? 1 : -1
         if cats[i].action != .running { start(i, .running, for: 3) }
-        let fresh = !cats[i].escaping
-        cats[i].escaping = true
-        cats[i].direction = spot > x ? 1 : -1
-        if fresh { cats[i].velocity = 0; cats[i].escapeTop = max(70 * cats[i].size.scale, abs(spot - x)) }
+        if !cats[i].escaping {
+            cats[i].escaping = true
+            cats[i].velocity = 0
+            cats[i].escapeTop = max(70 * cats[i].size.scale, abs(spot - x) / 0.8)
+            // Facing the wrong way: turn first, so the turn frames never slide.
+            if cats[i].direction != way { cats[i].direction = way; cats[i].turnHold = Colony.turnTime }
+        }
+        cats[i].phase += dt; cats[i].elapsed += dt
+        if cats[i].turnHold > 0 { cats[i].turnHold = max(0, cats[i].turnHold - dt); return }
+        cats[i].direction = way
         // A real dash: it speeds up quickly to a top speed set so even a far escape is out within about a second.
         let speed = min(cats[i].escapeTop, abs(cats[i].velocity) + 700 * cats[i].size.scale * dt)
-        cats[i].velocity = cats[i].direction * speed
+        cats[i].velocity = way * speed
         let step = min(abs(spot - x), speed * dt)
-        cats[i].x += cats[i].direction * step
+        cats[i].x += way * step
         // Faster than a gallop, strides lengthen instead of the legs blurring.
         cats[i].gait += step / max(1, speed / (Self.runSpeed * cats[i].size.scale))
-        cats[i].phase += dt
-        if abs(spot - cats[i].x) < 0.01 { cats[i].x = spot; cats[i].velocity = 0; start(i, .sitting, for: 1 + random() * 2) }
         cats[i].destination = cats[i].x
+        guard abs(spot - cats[i].x) < 0.01 else { return }
+        // Out from under the obstacle: keep running a few strides clear of the edge and brake,
+        // instead of stopping right where the edge pushed it.
+        cats[i].x = spot
+        cats[i].velocity = way * min(speed, Self.runSpeed * cats[i].size.scale)
+        start(i, .running, for: 3)
+        cats[i].destination = clamp(spot + way * 36 * cats[i].size.scale, to: lane, for: i)
     }
     // MARK: Cat tower
     var homeCount: Int { cats.filter(\.home).count }
