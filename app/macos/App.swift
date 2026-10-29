@@ -184,11 +184,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             if interval != monitorInterval { monitorInterval = interval; system.start(interval: interval) }
         }
         colony.quiet = quietNow
-        let title = defaults.bool(forKey: Pref.cpuInBar) ? String(format: " %d%%", Int((stats.cpu * 100).rounded())) : ""
-        if statusItem.button?.title != title {
-            statusItem.button?.title = title
-            statusItem.button?.font = .monospacedDigitSystemFont(ofSize: 12, weight: .regular)
-        }
     }
     @objc func togglePanel() {
         if popover.isShown { popover.performClose(nil); return }

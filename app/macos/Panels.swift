@@ -8,11 +8,11 @@ enum Pref {
     static let fixedLineup = "useCustomLineup", lineup = "catLineup"
     static let activity = "activity", adaptivePower = "adaptivePower", allowDrag = "allowDrag"
     static let nightQuiet = "nightQuiet", nightFrom = "nightFrom", nightTo = "nightTo"
-    static let cpuInBar = "showCPUInBar", interval = "monitorInterval"
+    static let interval = "monitorInterval"
     static let showCPU = "showCPU", showMemory = "showMemory", showDisk = "showDisk", showBattery = "showBattery", showNetwork = "showNetwork"
     static let defaults: [String: Any] = [
         count: 3, fixedLineup: false, paused: false, quiet: false, activity: 1, adaptivePower: true, allowDrag: true,
-        nightQuiet: false, nightFrom: 23, nightTo: 7, cpuInBar: false, interval: 2.0,
+        nightQuiet: false, nightFrom: 23, nightTo: 7, interval: 2.0,
         showCPU: true, showMemory: true, showDisk: true, showBattery: true, showNetwork: true,
     ]
 }
@@ -52,35 +52,35 @@ struct DashboardView: View {
             }
             VStack(spacing: 0) {
                 if showCPU {
-                    StatSection(icon: "gauge.with.dots.needle.67percent", tint: .blue, title: "CPU: \(percent(s.cpu))") {
+                    StatSection(icon: "gauge.with.dots.needle.67percent", title: "CPU: \(percent(s.cpu))", open: openActivityMonitor) {
                         Detail("System", percent(s.cpuSystem)); Detail("User", percent(s.cpuUser)); Detail("Idle", percent(s.cpuIdle))
                         Sparkline(values: system.cpuHistory).frame(height: 22).padding(.top, 2)
                     }
                 }
                 if showMemory {
-                    StatSection(icon: "square.stack.3d.up.fill", tint: .purple, title: "Memory: \(percent(s.memoryUsed / max(1, s.memoryTotal)))") {
+                    StatSection(icon: "square.stack.3d.up.fill", title: "Memory: \(percent(s.memoryUsed / max(1, s.memoryTotal)))", open: openActivityMonitor) {
                         Detail("Pressure", percent(s.memoryPressure)); Detail("App Memory", bytes(s.memoryApp))
                         Detail("Wired Memory", bytes(s.memoryWired)); Detail("Compressed", bytes(s.memoryCompressed))
                         Meter(value: s.memoryUsed / max(1, s.memoryTotal))
                     }
                 }
                 if showDisk {
-                    StatSection(icon: "externaldrive.fill", tint: .orange, title: "Storage: \(percent(s.diskUsed / max(1, s.diskTotal))) used") {
+                    StatSection(icon: "externaldrive.fill", title: "Storage: \(percent(s.diskUsed / max(1, s.diskTotal))) used") {
                         Detail(nil, "\(bytes(s.diskUsed)) / \(bytes(s.diskTotal))")
                         Meter(value: s.diskUsed / max(1, s.diskTotal))
                     }
                 }
                 if showBattery {
                     if s.hasBattery {
-                        StatSection(icon: s.charging ? "battery.100.bolt" : "battery.75", tint: .green, title: "Battery: \(Int(s.batteryLevel * 100))%") {
+                        StatSection(icon: s.charging ? "battery.100.bolt" : "battery.75", title: "Battery: \(Int(s.batteryLevel * 100))%") {
                             Detail(nil, s.charging ? "Charging" : (s.onAC ? "On power adapter" : "On battery"))
                         }
                     } else {
-                        StatSection(icon: "bolt.fill", tint: .green, title: "Power: Adapter") { EmptyView() }
+                        StatSection(icon: "bolt.fill", title: "Power: Adapter") { EmptyView() }
                     }
                 }
                 if showNetwork {
-                    StatSection(icon: s.networkName.localizedCaseInsensitiveContains("wi-fi") ? "wifi" : (s.networkName == "Offline" ? "wifi.slash" : "cable.connector"), tint: .teal, title: "Network: \(s.networkName)") {
+                    StatSection(icon: s.networkName.localizedCaseInsensitiveContains("wi-fi") ? "wifi" : (s.networkName == "Offline" ? "wifi.slash" : "cable.connector"), title: "Network: \(s.networkName)") {
                         Detail("Local IP", s.localIP); Detail("Upload", rate(s.upload)); Detail("Download", rate(s.download))
                     }
                 }
@@ -118,24 +118,59 @@ private struct UpdateBanner: View {
     }
 }
 
+private func openActivityMonitor() {
+    NSWorkspace.shared.openApplication(at: URL(fileURLWithPath: "/System/Applications/Utilities/Activity Monitor.app"),
+                                       configuration: NSWorkspace.OpenConfiguration())
+}
+
+/// A badge with cat ears: the tile's top corners grow two small triangles.
+private struct CatTile: Shape {
+    func path(in rect: CGRect) -> Path {
+        let ear = rect.width * 0.3, rise = rect.height * 0.22, top = rect.minY + rise
+        var path = Path(roundedRect: CGRect(x: rect.minX, y: top, width: rect.width, height: rect.height - rise), cornerRadius: rect.width * 0.27)
+        for x in [rect.minX + rect.width * 0.08, rect.maxX - rect.width * 0.08 - ear] {
+            path.move(to: CGPoint(x: x, y: top + rise * 0.9))
+            path.addLine(to: CGPoint(x: x + (x < rect.midX ? ear * 0.2 : ear * 0.8), y: rect.minY))
+            path.addLine(to: CGPoint(x: x + ear, y: top + rise * 0.9))
+            path.closeSubpath()
+        }
+        return path
+    }
+}
+
+/// Hover state in a class: the Command Line Tools toolchain lacks the macro plugin behind @State.
+private final class Hover: ObservableObject { @Published var on = false }
+
 private struct StatSection<Content: View>: View {
     let icon: String
-    let tint: Color
     let title: String
+    /// Clicking the section opens a related app (Activity Monitor for CPU and memory).
+    var open: (() -> Void)? = nil
     @ViewBuilder var content: Content
+    @StateObject private var hover = Hover()
+    private var hovering: Bool { hover.on }
     var body: some View {
         HStack(alignment: .top, spacing: 12) {
-            // Small colored badge, in the spirit of System Settings icons.
-            Image(systemName: icon).font(.system(size: 13, weight: .semibold)).foregroundStyle(.white)
-                .frame(width: 26, height: 26)
-                .background(RoundedRectangle(cornerRadius: 7).fill(tint.gradient))
+            // One quiet color for every badge; the cat ears tie the dashboard to the cats.
+            Image(systemName: icon).font(.system(size: 12, weight: .semibold)).foregroundStyle(.primary)
+                .frame(width: 26, height: 26).padding(.top, 5)
+                .background(CatTile().fill(Color.primary.opacity(hovering && open != nil ? 0.22 : 0.12)))
             VStack(alignment: .leading, spacing: 2) {
-                Text(title).font(.system(size: 13, weight: .semibold))
+                HStack(spacing: 4) {
+                    Text(title).font(.system(size: 13, weight: .semibold))
+                    if open != nil {
+                        Image(systemName: "arrow.up.forward.app").font(.system(size: 10)).foregroundStyle(.secondary).opacity(hovering ? 1 : 0)
+                    }
+                }
                 content
             }
             Spacer(minLength: 0)
         }
         .padding(.horizontal, 12).padding(.vertical, 9)
+        .contentShape(Rectangle())
+        .onHover { hover.on = $0 }
+        .onTapGesture { open?() }
+        .help(open == nil ? "" : "Open Activity Monitor")
         .overlay(alignment: .bottom) { Divider().opacity(0.6) }
     }
 }
@@ -354,7 +389,6 @@ private let hours = (0..<24).map { (String(format: "%02d:00", $0), $0) }
 struct GeneralTab: View {
     @ObservedObject var model: AppModel
     @ObservedObject var state: SettingsState
-    @AppStorage(Pref.cpuInBar) private var cpuInBar = false
     var body: some View {
         SettingsPage {
             SettingsCard(title: "App") {
@@ -368,10 +402,6 @@ struct GeneralTab: View {
                     }))
                 }
                 if let error = state.loginError { SettingsNote(text: error) }
-                Divider()
-                SettingsRow(title: "CPU in menu bar") {
-                    SettingsSwitch(title: "CPU in menu bar", isOn: $cpuInBar).help("Shows the CPU percentage next to the cat tower icon.")
-                }
             }
             SettingsCard(title: "Access") {
                 SettingsRow(title: "Accessibility") {
