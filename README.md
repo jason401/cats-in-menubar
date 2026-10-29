@@ -33,7 +33,7 @@ Developers commit to `main`; only tested commits go to stable with `git push ori
 
 ### Development build
 
-Double-click **Build Cats in Menubar.command**, or run:
+Double-click **Build Cats in Menubar.command** to build and install this checkout, or run (the build stays in `build/`):
 
 ```sh
 zsh tools/build_app.sh
