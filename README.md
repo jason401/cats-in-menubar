@@ -2,15 +2,11 @@
 
 A native macOS menu bar playground for two or three tiny cats. They nap, loaf, stretch, groom, walk, sometimes run or hunt an imaginary bug, chase one another, and play with a ball in the space between menus and status icons.
 
-## Current artwork: native 2x, 16-frame slow walk
+## Artwork
 
-The build now reads one native 2x master image: `app/macos/Resources/Cats/sheets/orange.png`, with `orange.json` describing its coordinates and walk order. It has 8 columns × 16 rows (128 cells), each 102×68 px. The full image is 816×1088 px. Seventy cells are occupied and 58 are transparent for future artwork; 128 is capacity, not 128 completed poses.
+Each coat is one authored sprite sheet in `app/macos/Resources/Cats/sheets/`: `<coat>.png` (8 × 16 cells of 102 × 68 px, adult cat at 2x) and `<coat>.json`, whose `animations` table names every behavior's cells. The app looks poses up only by those names, so art can be reordered or lengthened by editing that table. Orange, white and black have their own sheets; the other five coats use orange until theirs arrive. The build measures each pose and writes 1x/2x menu bar copies for the three cat sizes; it never rescales a single pose. Rules for drawing and importing art are in `design/ART_GUIDE.md`; behavior timing and connections in `design/cat-behaviors.docx`.
 
-The user-supplied 16-phase walk and leg map are archived in `design/native-walk16/`. The adopted walk repairs the sliced limb connections with built-in ImageGen while retaining that pose sequence. The other 54 poses retain their previous artwork. The walk is one unbroken run of cells, 4–19. `orange.json` names every behavior's cells (`animations`: stand, idle, walk, run, turn, sitDown, sit, …), and the app looks poses up only by those names, so art can be reordered or lengthened by editing that table. Adult walking is 6 pt/s, acceleration 12 pt/s², with a 9.6 pt cycle: 16 pictures over 1.6 seconds. Size scales speed and stride together.
-
-The master is already adult 2x resolution. Builds generate 1x/2x sheets at the three cat sizes; they do not depend on a larger runtime art sheet. The high-resolution inputs remain only as authoring history. The actual 1x adult cell is 51×34 px. Runtime geometry uses the sheet's own pixels-per-point metadata, so changing resolution does not shrink the cat.
-
-`tools/preview_native_walk.cjs <built orange folder> <output folder>` creates a standalone player using the exact baked 1x/2x images, with frame stepping, size selection, separate fore/hind views and the 16→1 wrap. The current generated player is `build/previews/native-walk16/review.html`. The older artwork descriptions below describe previous iterations.
+Adult walking is 6 pt/s with a 9.6 pt stride (16 pictures over 1.6 s). Size scales speed and stride together: Kitten 64%, Young 82%, Adult 100%.
 
 ## Run
 
@@ -69,7 +65,7 @@ Status changes are appended to `~/Library/Logs/CatsInMenubar.log`. `open -n "bui
 ## Layout
 
 - `app/macos/Habitat.swift`: interval geometry and behavior simulation.
-- `app/macos/SpriteAtlas.swift`: approved PNG sprite frames, animation timing and cached color variants.
+- `app/macos/SpriteAtlas.swift`: sprite sheets, named poses, animation timing and transitions.
 - `app/macos/CatDrawing.swift`: overlay drawing and cached cat thumbnails.
 - `app/macos/TowerIcon.swift`: cat-tower menu bar and app icon.
 - `app/macos/MenuBarMonitor.swift`: background Accessibility layout scan.
@@ -79,24 +75,8 @@ Status changes are appended to `~/Library/Logs/CatsInMenubar.log`. `open -n "bui
 - `tools/`: build and verification scripts.
 
 
-## Cat collection
+## Cats
 
-Each of the eight cats has its own PNG sprite sheet in `app/macos/Resources/Cats/`: orange, black, white, silver tabby, cream tabby, tuxedo, calico and Siamese. No coat is generated with runtime color filters or rectangular masks. Orange keeps the approved source artwork; the other sheets were made with the built-in ImageGen tool using the approved artwork as reference. `design/asset-prompts-v2.json` records the generation prompts.
+By default each launch selects distinct random coats, random sizes and random positions in detected free space. In Settings → Cats → Your cats, select each coat and size. Editing enables **Keep my cats** to save the lineup; **Shuffle cats** randomizes immediately. Count is 1–3 (default 3).
 
-The held artwork in `design/held-cats-v1.png` has three dedicated poses per cat: neutral, body trailing left, body trailing right. The build prepares a separate folder per cat with 21 cropped images: six walk, six run, six lifestyle and three held poses. `tools/prepare_assets.swift` detects each cat's alpha bounds, ignores stray transparent pixels, and writes per-cat anchor metadata. Images and metadata are bundled inside the standalone app; source sheets are not read at runtime.
-
-Three sizes preserve their artwork's proportions: Kitten 64%, Young 82%, Adult 100%. Movement speed and acceleration scale with size: normal walking is 9.6 / 12.3 / 15 pt/s. Stride length scales as well, so a small cat does not cycle its feet faster than an adult at its normal walking speed. Walk frames share a foot baseline and a head landmark rather than the tail-inclusive crop center.
-
-Click and hold a cat to use its dangling sprite. Drag right and its body trails left; drag left and it trails right. A damped spring settles the sway when the mouse stops. Release returns to grooming. Held cats stay inside their connected safe interval. The original native vector drawing remains a development fallback, but tests require all eight independent artwork sets and all 24 held sprites to be bundled.
-
-By default each launch selects distinct random coats, random sizes and random positions in detected free space. In Settings → Cats → Your cats, select each coat and size. Editing enables **Keep my cats** to save the lineup. Turn it off for random appearances next launch; **Shuffle cats** randomizes immediately. Positions are always randomized, including for a saved lineup. Count remains 1–3 (default 3).
-
-`tools/test.sh` builds and runs the simulation, renders the full collection and held poses, and creates a size/speed comparison GIF in `build/previews/`. The source artwork is still a small set of illustrated key poses, not a fully hand-authored in-between animation. Pose-to-pose artwork consistency can be refined further after visual feedback.
-
-### Current v3 artwork preview
-
-All coat selections currently display the new orange animation set; selected coat and size preferences are preserved. The build imports 18 source sheets (62 poses) from `app/macos/Resources/Cats/v3/orange/`. To enable a future coat, add a complete set with the same filenames and pose order in `v3/<coat>/` and rebuild; missing sets fall back to orange. See `design/ART_GUIDE.md` section 7 for the current pipeline. Earlier 21-frame artwork remains archived in the source tree.
-
-The full 0–61 animation sequence and transition map is in `design/ANIMATION_MAP.md`. Walk/run artwork was redrawn (originals/prompts in `design/gait-redraw-v4/`). All sizes now share time-based walk10/run16/creep5 fps; only physical travel speed and acceleration vary with size. This replaces the earlier distance-based clock description.
-
-Motion v5 normalizes walk/run by authored eye landmarks instead of tail-inclusive width, preserving head size when running. Stretch now returns to standing. Source assets, previous images and prompts: `design/motion-v5/`. See ART_GUIDE section10 for registration requirements.
+Click and hold a cat to pick it up: its body trails opposite to the drag and settles with a damped spring. Release returns to grooming. Held cats stay inside their connected free interval, and can be carried across a MacBook notch.

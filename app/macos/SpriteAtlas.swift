@@ -69,7 +69,6 @@ enum SpriteAtlas {
             }
         }
     }
-    static let sourceScale: CGFloat = 24.0 / 180.0
     // Leg frames advance with distance walked, so feet never slide: slow down and the legs slow down too.
     // Strides scale with cat size like travel speed does, so every size keeps the same rhythm
     // (at cruising speed this equals 10 fps walking, 16 fps running, 5 fps creeping).
