@@ -29,17 +29,25 @@ enum SpriteAtlas {
     // stand→sit 24–26, sit→loaf 27–29, loaf→sleep 30–32, sleep 33–34,
     // groom 35–38, stretch 39–43, yawn 44–45, crouch 46–47,
     // creep 48–51, wiggle 52–53, pounce 54–57, bat 58–59, held 60–61.
-    // Playback is wall-clock based, identical for every cat size. Travel speed stays in Habitat.swift.
-    static let walkFPS = 10.0
-    static let runFPS = 16.0
+    // Leg frames advance with distance walked, so feet never slide: slow down and the legs slow down too.
+    // Strides scale with cat size like travel speed does, so every size keeps the same rhythm
+    // (at cruising speed this equals 10 fps walking, 16 fps running, 5 fps creeping).
+    static let walkStride = 12.0   // pt per 8-frame walk cycle, adult
+    static let runStride = 29.0    // pt per 8-frame gallop, adult
+    static let creepStride = 4.8   // pt per 4-frame creep, adult
+    static let walkFPS = 10.0      // reference cadence at 15 pt/s, used by previews
+    static let runFPS = 16.0       // reference cadence at 58 pt/s
     static let standFrame = 0
     static func frameIndex(_ cat: Cat) -> Int {
         func loop(_ start: Int, _ count: Int, _ fps: Double) -> Int { start + Int(max(0, cat.elapsed) * fps) % count }
         func once(_ start: Int, _ count: Int, _ seconds: Double) -> Int { start + min(count-1, Int(max(0, cat.elapsed) / seconds * Double(count))) }
         let stopped = abs(cat.velocity) < 1.5 * cat.size.scale
         let idle = cat.elapsed > 1 && cat.turnCooldown <= 0 ? [1,2,3,2][Int(cat.elapsed * 1.5) % 4] : standFrame
-        let walking = stopped ? idle : 4 + Int(max(0, cat.phase) * walkFPS) % 8
-        let running = stopped ? standFrame : 12 + Int(max(0, cat.phase) * runFPS) % 8
+        func cycle(_ start: Int, _ count: Int, _ stride: Double) -> Int {
+            start + Int(max(0, cat.gait) / (stride * cat.size.scale) * Double(count)) % count
+        }
+        let walking = stopped ? idle : cycle(4, 8, walkStride)
+        let running = stopped ? standFrame : cycle(12, 8, runStride)
         switch cat.action {
         case .sleeping: return loop(33, 2, 0.65)
         case .loafing: return 29
@@ -51,16 +59,20 @@ enum SpriteAtlas {
         case .stretching: return once(39, 5, Colony.stretchTime)
         case .stalking:
             if cat.wiggle > 0 { return loop(52, 2, 5) }
-            if stopped { return cat.elapsed < 0.2 ? 46 : 47 }
-            return 48 + Int(max(0, cat.phase) * 5) % 4
+            // The medium crouch (46) sits closest to the creeping height, so starting to creep does not pop up.
+            if stopped { return 46 }
+            return cycle(48, 4, creepStride)
         case .pouncing, .hopping: return once(54, 4, cat.action == .hopping ? Colony.hopTime : 0.45)
         case .walking: return walking
         case .running, .chasing, .goingHome: return abs(cat.velocity) > 18 * cat.size.scale ? running : walking
         case .playing:
             if abs(cat.velocity) > 20 * cat.size.scale { return running }
             if !stopped { return walking }
-            if cat.pounceCooldown > 0.35 { return 58 + Int(cat.pounceCooldown * 5) % 2 }
-            return 47
+            // One swipe right after hitting the ball, then sit and watch; crouch again just before the next swipe.
+            let sinceBat = cat.phase - cat.batAt
+            if sinceBat < 0.3 { return sinceBat < 0.15 ? 58 : 59 }
+            if cat.pounceCooldown > 0.35 { return 26 }
+            return 46
         }
     }
     /// Rest poses are connected by their actual in-between art; other changes retain Claude's short blend.
@@ -104,6 +116,52 @@ enum SpriteAtlas {
         case 58...59: return 58
         default: return 60
         }
+    }
+    // MARK: Ground and body position measured from the art
+    /// Visible extent of a frame in source pixels: lowest solid row (from the top) and left/right edges.
+    private struct Extent { var bottom: Double; var left: Double; var right: Double }
+    private static var extents: [Int: Extent] = [:]
+    private static func extent(_ index: Int, coat: Int) -> Extent? {
+        let key = coat * frameCount + index
+        if let known = extents[key] { return known }
+        guard let cg = image(index, coat: coat)?.cgImage(forProposedRect: nil, context: nil, hints: nil),
+              let context = CGContext(data: nil, width: cg.width, height: cg.height, bitsPerComponent: 8, bytesPerRow: cg.width * 4,
+                                      space: CGColorSpace(name: CGColorSpace.sRGB)!, bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue),
+              let pixels = context.data?.assumingMemoryBound(to: UInt8.self) else { return nil }
+        context.draw(cg, in: CGRect(x: 0, y: 0, width: cg.width, height: cg.height))
+        var bottom = 0, left = cg.width, right = 0
+        for row in 0..<cg.height {          // the first row in memory is the top of the image
+            for x in 0..<cg.width where pixels[(row * cg.width + x) * 4 + 3] > 100 {
+                bottom = max(bottom, row); left = min(left, x); right = max(right, x)
+            }
+        }
+        // The art was scaled into the canvas; express it in the same source pixels as the metadata.
+        let unit = Double(metadata[coat][index].height) / Double(cg.height)
+        let result = Extent(bottom: Double(bottom) * unit, left: Double(left) * unit, right: Double(right) * unit)
+        extents[key] = result
+        return result
+    }
+    /// Source pixels to raise a frame so its lowest paw stands on the ground line (232 px from the canvas top).
+    /// Grounded poses snap one by one; a gallop or pounce moves as a whole, so only its true flight frames leave the ground.
+    static func groundFix(_ index: Int, coat: Int) -> Double {
+        let ground = 232.0
+        func lowest(_ frames: ClosedRange<Int>) -> Double {
+            frames.compactMap { extent($0, coat: coat)?.bottom }.max() ?? ground
+        }
+        switch index {
+        case 12...19: return lowest(12...19) - ground
+        case 54...57: return lowest(54...57) - ground
+        case 60...61: return 0
+        default: return (extent(index, coat: coat)?.bottom ?? ground) - ground
+        }
+    }
+    /// Where the visible body's middle is drawn, in points from the cat's position, for a given facing.
+    static func bodyCenter(_ index: Int, cat: Cat, direction: Double) -> CGFloat {
+        guard metadata.indices.contains(cat.coat), metadata[cat.coat].indices.contains(index),
+              let extent = extent(index, coat: cat.coat) else { return 0 }
+        let factor = sourceScale * cat.size.scale
+        let middle = (extent.left + extent.right) / 2 - metadata[cat.coat][index].headX
+        return CGFloat(direction) * (offsetFor(cat, cat.size.scale) + middle * factor)
     }
     private static func offsetFor(_ cat: Cat, _ scale: CGFloat) -> CGFloat { cat.action == .held ? 0 : 9 * scale }
     /// Pixels per point of the menu bar display (the overlay lives on the primary screen).
@@ -150,7 +208,7 @@ enum SpriteAtlas {
         // previews at other scales and the brief tower hop draw the original.
         let pixels = scale == cat.size.scale && cat.action != .hopping ? screenScale : 0
         func snap(_ value: CGFloat) -> CGFloat { pixels > 0 ? (value * pixels).rounded() / pixels : value }
-        var rect = NSRect(x: snap(offsetFor(cat, scale) - frame.headX * factor), y: snap(frame.footLift * factor),
+        var rect = NSRect(x: snap(offsetFor(cat, scale) - frame.headX * factor), y: snap((frame.footLift + groundFix(index, coat: cat.coat)) * factor),
                           width: Double(frame.width) * factor, height: Double(frame.height) * factor)
         var drawn = image
         if pixels > 0, let small = shrunk(index, coat: cat.coat, width: Int((rect.width * pixels).rounded()), height: Int((rect.height * pixels).rounded())) {

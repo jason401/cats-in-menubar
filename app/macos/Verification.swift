@@ -75,18 +75,37 @@ func runSelfTests() {
     }
     for size in CatSize.allCases {
         expect(abs(distances[size]! / distances[.adult]! - size.scale) < 0.001, "travel speed scales with kitten/young/adult size")
-        for i in 0..<80 {
-            let time = Double(i) * 0.071 + 0.013
-            var adult = Cat(x: 0, destination: 0, action: .walking, coat: 0)
-            adult.phase = time; adult.gait = 15 * time; adult.velocity = 15
-            var smaller = adult; smaller.size = size; smaller.gait = 987 + time * 3; smaller.velocity *= size.scale
-            expect(SpriteAtlas.frameIndex(adult) == SpriteAtlas.frameIndex(smaller), "small cats do not cycle frames faster, even with unrelated travel distances")
-            adult.action = .running; adult.velocity = 58
-            smaller.action = .running; smaller.velocity = 58 * size.scale
-            expect(SpriteAtlas.frameIndex(adult) == SpriteAtlas.frameIndex(smaller), "run playback is time-based and size independent")
-            adult.action = .stalking; smaller.action = .stalking
-            expect(SpriteAtlas.frameIndex(adult) == SpriteAtlas.frameIndex(smaller), "creep playback is size independent")
+    }
+    // Leg frames follow distance: a cat that barely moves barely steps, and every size keeps the same rhythm
+    // at its own cruising speed (strides scale with size like speed does).
+    for size in CatSize.allCases {
+        for (action, speed, first, count) in [(CatAction.walking, 15.0, 4, 8), (.running, 58.0, 12, 8)] {
+            var adult = Cat(x: 0, destination: 0, action: action, coat: 0); adult.velocity = speed
+            var smaller = adult; smaller.size = size; smaller.velocity = speed * size.scale
+            for i in 0..<80 {
+                let time = Double(i) * 0.071 + 0.013
+                adult.gait = speed * time; smaller.gait = speed * size.scale * time
+                expect(SpriteAtlas.frameIndex(adult) == SpriteAtlas.frameIndex(smaller), "\(size) \(action) keeps the adult rhythm")
+            }
+            var creeping = adult; creeping.size = size
+            creeping.velocity = (action == .running ? 19 : 2) * size.scale + 0.5
+            creeping.gait = 0
+            let start = SpriteAtlas.frameIndex(creeping)
+            creeping.gait = 0.2 * size.scale
+            expect(SpriteAtlas.frameIndex(creeping) == start && (first..<first + count).contains(start), "tiny distance does not flip legs")
         }
+    }
+    // Every grounded frame stands on the ground line; the gallop touches it on its lowest frame.
+    if SpriteAtlas.available {
+        var fixes: [String] = []
+        for index in [0, 4, 5, 6, 7, 8, 9, 10, 11, 26, 29, 33, 46, 48] {
+            let fix = SpriteAtlas.groundFix(index, coat: 0)
+            fixes.append("\(index):\(Int(fix.rounded()))")
+            expect(abs(fix) < 40, "ground fix for frame \(index) is a small nudge, not a jump: \(fix)")
+        }
+        let run = (12...19).map { SpriteAtlas.groundFix($0, coat: 0) }
+        expect(Set(run.map { Int($0.rounded()) }).count == 1, "the gallop moves as one piece")
+        print("Ground fixes (source px): \(fixes.joined(separator: " ")) run \(Int(run[0].rounded()))")
     }
     var frameRateDistances: [Double] = []
     for fps in [8, 15, 30] {
@@ -454,4 +473,50 @@ func renderHeld(to path: String) {
     NSGraphicsContext.restoreGraphicsState()
     try! bitmap.representation(using: .png, properties: [:])!.write(to: URL(fileURLWithPath: path))
     print("Held: \(path)")
+}
+
+/// Film strip of the real drawing path (ground fix, turn, transitions): a cat walks right, stops, turns and walks back.
+/// Each frame is captured at actual 1x menu bar size and enlarged with hard pixels, with the ground line marked.
+func renderScenario(to path: String) {
+    _ = NSApplication.shared
+    let colony = Colony(count: 1, random: { 0.5 })
+    colony.updateLanes([Lane(lower: 0, upper: 300)])
+    colony.cats[0].x = 60; colony.cats[0].visible = true; colony.cats[0].hiddenFor = 0
+    colony.cats[0].appearance = CatAppearance(coat: 0, size: .adult)
+    colony.start(0, .walking, for: 100); colony.cats[0].destination = 150
+    let view = HabitatView(colony: colony, frame: NSRect(x: 0, y: 0, width: 300, height: 30))
+    let window = NSWindow(contentRect: view.frame, styleMask: [.borderless], backing: .buffered, defer: false)
+    window.contentView = view
+    var shots: [(CGImage, String)] = []
+    for tick in 0..<120 {
+        if tick == 50 { colony.cats[0].destination = 60 }           // turn back
+        colony.step(1.0 / 30)
+        Thread.sleep(forTimeInterval: 1.0 / 30)                     // transitions run on real time
+        guard tick % 4 == 0 || (50...66).contains(tick) && tick % 2 == 0 else { continue }
+        let cat = colony.cats[0]
+        let box = NSRect(x: cat.x - 26, y: 0, width: 52, height: 30)
+        guard let rep = view.bitmapImageRepForCachingDisplay(in: box) else { continue }
+        view.cacheDisplay(in: box, to: rep)
+        if let image = rep.cgImage { shots.append((image, "\(tick) \(SpriteAtlas.frameIndex(cat))")) }
+    }
+    let zoom = 4, cellW = 52 * zoom + 6, cellH = 30 * zoom + 18, columns = 8
+    let rows = (shots.count + columns - 1) / columns
+    let width = cellW * columns, height = cellH * rows
+    let context = CGContext(data: nil, width: width, height: height, bitsPerComponent: 8, bytesPerRow: 0,
+                            space: CGColorSpace(name: CGColorSpace.sRGB)!, bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)!
+    NSGraphicsContext.current = NSGraphicsContext(cgContext: context, flipped: false)
+    NSColor(white: 0.16, alpha: 1).setFill(); NSRect(x: 0, y: 0, width: width, height: height).fill()
+    context.interpolationQuality = .none
+    let label: [NSAttributedString.Key: Any] = [.font: NSFont.systemFont(ofSize: 10), .foregroundColor: NSColor.lightGray]
+    for (i, shot) in shots.enumerated() {
+        let x = (i % columns) * cellW, y = height - (i / columns + 1) * cellH
+        let baseline = CGFloat(max(0, floor((30 - 22) / 2))) * CGFloat(zoom)
+        context.draw(shot.0, in: CGRect(x: x, y: y + 14, width: 52 * zoom, height: 30 * zoom))
+        NSColor(white: 1, alpha: 0.35).setFill(); NSRect(x: CGFloat(x), y: CGFloat(y + 14) + baseline, width: CGFloat(52 * zoom), height: 1).fill()
+        NSColor(red: 1, green: 0.4, blue: 0.4, alpha: 0.5).setFill(); NSRect(x: CGFloat(x + 26 * zoom), y: CGFloat(y + 14), width: 1, height: CGFloat(30 * zoom)).fill()
+        (shot.1 as NSString).draw(at: NSPoint(x: x + 2, y: y), withAttributes: label)
+    }
+    let rep = NSBitmapImageRep(cgImage: context.makeImage()!)
+    try? rep.representation(using: .png, properties: [:])?.write(to: URL(fileURLWithPath: path))
+    print("Scenario: \(path)")
 }

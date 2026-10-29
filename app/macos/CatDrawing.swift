@@ -382,7 +382,16 @@ final class HabitatView: NSView {
         shown[i] = memory
         let step = Int(max(0, now - memory.since) / 0.09)
         if memory.sequence.indices.contains(step), cat.action != .held && cat.action != .hopping {
-            SpriteAtlas.draw(cat, at: point, scale: 1, frame: memory.sequence[step], direction: memory.sequenceDirection)
+            var at = point
+            if memory.sequence == [20, 21, 22, 23] {
+                // Turn in place: slide the body's middle from where it was to where the turned pose will be,
+                // so the last turn frame meets the mirrored pose without a sideways jump.
+                let start = SpriteAtlas.bodyCenter(memory.fromFrame, cat: cat, direction: memory.fromDirection)
+                let end = SpriteAtlas.bodyCenter(frame, cat: cat, direction: cat.direction)
+                let target = start + (end - start) * CGFloat(step + 1) / 4
+                at.x += target - SpriteAtlas.bodyCenter(memory.sequence[step], cat: cat, direction: memory.sequenceDirection)
+            }
+            SpriteAtlas.draw(cat, at: at, scale: 1, frame: memory.sequence[step], direction: memory.sequenceDirection)
             return
         }
         CatDrawing.cat(cat, at: point)

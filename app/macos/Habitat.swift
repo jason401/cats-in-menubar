@@ -49,6 +49,8 @@ struct Cat {
     var velocity = 0.0
     var gait = 0.0          // distance walked, drives leg motion so feet never slide
     var turnCooldown = 0.0  // a cat must stand a moment before facing the other way
+    var turnHold = 0.0      // stays put while the turn-around frames play
+    var batAt = -10.0       // phase of the last paw swipe at the ball
     var pounceCooldown = 0.0
     var elapsed = 0.0       // time in the current action, drives one-shot poses like stretching
     var target = 0.0        // where a hunt ends
@@ -93,6 +95,7 @@ final class Colony {
     var activity = 1        // 0 calm, 1 normal, 2 playful
     var homeX: Double?      // overlay x of the cat tower icon
     static let hopTime = 0.55
+    static let turnTime = 0.36  // four turn-around frames at 0.09 s
     var random: () -> Double
     init(count: Int = 3, random: @escaping () -> Double = { Double.random(in: 0..<1) }) {
         self.random = random
@@ -253,6 +256,7 @@ final class Colony {
             if quiet && !cats[i].homeBound && cats[i].action != .sleeping { start(i, .sleeping, for: 30) }
             if cats[i].remaining <= 0 { choose(i, lane: lane) }
             cats[i].turnCooldown = max(0, cats[i].turnCooldown - dt)
+            cats[i].turnHold = max(0, cats[i].turnHold - dt)
             cats[i].pounceCooldown = max(0, cats[i].pounceCooldown - dt)
             if cats[i].action == .playing {
                 if var toy = ball, lane.contains(toy.x, margin: 5) {
@@ -268,6 +272,7 @@ final class Colony {
                         toy.velocity = side * (40 + random() * 35)
                         ball = toy
                         cats[i].pounceCooldown = 0.9 + random() * 1.4
+                        cats[i].batAt = cats[i].phase
                         cats[i].destination = cats[i].x
                         cats[i].stuck = 0
                     } else {
@@ -314,8 +319,10 @@ final class Colony {
                 let wanted = delta > 0 ? 1.0 : -1.0
                 if wanted != cats[i].direction {
                     // Slow down, pause, then turn around.
-                    if abs(cats[i].velocity) < 0.5 && cats[i].turnCooldown <= 0 { cats[i].direction = wanted; cats[i].turnCooldown = 0.6 }
-                } else {
+                    if abs(cats[i].velocity) < 0.5 && cats[i].turnCooldown <= 0 {
+                        cats[i].direction = wanted; cats[i].turnCooldown = 0.6; cats[i].turnHold = Colony.turnTime
+                    }
+                } else if cats[i].turnHold <= 0 {
                     // Ease in and brake smoothly before the destination.
                     desired = wanted * min(maxSpeed, sqrt(2 * accel * abs(delta)))
                 }

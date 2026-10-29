@@ -12,3 +12,4 @@ mkdir -p build/previews
 "build/Cats in Menubar.app/Contents/MacOS/CatsInMenubar" --render-motion "$PWD/build/previews/motion.gif"
 
 "build/Cats in Menubar.app/Contents/MacOS/CatsInMenubar" --render-held "$PWD/build/previews/held.png"
+"build/Cats in Menubar.app/Contents/MacOS/CatsInMenubar" --render-scenario "$PWD/build/previews/scenario.png"
