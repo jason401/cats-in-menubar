@@ -3,6 +3,14 @@ import sys, os, json
 from PIL import Image, ImageDraw, ImageFont
 
 _SHEET = {}
+# The document numbers frames the way the original 62-frame art did (walk 4–11, then 62–69 for its second half).
+# Those numbers are only labels here; each one is looked up by pose name in the sheet's `animations` table.
+_LEGACY_POSES = [("stand", [0]), ("idle", [1, 2, 3]), ("walk", list(range(4, 12)) + list(range(62, 70))),
+    ("run", list(range(12, 20))), ("turn", list(range(20, 24))), ("sitDown", [24, 25]), ("sit", [26]),
+    ("loafDown", [27, 28]), ("loaf", [29]), ("sleepDown", [30, 31, 32]), ("sleep", [33, 34]),
+    ("groom", list(range(35, 39))), ("stretch", list(range(39, 44))), ("yawn", [44, 45]), ("crouch", [46, 47]),
+    ("creep", list(range(48, 52))), ("wiggle", [52, 53]), ("pounce", list(range(54, 58))), ("bat", [58, 59]), ("held", [60, 61])]
+LEGACY = {n: (pose, step) for pose, ids in _LEGACY_POSES for step, n in enumerate(ids)}
 def cell(i, density=None):
     """Metadata-sized cell from the native master or exact baked screen sheet."""
     if "meta" not in _SHEET:
@@ -12,6 +20,8 @@ def cell(i, density=None):
     file = "sheet.png" if density is None else f"sheet-{key}.png"
     if key not in _SHEET: _SHEET[key] = Image.open(f"{SRC_SHEET}/{file}").convert("RGBA")
     w,h = (m["cellWidth"],m["cellHeight"]) if density is None else m["variants"][key]
+    pose, step = LEGACY[i]
+    i = m["animations"][pose][step]  # the sheet's own cell for this pose
     im = _SHEET[key].crop((i % 8*w,i//8*h,i%8*w+w,i//8*h+h))
     return im.resize((384,256),Image.Resampling.NEAREST) if density is None else im
 
@@ -72,7 +82,7 @@ def strip(name, frames, labels=None, per_row=8):
         sheet.save(f"{out}/{name}{suffix}.png")
 
 groups = {
-    "stand": [0, 1, 2, 3], "walk": json.load(open(f"{src}/sheet.json"))["animations"]["walk"], "run": list(range(12, 20)), "turn": [20, 21, 22, 23],
+    "stand": [0, 1, 2, 3], "walk": list(range(4, 12)) + list(range(62, 70)), "run": list(range(12, 20)), "turn": [20, 21, 22, 23],
     "stand-sit": [24, 25, 26], "sit-loaf": [27, 28, 29], "loaf-sleep": [30, 31, 32], "sleep": [33, 34],
     "groom": [35, 36, 37, 38], "stretch": [39, 40, 41, 42, 43], "yawn": [26, 44, 45, 26], "crouch": [46, 47],
     "creep": [48, 49, 50, 51], "wiggle": [52, 53], "pounce": [54, 55, 56, 57], "bat": [46, 58, 59, 26],
@@ -81,5 +91,5 @@ groups = {
 }
 for name, frames in groups.items():
     strip(name, frames, per_row=6 if name == "rest-chain" else 8)
-strip("all", list(range(len(json.load(open(f"{src}/sheet.json"))["frames"]))), per_row=8)
+strip("all", sorted(LEGACY), per_row=8)
 print("ok")

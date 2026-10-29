@@ -10,6 +10,14 @@ from matplotlib.patches import FancyArrowPatch, FancyBboxPatch
 from PIL import Image
 
 _SHEET = {}
+# The document numbers frames the way the original 62-frame art did (walk 4–11, then 62–69 for its second half).
+# Those numbers are only labels here; each one is looked up by pose name in the sheet's `animations` table.
+_LEGACY_POSES = [("stand", [0]), ("idle", [1, 2, 3]), ("walk", list(range(4, 12)) + list(range(62, 70))),
+    ("run", list(range(12, 20))), ("turn", list(range(20, 24))), ("sitDown", [24, 25]), ("sit", [26]),
+    ("loafDown", [27, 28]), ("loaf", [29]), ("sleepDown", [30, 31, 32]), ("sleep", [33, 34]),
+    ("groom", list(range(35, 39))), ("stretch", list(range(39, 44))), ("yawn", [44, 45]), ("crouch", [46, 47]),
+    ("creep", list(range(48, 52))), ("wiggle", [52, 53]), ("pounce", list(range(54, 58))), ("bat", [58, 59]), ("held", [60, 61])]
+LEGACY = {n: (pose, step) for pose, ids in _LEGACY_POSES for step, n in enumerate(ids)}
 def cell(i, density=None):
     """Metadata-sized cell from the native master or exact baked screen sheet."""
     if "meta" not in _SHEET:
@@ -19,6 +27,8 @@ def cell(i, density=None):
     file = "sheet.png" if density is None else f"sheet-{key}.png"
     if key not in _SHEET: _SHEET[key] = Image.open(f"{SRC_SHEET}/{file}").convert("RGBA")
     w,h = (m["cellWidth"],m["cellHeight"]) if density is None else m["variants"][key]
+    pose, step = LEGACY[i]
+    i = m["animations"][pose][step]  # the sheet's own cell for this pose
     im = _SHEET[key].crop((i % 8*w,i//8*h,i%8*w+w,i//8*h+h))
     return im.resize((384,256),Image.Resampling.NEAREST) if density is None else im
 

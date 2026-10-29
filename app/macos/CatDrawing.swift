@@ -373,22 +373,23 @@ final class HabitatView: NSView {
         var memory = shown[i] ?? Shown(frame: frame, direction: cat.direction)
         let inTransition = now - memory.since < Double(memory.sequence.count) * 0.09
             && cat.action != .held && cat.action != .hopping
-        if (!inTransition && SpriteAtlas.group(frame) != SpriteAtlas.group(memory.frame)) || cat.direction != memory.direction {
+        let turn = SpriteAtlas.cells(.turn, coat: cat.coat)
+        if (!inTransition && SpriteAtlas.group(frame, coat: cat.coat) != SpriteAtlas.group(memory.frame, coat: cat.coat)) || cat.direction != memory.direction {
             let old = memory
             memory = Shown(frame: frame, direction: cat.direction, fromFrame: old.frame, fromDirection: old.direction, since: now)
-            memory.sequence = cat.direction != old.direction ? [20,21,22,23] : SpriteAtlas.transition(from: old.frame, to: frame)
+            memory.sequence = cat.direction != old.direction ? turn : SpriteAtlas.transition(from: old.frame, to: frame, coat: cat.coat)
             memory.sequenceDirection = cat.direction != old.direction ? old.direction : cat.direction
         } else { memory.frame = frame }
         shown[i] = memory
         let step = Int(max(0, now - memory.since) / 0.09)
         if memory.sequence.indices.contains(step), cat.action != .held && cat.action != .hopping {
             var at = point
-            if memory.sequence == [20, 21, 22, 23] {
+            if memory.sequence == turn {
                 // Turn in place: slide the body's middle from where it was to where the turned pose will be,
                 // so the last turn frame meets the mirrored pose without a sideways jump.
                 let start = SpriteAtlas.bodyCenter(memory.fromFrame, cat: cat, direction: memory.fromDirection)
                 let end = SpriteAtlas.bodyCenter(frame, cat: cat, direction: cat.direction)
-                let target = start + (end - start) * CGFloat(step + 1) / 4
+                let target = start + (end - start) * CGFloat(step + 1) / CGFloat(turn.count)
                 at.x += target - SpriteAtlas.bodyCenter(memory.sequence[step], cat: cat, direction: memory.sequenceDirection)
             }
             SpriteAtlas.draw(cat, at: at, scale: 1, frame: memory.sequence[step], direction: memory.sequenceDirection)

@@ -24,9 +24,31 @@ enum SpriteAtlas {
         return sheet
     }
     private static func sheet(for coat: Int) -> Sheet? { artworkName(for: coat).flatMap(sheet) }
-    static var frameCount: Int { sheet(for: 0)?.frames.count ?? 62 }
+    static var frameCount: Int { sheet(for: 0)?.frames.count ?? 0 }
     static let cellCount = 128
-    static func walkFrames(for coat: Int) -> [Int] { sheet(for: coat)?.animations["walk"] ?? Array(4...11) }
+    /// Every behavior's cells, in play order, from the sheet's own table of contents (`animations` in sheet.json).
+    /// Code asks for poses by name, so artwork can be reordered or given more frames without touching code.
+    enum Pose: String, CaseIterable {
+        case stand, idle, walk, run, turn, sitDown, sit, loafDown, loaf, sleepDown, sleep
+        case groom, stretch, yawn, crouch, creep, wiggle, pounce, bat, held
+    }
+    static func cells(_ pose: Pose, coat: Int) -> [Int] { sheet(for: coat)?.animations[pose.rawValue] ?? [] }
+    /// The `step`th cell of a pose, wrapping around; cell 0 if the artwork is missing.
+    static func cell(_ pose: Pose, _ step: Int, coat: Int) -> Int {
+        let list = cells(pose, coat: coat)
+        return list.isEmpty ? 0 : list[step % list.count]
+    }
+    private static var owners: [String: [Int: (pose: Pose, step: Int)]] = [:]
+    /// Which pose a cell belongs to, and its place in that pose.
+    static func pose(of cell: Int, coat: Int) -> (pose: Pose, step: Int)? {
+        guard let name = artworkName(for: coat), let sheet = sheet(name) else { return nil }
+        if owners[name] == nil {
+            var map: [Int: (pose: Pose, step: Int)] = [:]
+            for pose in Pose.allCases { for (step, cell) in (sheet.animations[pose.rawValue] ?? []).enumerated() { map[cell] = (pose, step) } }
+            owners[name] = map
+        }
+        return owners[name]?[cell]
+    }
     static func walkStride(for coat: Int) -> Double { sheet(for: coat)?.walkStride ?? 12 }
     private static let resolvedCoats: [String] = {
         guard let url = folder?.appendingPathComponent("coats.json"), let data = try? Data(contentsOf: url),
@@ -37,56 +59,53 @@ enum SpriteAtlas {
     static var available: Bool {
         guard let folder, resolvedCoats.count == 8 else { return false }
         return Set(resolvedCoats).allSatisfy { name in
-            guard let sheet = sheet(name), (62...cellCount).contains(sheet.frames.count), sheet.columns == 8, sheet.rows == 16,
-                  sheet.pixelsPerPoint > 0, sheet.walkStride > 0, let walk = sheet.animations["walk"],
-                  [8,16].contains(walk.count), Set(walk).count == walk.count,
-                  walk.allSatisfy({ sheet.frames.indices.contains($0) }) else { return false }
+            let named = Pose.allCases.compactMap { sheet(name)?.animations[$0.rawValue] }
+            guard let sheet = sheet(name), sheet.frames.count <= cellCount, sheet.columns == 8, sheet.rows == 16,
+                  sheet.pixelsPerPoint > 0, sheet.walkStride > 0, named.count == Pose.allCases.count,
+                  named.allSatisfy({ !$0.isEmpty && $0.allSatisfy(sheet.frames.indices.contains) }),
+                  Set(named.joined()).count == named.joined().count else { return false }
             return (["sheet.png"] + sheet.variants.keys.map { "sheet-\($0).png" }).allSatisfy {
                 FileManager.default.fileExists(atPath: folder.appendingPathComponent("\(name)/\($0)").path)
             }
         }
     }
     static let sourceScale: CGFloat = 24.0 / 180.0
-    // V3: stand 0, idle 1–3, walk 4–11, run 12–19, turn 20–23,
-    // stand→sit 24–26, sit→loaf 27–29, loaf→sleep 30–32, sleep 33–34,
-    // groom 35–38, stretch 39–43, yawn 44–45, crouch 46–47,
-    // creep 48–51, wiggle 52–53, pounce 54–57, bat 58–59, held 60–61.
     // Leg frames advance with distance walked, so feet never slide: slow down and the legs slow down too.
     // Strides scale with cat size like travel speed does, so every size keeps the same rhythm
     // (at cruising speed this equals 10 fps walking, 16 fps running, 5 fps creeping).
     static var walkStride: Double { walkStride(for: 0) }
     static let runStride = 29.0    // pt per 8-frame gallop, adult
     static let creepStride = 4.8   // pt per 4-frame creep, adult
-    static var walkFPS: Double { Double(walkFrames(for: 0).count) * Colony.walkSpeed / walkStride }
+    static var walkFPS: Double { Double(cells(.walk, coat: 0).count) * Colony.walkSpeed / walkStride }
     static let runFPS = 16.0       // reference cadence at 58 pt/s
-    static let standFrame = 0
     static func frameIndex(_ cat: Cat) -> Int {
-        func loop(_ start: Int, _ count: Int, _ fps: Double) -> Int { start + Int(max(0, cat.elapsed) * fps) % count }
-        func once(_ start: Int, _ count: Int, _ seconds: Double) -> Int { start + min(count-1, Int(max(0, cat.elapsed) / seconds * Double(count))) }
+        func at(_ pose: Pose, _ step: Int) -> Int { cell(pose, step, coat: cat.coat) }
+        func count(_ pose: Pose) -> Int { max(1, cells(pose, coat: cat.coat).count) }
+        func loop(_ pose: Pose, _ fps: Double) -> Int { at(pose, Int(max(0, cat.elapsed) * fps)) }
+        func once(_ pose: Pose, _ seconds: Double) -> Int { at(pose, min(count(pose) - 1, Int(max(0, cat.elapsed) / seconds * Double(count(pose))))) }
+        func cycle(_ pose: Pose, _ stride: Double) -> Int { at(pose, Int(max(0, cat.gait) / (stride * cat.size.scale) * Double(count(pose)))) }
         let stopped = abs(cat.velocity) < 1.5 * cat.size.scale
-        let idle = cat.elapsed > 1 && cat.turnCooldown <= 0 ? [1,2,3,2][Int(cat.elapsed * 1.5) % 4] : standFrame
-        func cycle(_ start: Int, _ count: Int, _ stride: Double) -> Int {
-            start + Int(max(0, cat.gait) / (stride * cat.size.scale) * Double(count)) % count
-        }
-        let walk = walkFrames(for: cat.coat)
-        let walkPhase = Int(max(0, cat.gait) / (walkStride(for: cat.coat) * cat.size.scale) * Double(walk.count)) % walk.count
-        let walking = stopped ? idle : walk[walkPhase]
-        let running = stopped ? standFrame : cycle(12, 8, runStride)
+        let stand = at(.stand, 0)
+        // Idle sways through its cells and back (1, 2, 3, 2 for three cells).
+        let sway = Array(0..<count(.idle)) + Array((1..<max(1, count(.idle) - 1)).reversed())
+        let idle = cat.elapsed > 1 && cat.turnCooldown <= 0 ? at(.idle, sway[Int(cat.elapsed * 1.5) % sway.count]) : stand
+        let walking = stopped ? idle : cycle(.walk, walkStride(for: cat.coat))
+        let running = stopped ? stand : cycle(.run, runStride)
         switch cat.action {
-        case .sleeping: return loop(33, 2, 0.65)
-        case .loafing: return 29
+        case .sleeping: return loop(.sleep, 0.65)
+        case .loafing: return at(.loaf, 0)
         case .sitting:
             let yawn = max(0, cat.elapsed - 4).truncatingRemainder(dividingBy: 12)
-            return cat.elapsed > 4 && yawn < 0.6 ? 44 + min(1, Int(yawn * 4)) : 26
-        case .held: return loop(60, 2, abs(cat.swing) > 5 ? 4 : 1.5)
-        case .grooming: return loop(35, 4, 4)
-        case .stretching: return once(39, 5, Colony.stretchTime)
+            return cat.elapsed > 4 && yawn < 0.6 ? at(.yawn, min(count(.yawn) - 1, Int(yawn * 4))) : at(.sit, 0)
+        case .held: return loop(.held, abs(cat.swing) > 5 ? 4 : 1.5)
+        case .grooming: return loop(.groom, 4)
+        case .stretching: return once(.stretch, Colony.stretchTime)
         case .stalking:
-            if cat.wiggle > 0 { return loop(52, 2, 5) }
-            // The medium crouch (46) sits closest to the creeping height, so starting to creep does not pop up.
-            if stopped { return 46 }
-            return cycle(48, 4, creepStride)
-        case .pouncing, .hopping: return once(54, 4, cat.action == .hopping ? Colony.hopTime : 0.45)
+            if cat.wiggle > 0 { return loop(.wiggle, 5) }
+            // The medium crouch (first crouch cell) sits closest to the creeping height, so starting to creep does not pop up.
+            if stopped { return at(.crouch, 0) }
+            return cycle(.creep, creepStride)
+        case .pouncing, .hopping: return once(.pounce, cat.action == .hopping ? Colony.hopTime : 0.45)
         case .walking: return walking
         case .running, .chasing, .goingHome: return abs(cat.velocity) > 18 * cat.size.scale ? running : walking
         case .playing:
@@ -94,22 +113,24 @@ enum SpriteAtlas {
             if !stopped { return walking }
             // One swipe right after hitting the ball, then sit and watch; crouch again just before the next swipe.
             let sinceBat = cat.phase - cat.batAt
-            if sinceBat < 0.3 { return sinceBat < 0.15 ? 58 : 59 }
-            if cat.pounceCooldown > 0.35 { return 26 }
-            return 46
+            if sinceBat < 0.3 { return at(.bat, sinceBat < 0.15 ? 0 : 1) }
+            if cat.pounceCooldown > 0.35 { return at(.sit, 0) }
+            return at(.crouch, 0)
         }
     }
     /// Rest poses are connected by their actual in-between art; other changes retain Claude's short blend.
-    static func transition(from: Int, to: Int) -> [Int] {
-        func rank(_ f: Int) -> Int {
-            switch f { case 26...28, 35...38, 44...45, 58...59: return 1
-            case 29...31: return 2
-            case 32...34: return 3
+    static func transition(from: Int, to: Int, coat: Int) -> [Int] {
+        // How far down the rest ladder a pose is: standing, sitting, loafing, asleep.
+        func rank(_ cell: Int) -> Int {
+            switch pose(of: cell, coat: coat)?.pose {
+            case .sit, .loafDown, .groom, .yawn, .bat: return 1
+            case .loaf, .sleepDown: return 2
+            case .sleep: return 3
             default: return 0 }
         }
         let a = rank(from), b = rank(to)
         guard a != b else { return [] }
-        let links = [[24,25,26], [27,28,29], [30,31,32]]
+        let links = [cells(.sitDown, coat: coat) + cells(.sit, coat: coat), cells(.loafDown, coat: coat) + cells(.loaf, coat: coat), cells(.sleepDown, coat: coat)]
         if a < b { return (a..<b).flatMap { links[$0] } }
         return (b..<a).reversed().flatMap { Array(links[$0].reversed()) }
     }
@@ -140,23 +161,13 @@ enum SpriteAtlas {
         return image
     }
     /// Frames in the same cycle step through each other; anything else is a pose change worth blending.
-    static func group(_ frame: Int) -> Int {
-        switch frame {
-        case 0...3: return 0
-        case 4...11, 62...69: return 4
-        case 12...19: return 12
-        case 20...23: return 20
-        case 24...26, 44...45: return 26
-        case 27...29: return 29
-        case 30...34: return 33
-        case 35...38: return 35
-        case 39...43: return 39
-        case 46...47: return 47
-        case 48...51: return 48
-        case 52...53: return 52
-        case 54...57: return 54
-        case 58...59: return 58
-        default: return 60
+    static func group(_ frame: Int, coat: Int) -> Pose? {
+        switch pose(of: frame, coat: coat)?.pose {
+        case .stand, .idle: return .stand
+        case .sitDown, .sit, .yawn: return .sit
+        case .loafDown, .loaf: return .loaf
+        case .sleepDown, .sleep: return .sleep
+        case let other: return other
         }
     }
     // MARK: Ground and body position, measured from the art when the sheet is built

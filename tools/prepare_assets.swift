@@ -2,16 +2,26 @@ import Cocoa
 
 struct Registration: Decodable { var eyeX: Double; var eyeY: Double; var scale: Double; var baselineEye: Double?; var rootX: Double? }
 // One sheet per artwork set: 128 equal cells (8 x 16), unused cells transparent.
+// The sheet's table of contents: each behavior's cells in play order. The app finds poses only by these names.
+let poseNames = ["stand", "idle", "walk", "run", "turn", "sitDown", "sit", "loafDown", "loaf", "sleepDown", "sleep",
+                 "groom", "stretch", "yawn", "crouch", "creep", "wiggle", "pounce", "bat", "held"]
+// Cell order of the older 62-frame strip artwork.
+let stripAnimations: [String: [Int]] = [
+    "stand": [0], "idle": [1, 2, 3], "walk": Array(4...11), "run": Array(12...19), "turn": Array(20...23),
+    "sitDown": [24, 25], "sit": [26], "loafDown": [27, 28], "loaf": [29], "sleepDown": [30, 31, 32], "sleep": [33, 34],
+    "groom": Array(35...38), "stretch": Array(39...43), "yawn": [44, 45], "crouch": [46, 47], "creep": Array(48...51),
+    "wiggle": [52, 53], "pounce": Array(54...57), "bat": [58, 59], "held": [60, 61]]
 struct AtlasSource: Decodable {
     var cellWidth: Int; var cellHeight: Int; var headX: Double; var ground: Double
-    var pixelsPerPoint: Double; var frameCount: Int; var walkFrames: [Int]; var walkStride: Double
+    var pixelsPerPoint: Double; var frameCount: Int; var walkStride: Double
+    var animations: [String: [Int]]
 }
 struct SheetFrame: Codable { var lift: Double; var left: Double; var right: Double }
 struct SheetInfo: Codable {
     var columns = 8, rows = 16, cellWidth = 384, cellHeight = 256
     var headX = 300.0, ground = 232.0
     var pixelsPerPoint = 7.5, walkStride = 12.0
-    var animations = ["walk": Array(4...11)]
+    var animations = stripAnimations
     var frames: [SheetFrame]
     var variants: [String: [Int]]   // "<density>x-<size>": cell width and height in screen pixels
 }
@@ -53,22 +63,24 @@ func writeSheet(_ frames: [CGImage], to folder: URL, source: AtlasSource? = nil)
     var info0 = SheetInfo(frames: [], variants: [:])
     if let source {
         precondition(source.pixelsPerPoint > 0 && source.walkStride > 0)
-        precondition([8, 16].contains(source.walkFrames.count) && Set(source.walkFrames).count == source.walkFrames.count)
-        precondition(source.walkFrames.allSatisfy { frames.indices.contains($0) })
         info0.cellWidth = source.cellWidth; info0.cellHeight = source.cellHeight
         info0.headX = source.headX; info0.ground = source.ground
         info0.pixelsPerPoint = source.pixelsPerPoint; info0.walkStride = source.walkStride
-        info0.animations = ["walk": source.walkFrames]
+        info0.animations = source.animations
     }
+    let named = poseNames.map { info0.animations[$0] ?? [] }
+    precondition(named.allSatisfy { !$0.isEmpty && $0.allSatisfy(frames.indices.contains) }, "Every pose needs cells inside the sheet")
+    precondition(Set(named.joined()).count == named.joined().count, "A cell belongs to one pose")
     precondition(frames.count <= info0.columns * info0.rows, "More frames than sheet cells")
     // Paws go on the ground line per frame; a gallop or pounce moves as a whole, so only true flight frames leave the ground.
     let extents = frames.map(extent)
-    func lowest(_ range: ClosedRange<Int>) -> Double { range.map { extents[$0].bottom }.max()! }
+    func lowest(_ cells: [Int]) -> Double { cells.map { extents[$0].bottom }.max()! }
+    let run = info0.animations["run"]!, pounce = info0.animations["pounce"]!, held = info0.animations["held"]!
     let frameInfo = extents.enumerated().map { index, e -> SheetFrame in
         let lift = switch index {
-        case 12...19: lowest(12...19) - info0.ground
-        case 54...57: lowest(54...57) - info0.ground
-        case 60...61: 0.0
+        case _ where run.contains(index): lowest(run) - info0.ground
+        case _ where pounce.contains(index): lowest(pounce) - info0.ground
+        case _ where held.contains(index): 0.0
         default: e.bottom - info0.ground
         }
         return SheetFrame(lift: lift, left: e.left, right: e.right)

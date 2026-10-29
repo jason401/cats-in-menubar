@@ -2,6 +2,8 @@ import Cocoa
 
 // Import a 4x4 authored walk into a native 2x, 128-cell master. No per-pose fitting or anatomy changes.
 // Usage: swift import_walk16.swift <walk4x4.png> <previous-2x-sheet.png> <out-master.png> <out-walk.png>
+// History only: this produced the first native master (walk at cells 4–11 + 62–69, `walkFrames` manifest).
+// The master has since been reordered and now lists every pose by name in `animations`; see ART_GUIDE.
 let args = CommandLine.arguments
 precondition(args.count == 5)
 func context(_ w: Int, _ h: Int) -> CGContext {

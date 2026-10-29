@@ -21,8 +21,17 @@ func runSelfTests() {
             }
         }
     }
-    expect(SpriteAtlas.transition(from: 0, to: 33) == [24,25,26,27,28,29,30,31,32], "rest transition reaches sleep through sitting and loaf")
-    expect(SpriteAtlas.transition(from: 33, to: 0) == [32,31,30,29,28,27,26,25,24], "waking reverses the transition art")
+    func cells(_ pose: SpriteAtlas.Pose) -> [Int] { SpriteAtlas.cells(pose, coat: 0) }
+    let restLadder = cells(.sitDown) + cells(.sit) + cells(.loafDown) + cells(.loaf) + cells(.sleepDown)
+    expect(SpriteAtlas.transition(from: cells(.stand)[0], to: cells(.sleep)[0], coat: 0) == restLadder, "rest transition reaches sleep through sitting and loaf")
+    expect(SpriteAtlas.transition(from: cells(.sleep)[0], to: cells(.stand)[0], coat: 0) == Array(restLadder.reversed()), "waking reverses the transition art")
+    // The sheet's table of contents names every behavior; each named cell is drawn, each cell belongs to one pose.
+    for pose in SpriteAtlas.Pose.allCases {
+        expect(!cells(pose).isEmpty, "\(pose) has cells in the sheet")
+        for (step, cell) in cells(pose).enumerated() { expect(SpriteAtlas.pose(of: cell, coat: 0)! == (pose, step), "cell \(cell) is \(pose) step \(step)") }
+    }
+    let walkCells = cells(.walk)
+    expect(walkCells == Array(walkCells[0]..<walkCells[0] + walkCells.count), "the walk sits in one unbroken run of cells")
     // Every artwork set is one 128-cell sprite sheet, plus copies shrunk for 1x/2x screens and each cat size.
     for name in Set((0..<8).compactMap(SpriteAtlas.artworkName)) {
         let sheet = SpriteAtlas.sheet(name)!
@@ -49,8 +58,8 @@ func runSelfTests() {
         expect(small?.size.width == CGFloat(Int((Double(SpriteAtlas.sheet(SpriteAtlas.artworkName(for: 0)!)!.cellWidth) / SpriteAtlas.sheet(SpriteAtlas.artworkName(for: 0)!)!.pixelsPerPoint).rounded())) && coverage(small) > 20, "1x adult cell \(index) is drawn and sized in points")
     }
     // Check the complete authored walk, including appended cells, instead of assuming contiguous IDs.
-    let walkIDs = SpriteAtlas.walkFrames(for: 0)
-    expect([8,16].contains(walkIDs.count) && Set(walkIDs).count == walkIDs.count, "walk uses distinct authored cells")
+    let walkIDs = cells(.walk)
+    expect(!walkIDs.isEmpty && Set(walkIDs).count == walkIDs.count, "walk uses distinct authored cells")
     var uniqueWalkArt = Set<Data>()
     for (phase, expected) in walkIDs.enumerated() {
         for size in CatSize.allCases {
@@ -73,7 +82,7 @@ func runSelfTests() {
         expect(max(abs(left),abs(right)) <= Habitat.catRadius, "walk frame \(id) fits the existing physical collision margin")
     }
     // Inspect rendered assets, not just metadata: switching to run must keep the eye scale and anchor.
-    for index in SpriteAtlas.walkFrames(for: 0) + Array(12...19) {
+    for index in walkIDs + cells(.run) {
         let sheet = SpriteAtlas.sheet(SpriteAtlas.artworkName(for: 0)!)!
         let registrationScale = sheet.pixelsPerPoint / 7.5
         let image = SpriteAtlas.cell(index, coat: 0)!.cgImage(forProposedRect: nil, context: nil, hints: nil)!
@@ -135,7 +144,7 @@ func runSelfTests() {
     // Leg frames follow distance: a cat that barely moves barely steps, and every size keeps the same rhythm
     // at its own cruising speed (strides scale with size like speed does).
     for size in CatSize.allCases {
-        for (action, speed, first, count) in [(CatAction.walking, Colony.walkSpeed, 4, SpriteAtlas.walkFrames(for: 0).count), (.running, 58.0, 12, 8)] {
+        for (action, speed, pose) in [(CatAction.walking, Colony.walkSpeed, SpriteAtlas.Pose.walk), (.running, 58.0, .run)] {
             var adult = Cat(x: 0, destination: 0, action: action, coat: 0); adult.velocity = speed
             var smaller = adult; smaller.size = size; smaller.velocity = speed * size.scale
             for i in 0..<80 {
@@ -148,18 +157,18 @@ func runSelfTests() {
             creeping.gait = 0
             let start = SpriteAtlas.frameIndex(creeping)
             creeping.gait = 0.2 * size.scale
-            expect(SpriteAtlas.frameIndex(creeping) == start && (action == .walking ? SpriteAtlas.walkFrames(for: 0).contains(start) : (first..<first + count).contains(start)), "tiny distance does not flip legs")
+            expect(SpriteAtlas.frameIndex(creeping) == start && cells(pose).contains(start), "tiny distance does not flip legs")
         }
     }
     // Every grounded frame stands on the ground line; the gallop touches it on its lowest frame.
     if SpriteAtlas.available {
         var fixes: [String] = []
-        for index in [0] + walkIDs + [26, 29, 33, 46, 48] {
+        for index in [cells(.stand)[0]] + walkIDs + [cells(.sit)[0], cells(.loaf)[0], cells(.sleep)[0], cells(.crouch)[0], cells(.creep)[0]] {
             let fix = SpriteAtlas.groundFix(index, coat: 0)
             fixes.append("\(index):\(Int(fix.rounded()))")
             expect(abs(fix) / nativeSheet.pixelsPerPoint < 40.0 / 7.5, "ground fix for frame \(index) is physically small: \(fix)")
         }
-        let run = (12...19).map { SpriteAtlas.groundFix($0, coat: 0) }
+        let run = cells(.run).map { SpriteAtlas.groundFix($0, coat: 0) }
         expect(Set(run.map { Int($0.rounded()) }).count == 1, "the gallop moves as one piece")
         print("Ground fixes (source px): \(fixes.joined(separator: " ")) run \(Int(run[0].rounded()))")
     }
@@ -178,22 +187,22 @@ func runSelfTests() {
         held.updateLanes([Lane(lower: 0, upper: 900)])
         held.cats[0].x = 300; held.cats[0].coat = coat; held.cats[0].hiddenFor = 0
         held.grab(0)
-        expect((60...61).contains(SpriteAtlas.frameIndex(held.cats[0])), "pickup uses the neutral dangling sprite, not sitting")
+        expect(SpriteAtlas.cells(.held, coat: coat).contains(SpriteAtlas.frameIndex(held.cats[0])), "pickup uses the neutral dangling sprite, not sitting")
         // A moving cat that has stopped stands instead of freezing mid-stride.
         var stopped = held.cats[0]
         for action in [CatAction.walking, .running, .chasing, .goingHome] {
             stopped.action = action; stopped.velocity = 0; stopped.gait = 4.5
-            expect(SpriteAtlas.frameIndex(stopped) == SpriteAtlas.standFrame, "stopped \(action) cat stands")
+            expect(SpriteAtlas.frameIndex(stopped) == SpriteAtlas.cells(.stand, coat: coat)[0], "stopped \(action) cat stands")
         }
         stopped.action = .walking; stopped.velocity = 12
-        expect(SpriteAtlas.group(SpriteAtlas.frameIndex(stopped)) == SpriteAtlas.group(4), "moving cat still walks")
+        expect(SpriteAtlas.group(SpriteAtlas.frameIndex(stopped), coat: coat) == .walk, "moving cat still walks")
         for _ in 0..<15 { held.cats[0].swing = 100; held.step(1.0 / 30) }
         expect(held.cats[0].heldLean < -0.2, "dragging right makes the body trail left")
         for _ in 0..<25 { held.cats[0].swing = -100; held.step(1.0 / 30) }
         expect(held.cats[0].heldLean > 0.2, "dragging left makes the body trail right")
         held.cats[0].swing = 0
         for _ in 0..<120 { held.step(1.0 / 30) }
-        expect(abs(held.cats[0].heldLean) < 0.01 && (60...61).contains(SpriteAtlas.frameIndex(held.cats[0])), "held sway damps to rest")
+        expect(abs(held.cats[0].heldLean) < 0.01 && SpriteAtlas.cells(.held, coat: coat).contains(SpriteAtlas.frameIndex(held.cats[0])), "held sway damps to rest")
         held.release(0)
         expect(held.cats[0].action == .grooming, "drop returns to grooming")
     }
