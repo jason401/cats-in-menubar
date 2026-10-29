@@ -1,12 +1,20 @@
 """Render per-behavior frame strips from the built orange sprite sheet, same scale, head-aligned."""
-import sys, os
+import sys, os, json
 from PIL import Image, ImageDraw, ImageFont
 
 _SHEET = {}
-def cell(i):
-    """Frame i from the built 64-cell sprite sheet (8 x 8 cells of 384 x 256)."""
-    if "s" not in _SHEET: _SHEET["s"] = Image.open(f"{SRC_SHEET}/sheet.png").convert("RGBA")
-    return _SHEET["s"].crop((i % 8 * 384, i // 8 * 256, i % 8 * 384 + 384, i // 8 * 256 + 256))
+def cell(i, density=None):
+    """Metadata-sized cell from the native master or exact baked screen sheet."""
+    if "meta" not in _SHEET:
+        _SHEET["meta"] = json.load(open(f"{SRC_SHEET}/sheet.json"))
+    m = _SHEET["meta"]
+    key = "s" if density is None else f"{density}x-2"
+    file = "sheet.png" if density is None else f"sheet-{key}.png"
+    if key not in _SHEET: _SHEET[key] = Image.open(f"{SRC_SHEET}/{file}").convert("RGBA")
+    w,h = (m["cellWidth"],m["cellHeight"]) if density is None else m["variants"][key]
+    im = _SHEET[key].crop((i % 8*w,i//8*h,i%8*w+w,i//8*h+h))
+    return im.resize((384,256),Image.Resampling.NEAREST) if density is None else im
+
 
 src, out = sys.argv[1], sys.argv[2]
 SRC_SHEET = src
@@ -41,7 +49,9 @@ def strip(name, frames, labels=None, per_row=8):
             if density is None:
                 cells.append(im.crop((left, top, right, bottom))); continue
             s = 24 / 180 * density  # adult cat; source px -> screen px
-            small = shrink(im, round(420 * s), round(256 * s))
+            small = Image.new("RGBA", (round(420*s),round(256*s)))
+            native = cell(frames[len(cells)], density)
+            small.alpha_composite(native, (round(20*s),0))
             l, t, r, b = (round(v * s) for v in (left, top, right, bottom))
             cells.append(small.crop((l, t, r, b)).resize(((r - l) * zoom, (b - t) * zoom), Image.NEAREST))
         cw, ch = cells[0].size
@@ -50,19 +60,19 @@ def strip(name, frames, labels=None, per_row=8):
         cols = min(per_row, len(cells)); rows = (len(cells) + cols - 1) // cols
         sheet = Image.new("RGB", (cols * (cw + pad) + pad, rows * (ch + label_h + pad) + pad), (255, 255, 255))
         d = ImageDraw.Draw(sheet)
-        for k, cell in enumerate(cells):
+        for k, tile in enumerate(cells):
             r, c = divmod(k, cols)
             x, y = pad + c * (cw + pad), pad + r * (ch + label_h + pad)
             d.rectangle([x, y, x + cw - 1, y + ch + label_h - 1], fill=(246, 244, 240))
             gy = y + round((232 - top) * unit)
             d.line([x + 4, gy, x + cw - 5, gy], fill=(200, 190, 175), width=2)
-            sheet.paste(cell, (x, y), cell)
+            sheet.paste(tile, (x, y), tile)
             text = labels[k] if labels else f"#{frames[k]}"
             d.text((x + 8, y + ch + 4), text, fill=(60, 50, 40), font=FONT)
         sheet.save(f"{out}/{name}{suffix}.png")
 
 groups = {
-    "stand": [0, 1, 2, 3], "walk": list(range(4, 12)), "run": list(range(12, 20)), "turn": [20, 21, 22, 23],
+    "stand": [0, 1, 2, 3], "walk": json.load(open(f"{src}/sheet.json"))["animations"]["walk"], "run": list(range(12, 20)), "turn": [20, 21, 22, 23],
     "stand-sit": [24, 25, 26], "sit-loaf": [27, 28, 29], "loaf-sleep": [30, 31, 32], "sleep": [33, 34],
     "groom": [35, 36, 37, 38], "stretch": [39, 40, 41, 42, 43], "yawn": [26, 44, 45, 26], "crouch": [46, 47],
     "creep": [48, 49, 50, 51], "wiggle": [52, 53], "pounce": [54, 55, 56, 57], "bat": [46, 58, 59, 26],
@@ -71,5 +81,5 @@ groups = {
 }
 for name, frames in groups.items():
     strip(name, frames, per_row=6 if name == "rest-chain" else 8)
-strip("all", list(range(62)), per_row=8)
+strip("all", list(range(len(json.load(open(f"{src}/sheet.json"))["frames"]))), per_row=8)
 print("ok")

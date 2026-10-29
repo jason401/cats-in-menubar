@@ -1,11 +1,17 @@
 import Cocoa
 
 struct Registration: Decodable { var eyeX: Double; var eyeY: Double; var scale: Double; var baselineEye: Double?; var rootX: Double? }
-// One sheet per artwork set: 64 equal cells (8 x 8), frames in order from the top left, unused cells transparent.
+// One sheet per artwork set: 128 equal cells (8 x 16), unused cells transparent.
+struct AtlasSource: Decodable {
+    var cellWidth: Int; var cellHeight: Int; var headX: Double; var ground: Double
+    var pixelsPerPoint: Double; var frameCount: Int; var walkFrames: [Int]; var walkStride: Double
+}
 struct SheetFrame: Codable { var lift: Double; var left: Double; var right: Double }
 struct SheetInfo: Codable {
-    var columns = 8, rows = 8, cellWidth = 384, cellHeight = 256
+    var columns = 8, rows = 16, cellWidth = 384, cellHeight = 256
     var headX = 300.0, ground = 232.0
+    var pixelsPerPoint = 7.5, walkStride = 12.0
+    var animations = ["walk": Array(4...11)]
     var frames: [SheetFrame]
     var variants: [String: [Int]]   // "<density>x-<size>": cell width and height in screen pixels
 }
@@ -43,8 +49,17 @@ func extent(_ image: CGImage) -> (bottom: Double, left: Double, right: Double) {
 func writePNG(_ image: CGImage, _ url: URL) throws {
     try NSBitmapImageRep(cgImage: image).representation(using: .png, properties: [:])!.write(to: url)
 }
-func writeSheet(_ frames: [CGImage], to folder: URL) throws {
-    let info0 = SheetInfo(frames: [], variants: [:])
+func writeSheet(_ frames: [CGImage], to folder: URL, source: AtlasSource? = nil) throws {
+    var info0 = SheetInfo(frames: [], variants: [:])
+    if let source {
+        precondition(source.pixelsPerPoint > 0 && source.walkStride > 0)
+        precondition([8, 16].contains(source.walkFrames.count) && Set(source.walkFrames).count == source.walkFrames.count)
+        precondition(source.walkFrames.allSatisfy { frames.indices.contains($0) })
+        info0.cellWidth = source.cellWidth; info0.cellHeight = source.cellHeight
+        info0.headX = source.headX; info0.ground = source.ground
+        info0.pixelsPerPoint = source.pixelsPerPoint; info0.walkStride = source.walkStride
+        info0.animations = ["walk": source.walkFrames]
+    }
     precondition(frames.count <= info0.columns * info0.rows, "More frames than sheet cells")
     // Paws go on the ground line per frame; a gallop or pounce moves as a whole, so only true flight frames leave the ground.
     let extents = frames.map(extent)
@@ -61,8 +76,8 @@ func writeSheet(_ frames: [CGImage], to folder: URL) throws {
     var variants: [String: [Int]] = [:]
     for density in [0, 1, 2] {   // 0 = the original, high quality
         for (size, scale) in sizeScales.enumerated() where density > 0 || size == 0 {
-            let factor = density == 0 ? 1 : sourceScale * scale * Double(density)
-            let w = Int((Double(cell.width) * factor).rounded()), h = Int((Double(cell.height) * factor).rounded())
+            let factor = density == 0 ? 1 : scale * Double(density) / info0.pixelsPerPoint
+            let w = Int((Double(info0.cellWidth) * factor).rounded()), h = Int((Double(info0.cellHeight) * factor).rounded())
             let sheet = rgbaContext(w * info0.columns, h * info0.rows)
             for (index, frame) in frames.enumerated() {
                 let column = index % info0.columns, row = index / info0.columns
@@ -148,11 +163,40 @@ var prepared = Set<String>()
 var resolved: [String] = []
 for name in names {
     let own = v3.appendingPathComponent(name)
-    let coat = sheets.allSatisfy { FileManager.default.fileExists(atPath: own.appendingPathComponent($0.0 + ".png").path) } ? name : "orange"
+    let single = input.appendingPathComponent("sheets/\(name).png")
+    let hasSingle = FileManager.default.fileExists(atPath: single.path)
+    let coat = hasSingle || sheets.allSatisfy { FileManager.default.fileExists(atPath: own.appendingPathComponent($0.0 + ".png").path) } ? name : "orange"
     resolved.append(coat)
     if prepared.contains(coat) { continue }
     let folder = output.appendingPathComponent(coat)
     try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+    // A registered atlas is already authored in runtime coordinates. Never crop, fit or rescale
+    // its individual poses: that would change head size, limb length and animation endpoints.
+    let atlasURL = input.appendingPathComponent("sheets/\(coat).png")
+    if FileManager.default.fileExists(atPath: atlasURL.path) {
+        guard let atlas = NSBitmapImageRep(data: try Data(contentsOf: atlasURL))?.cgImage else {
+            fatalError("Cannot decode \(atlasURL.path)")
+        }
+        let manifestURL = input.appendingPathComponent("sheets/\(coat).json")
+        let source = FileManager.default.fileExists(atPath: manifestURL.path)
+            ? try JSONDecoder().decode(AtlasSource.self, from: Data(contentsOf: manifestURL)) : nil
+        let w = source?.cellWidth ?? cell.width, h = source?.cellHeight ?? cell.height
+        let count = source?.frameCount ?? 62
+        precondition(w > 0 && h > 0 && count >= 62 && count <= 128)
+        precondition(atlas.width == w * 8 && (atlas.height == h * 16 || source == nil && atlas.height == h * 8),
+                     "Atlas must have 8 columns x 16 rows; legacy 64-cell sources remain readable")
+        let frames = (0..<count).map { index in
+            atlas.cropping(to: CGRect(x: index % 8 * w, y: index / 8 * h, width: w, height: h))!
+        }
+        precondition(frames.allSatisfy { extent($0).right > extent($0).left }, "Atlas has an empty pose")
+        for index in count..<(8 * atlas.height / h) {
+            let empty = atlas.cropping(to: CGRect(x: index % 8 * w, y: index / 8 * h, width: w, height: h))!
+            precondition(extent(empty).right == 0, "Reserved atlas cell \(index) must be empty")
+        }
+        try writeSheet(frames, to: folder, source: source)
+        prepared.insert(coat)
+        continue
+    }
     let registrationURL = v3.appendingPathComponent(coat).appendingPathComponent("registration.json")
     let registration = FileManager.default.fileExists(atPath: registrationURL.path)
         ? try JSONDecoder().decode([String: [Registration]].self, from: Data(contentsOf: registrationURL)) : [:]
@@ -216,4 +260,4 @@ for name in names {
     prepared.insert(coat)
 }
 try JSONEncoder().encode(resolved).write(to: output.appendingPathComponent("coats.json"))
-print("Prepared v3: 62 frames in a 64-cell sheet per artwork set; coat fallback: \(resolved)")
+print("Prepared 128-cell sheets (8 x 16); coat fallback: \(resolved)")

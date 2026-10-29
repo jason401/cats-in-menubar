@@ -1,5 +1,27 @@
 # Cats in Menubar — 2026-10-28
 
+## Current: native 2x master, 16-frame slow walk, 128 cells
+
+This supersedes the earlier 64-cell / 8-frame walk descriptions below. User supplied `cat_walk_sheet_4x4.png` and `cat_walk_legmap_4x4.png`, selected a slow 16-phase walk, requested 128-cell capacity, and approved native menu-bar resolution. Active source is now `app/macos/Resources/Cats/sheets/orange.png` + `orange.json`: 8×16 cells, each 102×68 px (2x), total816×1088. 70 cells occupied, 58 transparent. Walk order `[4...11,62...69]`; every other action ID stays stable. The other54 poses are pixel-identical to the previous adult-2x sheet (verified all54).
+
+The initial built-in ImageGen redraw changed the foot order and was rejected. Adopted artwork is a seam-repair edit of the user's exact16 poses (`design/native-walk16/cleanup-source.png`, full prompt/provenance and measured landmarks there). `tools/import_walk16.swift` measures the eyes and uses one common scale to register the native master. The generation tool returned a larger intermediate; do not claim it directly output102×68 cells. The active authoring/runtime master itself is native2x, with no larger runtime sheet. Builds create the three sizes at1x/2x. Renderer uses metadata `pixelsPerPoint`, avoiding an accidental size change when source resolution changes.
+
+Adult walking6pt/s, acceleration12pt/s², stride9.6pt, 16phases/1.6seconds; size scales both speed and stride. A slower-walk regression exposed cats already at a notch entrance facing the wrong way. Entry now derives direction from its side and turns before crossing; a deterministic test covers it. Slow crossing bound24s; hidden middle still120pt/s. Picking test excludes the crossing cat itself while allowing a different visible cat at the same x.
+
+Full `tools/test.sh` passed336,749 assertions, 30,000 changing-obstacle steps and all standard renders. Verifies actual source pictures, all16 distinct/order/wrap across sizes, native eye scale/anchor,128cells/58empty and power/tunnel behavior. Inspected baked1x/2x, fore/hind crops and16→1 in `build/previews/native-walk16/review.html`. `walk.gif` is16frames×100ms and shows exact screen cells at integer zoom plus actual1x. These checks are not proof of perfect anatomy or pixel-perfect ground locking in all behaviors; broader non-walk artwork corrections remain separate.
+
+App restarted from the same bundle with existing Accessibility access. Fresh log: pid46071, Accessibility true; usable free areas and notch tunnel open. No live desktop screenshot (menu/screen privacy), no manual drag observation. No sibling app, key, permission or preferences changed.
+
+Behavior-document generators now read native metadata/baked images and use the new timing/IDs. Original `design/cat-behaviors.docx` remains untouched: candidate generated in ignored build/, but three bundled-renderer checks omitted Korean body text (two font choices and a host retry), so no unverified DOCX was delivered. Do not call its existing content current. Native-walk README records this limitation.
+
+## Latest review: proportions and connected poses — NOT completed
+
+User requested corrected proportions across all 62 poses, especially natural short-legged walking, and repeated review against `design/cat-behaviors.docx` connections. Full document text and connection diagrams were read and compared with actual runtime routing. Two full atlas attempts, three walk-only attempts and one isolated forepaw pose were generated with built-in ImageGen. All were rejected for inadequate foreleg pose adherence, hub/crouch-to-bat discontinuities or character drift. **No new art was installed.** See `design/proportion-v7/QA.md`; do not report this art request as finished.
+
+Added `tools/audit_sprite_sheet.cjs`: measurements, ordered connection strips and a source/1x HTML player with pause/step controls. Outputs: `build/previews/proportion-before/` and `proportion-attempt-02/`. The player is a source-art inspection aid, not the actual AppKit renderer. Source/strip/browser review confirmed existing defects; it did not approve a new animation.
+
+Added optional single registered atlas input at `app/macos/Resources/Cats/sheets/<coat>.png` in `prepare_assets.swift`. No source atlas is installed there yet, so existing strip behavior is retained. A fixture importing the existing built atlas produced pixel-identical full and all six menu-bar sheets. Full `tools/test.sh` passed: 335,395 assertions, 30,000 changing-obstacle steps and all standard renders. This is code/regression validation, not proof that the artwork issue is fixed. Existing app identity and preferences retained; no GUI restart or manual drag test in this pass.
+
 ## Scope
 
 First native development app, macOS 14+. Standalone bundle at `build/Cats in Menubar.app`; no installed app or existing project was modified. Private GitHub repository: https://github.com/jason401/cats-in-menubar .

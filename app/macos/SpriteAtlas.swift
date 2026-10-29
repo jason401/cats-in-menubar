@@ -2,12 +2,15 @@ import Cocoa
 
 /// Each cat owns its artwork. No runtime recoloring or rectangular coat masks.
 enum SpriteAtlas {
-    /// One sprite sheet per artwork set: 64 equal cells (8 x 8), frame n at column n % 8, row n / 8, unused cells empty.
+    /// One sprite sheet per artwork set: 128 equal cells (8 x 16), unused cells empty.
     /// The build also writes copies already shrunk for the menu bar: `sheet-<density>x-<size>.png`.
     struct Sheet: Decodable {
         struct Frame: Decodable { var lift: Double; var left: Double; var right: Double }
         var columns: Int, rows: Int, cellWidth: Int, cellHeight: Int
         var headX: Double, ground: Double
+        var pixelsPerPoint: Double
+        var walkStride: Double
+        var animations: [String: [Int]]
         var frames: [Frame]
         var variants: [String: [Int]]
     }
@@ -21,8 +24,10 @@ enum SpriteAtlas {
         return sheet
     }
     private static func sheet(for coat: Int) -> Sheet? { artworkName(for: coat).flatMap(sheet) }
-    static let frameCount = 62
-    static let cellCount = 64
+    static var frameCount: Int { sheet(for: 0)?.frames.count ?? 62 }
+    static let cellCount = 128
+    static func walkFrames(for coat: Int) -> [Int] { sheet(for: coat)?.animations["walk"] ?? Array(4...11) }
+    static func walkStride(for coat: Int) -> Double { sheet(for: coat)?.walkStride ?? 12 }
     private static let resolvedCoats: [String] = {
         guard let url = folder?.appendingPathComponent("coats.json"), let data = try? Data(contentsOf: url),
               let names = try? JSONDecoder().decode([String].self, from: data), names.count == 8 else { return [] }
@@ -32,7 +37,10 @@ enum SpriteAtlas {
     static var available: Bool {
         guard let folder, resolvedCoats.count == 8 else { return false }
         return Set(resolvedCoats).allSatisfy { name in
-            guard let sheet = sheet(name), sheet.frames.count == frameCount, sheet.columns * sheet.rows == cellCount else { return false }
+            guard let sheet = sheet(name), (62...cellCount).contains(sheet.frames.count), sheet.columns == 8, sheet.rows == 16,
+                  sheet.pixelsPerPoint > 0, sheet.walkStride > 0, let walk = sheet.animations["walk"],
+                  [8,16].contains(walk.count), Set(walk).count == walk.count,
+                  walk.allSatisfy({ sheet.frames.indices.contains($0) }) else { return false }
             return (["sheet.png"] + sheet.variants.keys.map { "sheet-\($0).png" }).allSatisfy {
                 FileManager.default.fileExists(atPath: folder.appendingPathComponent("\(name)/\($0)").path)
             }
@@ -46,10 +54,10 @@ enum SpriteAtlas {
     // Leg frames advance with distance walked, so feet never slide: slow down and the legs slow down too.
     // Strides scale with cat size like travel speed does, so every size keeps the same rhythm
     // (at cruising speed this equals 10 fps walking, 16 fps running, 5 fps creeping).
-    static let walkStride = 12.0   // pt per 8-frame walk cycle, adult
+    static var walkStride: Double { walkStride(for: 0) }
     static let runStride = 29.0    // pt per 8-frame gallop, adult
     static let creepStride = 4.8   // pt per 4-frame creep, adult
-    static let walkFPS = 10.0      // reference cadence at 15 pt/s, used by previews
+    static var walkFPS: Double { Double(walkFrames(for: 0).count) * Colony.walkSpeed / walkStride }
     static let runFPS = 16.0       // reference cadence at 58 pt/s
     static let standFrame = 0
     static func frameIndex(_ cat: Cat) -> Int {
@@ -60,7 +68,9 @@ enum SpriteAtlas {
         func cycle(_ start: Int, _ count: Int, _ stride: Double) -> Int {
             start + Int(max(0, cat.gait) / (stride * cat.size.scale) * Double(count)) % count
         }
-        let walking = stopped ? idle : cycle(4, 8, walkStride)
+        let walk = walkFrames(for: cat.coat)
+        let walkPhase = Int(max(0, cat.gait) / (walkStride(for: cat.coat) * cat.size.scale) * Double(walk.count)) % walk.count
+        let walking = stopped ? idle : walk[walkPhase]
         let running = stopped ? standFrame : cycle(12, 8, runStride)
         switch cat.action {
         case .sleeping: return loop(33, 2, 0.65)
@@ -133,7 +143,7 @@ enum SpriteAtlas {
     static func group(_ frame: Int) -> Int {
         switch frame {
         case 0...3: return 0
-        case 4...11: return 4
+        case 4...11, 62...69: return 4
         case 12...19: return 12
         case 20...23: return 20
         case 24...26, 44...45: return 26
@@ -160,7 +170,7 @@ enum SpriteAtlas {
         guard let sheet = sheet(for: cat.coat), sheet.frames.indices.contains(index) else { return 0 }
         let frame = sheet.frames[index]
         let middle = (frame.left + frame.right) / 2 - sheet.headX
-        return CGFloat(direction) * (offsetFor(cat, cat.size.scale) + middle * sourceScale * cat.size.scale)
+        return CGFloat(direction) * (offsetFor(cat, cat.size.scale) + middle / sheet.pixelsPerPoint * cat.size.scale)
     }
     private static func offsetFor(_ cat: Cat, _ scale: CGFloat) -> CGFloat { cat.action == .held ? 0 : 9 * scale }
     /// Pixels per point of the menu bar display (the overlay lives on the primary screen).
@@ -176,7 +186,7 @@ enum SpriteAtlas {
             scale *= cat.hopIn ? 1 - 0.55 * q * q : 0.45 + 0.55 * q
             lift = sin(q * .pi) * 7
         } else if cat.action == .pouncing { lift = sin(min(1, cat.elapsed / 0.45) * .pi) * 4.5 }
-        let factor = Self.sourceScale * scale
+        let factor = scale / sheet.pixelsPerPoint
         let breathing: CGFloat = [.sleeping, .loafing].contains(cat.action) ? 1 + sin(cat.phase * 1.5) * 0.015 : 1
         // In the menu bar (scale 1) draw the cell from the sheet shrunk at build time for this screen and cat size,
         // snapped to the pixel grid; previews at other scales and the brief tower hop draw the original.

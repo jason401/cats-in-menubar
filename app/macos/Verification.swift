@@ -23,13 +23,13 @@ func runSelfTests() {
     }
     expect(SpriteAtlas.transition(from: 0, to: 33) == [24,25,26,27,28,29,30,31,32], "rest transition reaches sleep through sitting and loaf")
     expect(SpriteAtlas.transition(from: 33, to: 0) == [32,31,30,29,28,27,26,25,24], "waking reverses the transition art")
-    // Every artwork set is one 64-cell sprite sheet, plus copies shrunk for 1x/2x screens and each cat size.
+    // Every artwork set is one 128-cell sprite sheet, plus copies shrunk for 1x/2x screens and each cat size.
     for name in Set((0..<8).compactMap(SpriteAtlas.artworkName)) {
         let sheet = SpriteAtlas.sheet(name)!
-        expect(sheet.columns == 8 && sheet.rows == 8 && sheet.frames.count == SpriteAtlas.frameCount, "\(name) sheet is 8 x 8 cells")
+        expect(sheet.columns == 8 && sheet.rows == 16 && (62...128).contains(sheet.frames.count), "\(name) sheet is 8 x 16 cells")
         for density in [1, 2] { for size in CatSize.allCases {
             let cells = sheet.variants[SpriteAtlas.variant(for: size, density: density)]
-            let expected = [sheet.cellWidth, sheet.cellHeight].map { Int((Double($0) * Double(SpriteAtlas.sourceScale) * size.scale * Double(density)).rounded()) }
+            let expected = [sheet.cellWidth, sheet.cellHeight].map { Int((Double($0) * (1 / sheet.pixelsPerPoint) * size.scale * Double(density)).rounded()) }
             expect(cells == expected, "\(name) \(density)x \(size) cells are the menu bar pixel size: \(String(describing: cells))")
         }}
     }
@@ -46,21 +46,51 @@ func runSelfTests() {
     }
     for index in [0, 6, 26, 33, 60] {
         let small = SpriteAtlas.cell(index, coat: 0, variant: SpriteAtlas.variant(for: .adult, density: 1))
-        expect(small?.size.width == CGFloat(Int((384 * 24.0 / 180).rounded())) && coverage(small) > 20, "1x adult cell \(index) is drawn and sized in points")
+        expect(small?.size.width == CGFloat(Int((Double(SpriteAtlas.sheet(SpriteAtlas.artworkName(for: 0)!)!.cellWidth) / SpriteAtlas.sheet(SpriteAtlas.artworkName(for: 0)!)!.pixelsPerPoint).rounded())) && coverage(small) > 20, "1x adult cell \(index) is drawn and sized in points")
+    }
+    // Check the complete authored walk, including appended cells, instead of assuming contiguous IDs.
+    let walkIDs = SpriteAtlas.walkFrames(for: 0)
+    expect([8,16].contains(walkIDs.count) && Set(walkIDs).count == walkIDs.count, "walk uses distinct authored cells")
+    var uniqueWalkArt = Set<Data>()
+    for (phase, expected) in walkIDs.enumerated() {
+        for size in CatSize.allCases {
+            var cat = Cat(x: 0, destination: 100, action: .walking, coat: 0, size: size)
+            cat.velocity = Colony.walkSpeed * size.scale
+            cat.gait = (Double(phase) + 0.01) / Double(walkIDs.count) * SpriteAtlas.walkStride * size.scale
+            expect(SpriteAtlas.frameIndex(cat) == expected, "walk follows its full frame order at every size")
+            cat.gait += SpriteAtlas.walkStride * size.scale
+            expect(SpriteAtlas.frameIndex(cat) == expected, "walk wraps without dropping or repeating a phase")
+        }
+        let cg = SpriteAtlas.cell(expected, coat: 0)!.cgImage(forProposedRect: nil, context: nil, hints: nil)!
+        uniqueWalkArt.insert(NSBitmapImageRep(cgImage: cg).representation(using: .png, properties: [:])!)
+    }
+    expect(uniqueWalkArt.count == walkIDs.count, "walk does not repeat eight pictures to fake sixteen")
+    let nativeSheet = SpriteAtlas.sheet(SpriteAtlas.artworkName(for: 0)!)!
+    for id in walkIDs {
+        let edges = nativeSheet.frames[id]
+        let left = 9 + (edges.left-nativeSheet.headX)/nativeSheet.pixelsPerPoint
+        let right = 9 + (edges.right-nativeSheet.headX)/nativeSheet.pixelsPerPoint
+        expect(max(abs(left),abs(right)) <= Habitat.catRadius, "walk frame \(id) fits the existing physical collision margin")
     }
     // Inspect rendered assets, not just metadata: switching to run must keep the eye scale and anchor.
-    for index in 4...19 {
+    for index in SpriteAtlas.walkFrames(for: 0) + Array(12...19) {
+        let sheet = SpriteAtlas.sheet(SpriteAtlas.artworkName(for: 0)!)!
+        let registrationScale = sheet.pixelsPerPoint / 7.5
         let image = SpriteAtlas.cell(index, coat: 0)!.cgImage(forProposedRect: nil, context: nil, hints: nil)!
         let ctx = CGContext(data: nil, width: image.width, height: image.height, bitsPerComponent: 8, bytesPerRow: image.width * 4,
             space: CGColorSpace(name: CGColorSpace.sRGB)!, bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)!
         ctx.draw(image, in: CGRect(x: 0, y: 0, width: image.width, height: image.height))
         let pixels = ctx.data!.assumingMemoryBound(to: UInt8.self)
         // Bitmap rows are top-down: eye is 256 - (24+97) = 135 pixels from the top.
-        let left = 270, bottom = 90, w = 60, h = 65
+        let left = Int((sheet.headX - 30 * registrationScale).rounded())
+        let bottom = Int((sheet.ground - 142 * registrationScale).rounded())
+        let w = Int((60 * registrationScale).rounded()), h = Int((65 * registrationScale).rounded())
         var mask = [Bool](repeating: false, count: w*h)
         for y in 0..<h { for x in 0..<w {
             let p = ((y+bottom)*image.width+x+left)*4
-            mask[y*w+x] = pixels[p+3] > 180 && max(pixels[p], pixels[p+1], pixels[p+2]) < 55
+            // At native 2x the eye is only 3–4 pixels high; include its antialiased dark edge.
+            let darkLimit: UInt8 = registrationScale < 0.5 ? 110 : 55
+            mask[y*w+x] = pixels[p+3] > 180 && max(pixels[p], pixels[p+1], pixels[p+2]) < darkLimit
         }}
         var eyes: [[Int]] = []
         for start in mask.indices where mask[start] {
@@ -72,15 +102,17 @@ func runSelfTests() {
                     if mask[n] { mask[n]=false; q.append(n) }
                 }
             }
-            if q.count > 30 && !q.contains(where: { $0%w == 0 || $0%w == w-1 || $0/w == 0 || $0/w == h-1 }) { eyes.append(q) }
+            if q.count > max(1, Int(30 * registrationScale * registrationScale)) && !q.contains(where: { $0%w == 0 || $0%w == w-1 || $0/w == 0 || $0/w == h-1 }) { eyes.append(q) }
         }
         expect(!eyes.isEmpty, "registered frame has a visible eye")
         let eye = eyes.max(by: { $0.count < $1.count })!
         let eyeX = Double(eye.map { $0%w+left }.reduce(0,+))/Double(eye.count)
         let eyeY = Double(eye.map { $0/w+bottom }.reduce(0,+))/Double(eye.count)
         let height = eye.map { $0/w }.max()! - eye.map { $0/w }.min()! + 1
-        expect(abs(eyeX-300) < 2 && abs(eyeY-135) < 2, "walk/run use the actual eye anchor")
-        expect((12...14).contains(height), "walk/run head feature does not shrink")
+        // Resampled native pixels represent pixel centers, half a pixel inside the geometric anchor.
+        let center = registrationScale < 0.5 ? 0.5 : 0
+        expect(abs(eyeX-(sheet.headX-center)) < max(0.8, 2 * registrationScale) && abs(eyeY-(sheet.ground-97*registrationScale-center)) < max(0.8, 2 * registrationScale), "frame \(index) uses the actual eye anchor (\(eyeX), \(eyeY))")
+        expect(abs(Double(height) - 13 * registrationScale) <= max(1.1, registrationScale), "frame \(index) keeps head feature scale: \(height)")
     }
     let lanes = Habitat.freeLanes(width: 1000, obstacles: [Lane(lower: 0, upper: 220), Lane(lower: 800, upper: 1000)])
     expect(lanes == [Lane(lower: 228, upper: 792)], "menu padding")
@@ -103,7 +135,7 @@ func runSelfTests() {
     // Leg frames follow distance: a cat that barely moves barely steps, and every size keeps the same rhythm
     // at its own cruising speed (strides scale with size like speed does).
     for size in CatSize.allCases {
-        for (action, speed, first, count) in [(CatAction.walking, 15.0, 4, 8), (.running, 58.0, 12, 8)] {
+        for (action, speed, first, count) in [(CatAction.walking, Colony.walkSpeed, 4, SpriteAtlas.walkFrames(for: 0).count), (.running, 58.0, 12, 8)] {
             var adult = Cat(x: 0, destination: 0, action: action, coat: 0); adult.velocity = speed
             var smaller = adult; smaller.size = size; smaller.velocity = speed * size.scale
             for i in 0..<80 {
@@ -116,16 +148,16 @@ func runSelfTests() {
             creeping.gait = 0
             let start = SpriteAtlas.frameIndex(creeping)
             creeping.gait = 0.2 * size.scale
-            expect(SpriteAtlas.frameIndex(creeping) == start && (first..<first + count).contains(start), "tiny distance does not flip legs")
+            expect(SpriteAtlas.frameIndex(creeping) == start && (action == .walking ? SpriteAtlas.walkFrames(for: 0).contains(start) : (first..<first + count).contains(start)), "tiny distance does not flip legs")
         }
     }
     // Every grounded frame stands on the ground line; the gallop touches it on its lowest frame.
     if SpriteAtlas.available {
         var fixes: [String] = []
-        for index in [0, 4, 5, 6, 7, 8, 9, 10, 11, 26, 29, 33, 46, 48] {
+        for index in [0] + walkIDs + [26, 29, 33, 46, 48] {
             let fix = SpriteAtlas.groundFix(index, coat: 0)
             fixes.append("\(index):\(Int(fix.rounded()))")
-            expect(abs(fix) < 40, "ground fix for frame \(index) is a small nudge, not a jump: \(fix)")
+            expect(abs(fix) / nativeSheet.pixelsPerPoint < 40.0 / 7.5, "ground fix for frame \(index) is physically small: \(fix)")
         }
         let run = (12...19).map { SpriteAtlas.groundFix($0, coat: 0) }
         expect(Set(run.map { Int($0.rounded()) }).count == 1, "the gallop moves as one piece")
@@ -303,6 +335,13 @@ func runSelfTests() {
         notched.updateLanes(Habitat.freeLanes(width: 1200, obstacles: [Lane(lower: 0, upper: 150), notch]))
         let ends = notched.tunnelEnds()
         expect(ends?.left.upper == 492 && ends?.right.lower == 708, "the free spaces next to the notch are its two ends")
+        let entrance = Colony(count: 1, random: { 0.5 })
+        entrance.tunnel = notch; entrance.updateLanes(notched.lanes)
+        entrance.cats[0].x = 468; entrance.cats[0].destination = 468
+        entrance.cats[0].direction = -1; entrance.cats[0].visible = true; entrance.cats[0].hiddenFor = 0
+        entrance.start(0, .walking, for: 100); entrance.cats[0].tunnelBound = true
+        for _ in 0..<720 { entrance.step(1.0 / 30) }
+        expect(!entrance.cats[0].inTunnel && entrance.cats[0].x > 700, "facing away at the entrance still crosses to the opposite side")
         var crossings = 0, inside = [Double](repeating: 0, count: 3), wasIn = notched.cats.map(\.inTunnel)
         var side = notched.cats.map { $0.x < 600 }
         for _ in 0..<60000 {
@@ -311,12 +350,13 @@ func runSelfTests() {
                 if cat.inTunnel {
                     inside[i] += 1.0 / 30
                     expect(cat.x >= 492 - cat.radius && cat.x <= 708 + cat.radius, "a crossing cat stays between the two sides")
-                    expect(notched.catIndex(at: cat.x) == nil, "a cat behind the notch cannot be picked up")
+                    // Another visible cat may occupy the same x while this cat crosses slowly.
+                    expect(notched.catIndex(at: cat.x) != i, "the crossing cat itself cannot be picked up")
                 } else {
                     expect(notched.lanes.contains { $0.contains(cat.x, margin: cat.radius) }, "outside the notch cats stay in free space")
                     if wasIn[i] {
                         expect(side[i] != (cat.x < 600), "a crossing ends on the other side")
-                        expect(inside[i] < 12, "the crossing is short: \(inside[i]) s")
+                        expect(inside[i] < 24, "the slow walk through the crossing finishes: \(inside[i]) s")
                         crossings += 1
                     }
                     inside[i] = 0; side[i] = cat.x < 600
@@ -472,7 +512,7 @@ func renderLineup(to path: String) {
         for size in CatSize.allCases {
             let x = left + CGFloat(35 + size.rawValue * 84)
             var cat = Cat(x: 0, destination: 0, action: .walking, phase: 1.3, visible: true, coat: coat, size: size)
-            cat.velocity = 15; cat.gait = 3
+            cat.velocity = Colony.walkSpeed; cat.gait = 3
             CatDrawing.cat(cat, at: NSPoint(x: x, y: base + 60), scale: 2)
             (size.label as NSString).draw(at: NSPoint(x: x - 19, y: base + 31), withAttributes: label)
             CatDrawing.cat(cat, at: NSPoint(x: x, y: base))
@@ -511,7 +551,7 @@ func renderMotion(to path: String) {
         ("Size changes travel speed, not frantic frame speed" as NSString).draw(at: NSPoint(x: 24, y: 399), withAttributes: title)
         for i in 0..<3 {
             let y = CGFloat(288 - i * 104)
-            ("\(colony.cats[i].size.label) · \(String(format: "%.1f", 15 * colony.cats[i].size.scale)) pt/s" as NSString).draw(at: NSPoint(x: 24, y: y + 58), withAttributes: label)
+            ("\(colony.cats[i].size.label) · \(String(format: "%.1f", Colony.walkSpeed * colony.cats[i].size.scale)) pt/s" as NSString).draw(at: NSPoint(x: 24, y: y + 58), withAttributes: label)
             NSColor.white.withAlphaComponent(0.12).setFill(); NSRect(x: 24, y: y - 2, width: 850, height: 1).fill()
             CatDrawing.cat(colony.cats[i], at: NSPoint(x: colony.cats[i].x * 2, y: y), scale: 2)
         }

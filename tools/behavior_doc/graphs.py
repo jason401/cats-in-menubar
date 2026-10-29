@@ -10,10 +10,18 @@ from matplotlib.patches import FancyArrowPatch, FancyBboxPatch
 from PIL import Image
 
 _SHEET = {}
-def cell(i):
-    """Frame i from the built 64-cell sprite sheet (8 x 8 cells of 384 x 256)."""
-    if "s" not in _SHEET: _SHEET["s"] = Image.open(f"{SRC_SHEET}/sheet.png").convert("RGBA")
-    return _SHEET["s"].crop((i % 8 * 384, i // 8 * 256, i % 8 * 384 + 384, i // 8 * 256 + 256))
+def cell(i, density=None):
+    """Metadata-sized cell from the native master or exact baked screen sheet."""
+    if "meta" not in _SHEET:
+        _SHEET["meta"] = json.load(open(f"{SRC_SHEET}/sheet.json"))
+    m = _SHEET["meta"]
+    key = "s" if density is None else f"{density}x-2"
+    file = "sheet.png" if density is None else f"sheet-{key}.png"
+    if key not in _SHEET: _SHEET[key] = Image.open(f"{SRC_SHEET}/{file}").convert("RGBA")
+    w,h = (m["cellWidth"],m["cellHeight"]) if density is None else m["variants"][key]
+    im = _SHEET[key].crop((i % 8*w,i//8*h,i%8*w+w,i//8*h+h))
+    return im.resize((384,256),Image.Resampling.NEAREST) if density is None else im
+
 
 
 SRC, OUT = sys.argv[1], sys.argv[2]

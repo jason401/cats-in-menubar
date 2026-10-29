@@ -1,0 +1,21 @@
+Edit the attached 8x8 orange cat sprite atlas as production animation artwork. Output EXACTLY 3072x2048 pixels, transparent RGBA, 8 columns x 8 rows of 384x256 cells. No labels, no grid, no shadows. Preserve the original adorable illustrated orange tabby character, brown outline, cream muzzle/paws, same head/eye/ear size, same trunk length/volume, same SHORT leg bone lengths, same tail length and markings consistently in EVERY pose. Current walking legs are too long: redraw all walking legs to the short compact standing-cat proportions, NOT stilts. Maintain original illustration quality, not cutout pieces. Use source stand character as master proportion reference for every pose, including sitting/grooming/held. Do not fit each cat independently to cell or resize heads between poses. All entire sprites stay within each cell. All nonflight paws touch cell y=232. Main right-facing standing eye around x=300 y=135; head approx 65x65, body from x=150 to270, short exposed legs about 40px. Tail extends left to about75. No anatomy stretching except spine articulation in gallop. Blank last TWO cells. The input atlas is the edit target; the second walk sample is motion reference ONLY, never copy cutout seams.
+Frame index zero-based row-major:
+0 stand master short legs;
+1,2,3 exact same stand body and head, ONLY tail sways slightly (1-2-3-2 loop).
+4-11 EIGHT evenly timed genuine quadruped WALK frames facing right. Head/trunk identical to master, very small body bob. All FOUR legs articulate, near/far distinguishable. A four-beat cat walk, sequential liftoffs rear-near, fore-near, rear-far, fore-far separated 2 frames. 62% stance,38% swing. Each planted foot moves BACK relative to body 11px PER frame, lifts and swings forward with bent joints while opposite feet support. Front limbs visibly alternate forward/back, no frozen foreleg across frames, no running bounce, no long skinny legs, no duplication. Every two adjacent phases differ by similar small amounts. Last11→first4 is smooth.
+12-19 eight gallop phases same head size, consistent bone lengths: gather, hind push-off touching ground, airborne extension, front contact touching ground, front support, gather, recovery, preparation. Tail and spine continuous, not random.
+20-23 turn: exact stand right → 3/4 right → front → exact mirrored stand left. Same body mass, head and legs.
+24-26 lower hindquarters progressively from stand to canonical seated cat.26 is master SIT hub, same head size as0 and same foreleg length as0.
+27-29 lower master SIT to compact LOAF.27 starts close to26;29 master LOAF.
+30-32 curl master LOAF into SLEEP.30 close to29,32 master sleeping.
+33-34 same as32 with tiny breathing belly change, head identical.
+35-38 grooming master SIT:35 EXACT26;36 lifts forepaw/licks;37 wipes face;38 EXACT26. Same body, head, tail position.
+39-43 stretch:39 EXACT0;40 lower front body with planted hind paws;41 deep front stretch hind paws stay;42 recover;43 EXACT0.
+44-45 yawn: same master26 body position/proportions, ONLY mouth/eyes open then close. No head/body scale change.
+46-47 crouch hubs same cat:46 medium crouch elbows bent,47 slightly lower.
+48-51 low creeping WALK, SAME body/head height as46, alternate short bent limbs; never pop up to standing.
+52-53 same medium crouch46, tiny hindquarter wiggle only.
+54-57 pounce:54 medium crouch46 ready;55 airborne extended;56 front paws landing;57 EXACT stand0. Same head/limb lengths.
+58-59 paw swipe: low crouch46 lifts one front paw then extends it; preserve low body/head height, NOT sitting. No ball.
+60-61 held dangling: same head size/torso/bone length as standing and sit, hind legs kick slightly, no elongated skinny different cat.
+Critical: shared hub endpoint sprites visibly identical at 0=39=43=57 and26=35=38,32≈33≈34; sitting26 must flow into27,29 into30,32 into33; walk4-11 must have coherent shorter legs matching0, consistent shoulder/hip heights. This is a SINGLE complete corrected sprite atlas.

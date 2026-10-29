@@ -89,6 +89,8 @@ struct ToyBall {
 }
 
 final class Colony {
+    static let walkSpeed = 6.0
+    static let walkAcceleration = 12.0
     var cats: [Cat] = []
     var ball: ToyBall?
     var lanes: [Lane] = []
@@ -241,13 +243,18 @@ final class Colony {
         }
         let exitLane = cats[i].direction > 0 ? ends.right : ends.left
         let exit = cats[i].direction > 0 ? exitLane.lower + cats[i].radius : exitLane.upper - cats[i].radius
-        let walk = 15 * cats[i].size.scale
+        if cats[i].turnHold > 0 {
+            cats[i].turnHold = max(0, cats[i].turnHold - dt)
+            cats[i].phase += dt; cats[i].elapsed += dt
+            return
+        }
+        let walk = Self.walkSpeed * cats[i].size.scale
         if cats[i].x - cats[i].radius >= tunnel.lower && cats[i].x + cats[i].radius <= tunnel.upper {
             // Out of sight it hurries, so the notch is a short wait rather than a long walk.
             cats[i].velocity = cats[i].direction * 120 * cats[i].size.scale
         } else {
             // Going in and coming out it walks, like any other walk.
-            let speed = min(walk, abs(cats[i].velocity) + 30 * cats[i].size.scale * dt)
+            let speed = min(walk, abs(cats[i].velocity) + Self.walkAcceleration * cats[i].size.scale * dt)
             cats[i].velocity = cats[i].direction * speed
         }
         let step = min(abs(exit - cats[i].x), abs(cats[i].velocity) * dt)
@@ -348,7 +355,7 @@ final class Colony {
             let holding = cats[i].action == .stalking && cats[i].wiggle > 0
             let delta = moving.contains(cats[i].action) && !holding ? cats[i].destination - cats[i].x : 0
             let (baseSpeed, baseAccel): (Double, Double) = switch cats[i].action {
-            case .walking: (15, 30)
+            case .walking: (Self.walkSpeed, Self.walkAcceleration)
             case .goingHome: (55, 90)
             case .running: (58, 90)
             case .chasing: (50, 90)
@@ -376,6 +383,13 @@ final class Colony {
                 case .playing, .goingHome: break
                 case .stalking: if cats[i].wiggle <= 0 { cats[i].wiggle = 0.7 + random() * 0.7 }
                 case .walking where cats[i].tunnelBound && tunnelEnds() != nil:
+                    // A cat already at the entrance may still face away from the notch.
+                    // Choose the crossing direction from its entrance, never from stale facing.
+                    let intoNotch = lane == tunnelEnds()!.left ? 1.0 : -1.0
+                    if cats[i].direction != intoNotch {
+                        cats[i].direction = intoNotch; cats[i].turnHold = Self.turnTime
+                        cats[i].turnCooldown = 0.6
+                    }
                     cats[i].tunnelBound = false; cats[i].inTunnel = true
                 default: cats[i].remaining = 0
                 }
