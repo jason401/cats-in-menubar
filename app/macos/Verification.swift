@@ -270,6 +270,58 @@ func runSelfTests() {
         expect(batted, "ball at the edge gets batted")
         expect(longest < 2.7, "a playing cat never stands still for long: \(longest)")
     }
+    // On a notched MacBook cats sometimes walk behind the notch and come out on the other side.
+    do {
+        var notchSeed: UInt64 = 11
+        let notched = Colony(random: { notchSeed = notchSeed &* 6364136223846793005 &+ 1; return Double(notchSeed >> 11) / Double(UInt64(1) << 53) })
+        let notch = Lane(lower: 500, upper: 700)
+        notched.tunnel = notch
+        notched.updateLanes(Habitat.freeLanes(width: 1200, obstacles: [Lane(lower: 0, upper: 150), notch]))
+        let ends = notched.tunnelEnds()
+        expect(ends?.left.upper == 492 && ends?.right.lower == 708, "the free spaces next to the notch are its two ends")
+        var crossings = 0, inside = [Double](repeating: 0, count: 3), wasIn = notched.cats.map(\.inTunnel)
+        var side = notched.cats.map { $0.x < 600 }
+        for _ in 0..<60000 {
+            notched.step(1.0 / 30)
+            for (i, cat) in notched.cats.enumerated() where cat.visible {
+                if cat.inTunnel {
+                    inside[i] += 1.0 / 30
+                    expect(cat.x >= 492 - cat.radius && cat.x <= 708 + cat.radius, "a crossing cat stays between the two sides")
+                    expect(notched.catIndex(at: cat.x) == nil, "a cat behind the notch cannot be picked up")
+                } else {
+                    expect(notched.lanes.contains { $0.contains(cat.x, margin: cat.radius) }, "outside the notch cats stay in free space")
+                    if wasIn[i] {
+                        expect(side[i] != (cat.x < 600), "a crossing ends on the other side")
+                        expect(inside[i] < 12, "the crossing is short: \(inside[i]) s")
+                        crossings += 1
+                    }
+                    inside[i] = 0; side[i] = cat.x < 600
+                }
+                wasIn[i] = cat.inTunnel
+            }
+        }
+        expect(crossings >= 3, "cats do use the notch tunnel: \(crossings)")
+        // A held cat can be carried across the notch, and let go behind it, walks out of the nearer side.
+        let carried = notched.cats.indices.first { !notched.cats[$0].inTunnel && notched.cats[$0].x < 492 && notched.cats[$0].x > 150 }
+            ?? { notched.cats[0].inTunnel = false; notched.cats[0].x = 300; notched.cats[0].visible = true; notched.start(0, .sitting, for: 5); return 0 }()
+        notched.grab(carried)
+        for x in stride(from: notched.cats[carried].x, through: 900, by: 10) {
+            notched.drag(carried, to: x, dt: 1.0 / 30); notched.step(1.0 / 30)
+            expect(notched.cats[carried].action == .held && !notched.cats[carried].escaping, "a held cat goes through the notch without being dropped")
+        }
+        notched.drag(carried, to: 900, dt: 1.0 / 30); notched.updateLanes(notched.lanes)
+        expect(abs(notched.cats[carried].x - 900) < 0.001 && notched.cats[carried].action == .held, "dragged across to the other side")
+        notched.drag(carried, to: 640, dt: 1.0 / 30); notched.step(1.0 / 30); notched.updateLanes(notched.lanes)
+        expect(notched.cats[carried].action == .held && notched.cats[carried].x == 640, "a cat can be held behind the notch while the layout refreshes")
+        notched.release(carried)
+        for _ in 0..<360 { notched.step(1.0 / 30) }
+        expect(!notched.cats[carried].inTunnel && !notched.cats[carried].escaping && notched.cats[carried].x > 700, "let go behind the notch, the cat walks out of the nearer side: \(notched.cats[carried].x)")
+        // The far side filling up mid-crossing sends the cat back out into the nearest free space.
+        notched.cats[0].x = 600; notched.cats[0].direction = 1; notched.cats[0].inTunnel = true; notched.cats[0].visible = true
+        notched.updateLanes(Habitat.freeLanes(width: 1200, obstacles: [Lane(lower: 0, upper: 150), Lane(lower: 500, upper: 1200)]))
+        for _ in 0..<45 { notched.step(1.0 / 30) }
+        expect(!notched.cats[0].inTunnel && notched.lanes.contains { $0.contains(notched.cats[0].x, margin: notched.cats[0].radius) }, "a closed tunnel lets the cat out on a free side")
+    }
     // Calling the cats home: everyone ends up in the tower, then comes back out into free space.
     colony.updateLanes([Lane(lower: 0, upper: 600)])
     for _ in 0..<60 { colony.step(1.0 / 30) }

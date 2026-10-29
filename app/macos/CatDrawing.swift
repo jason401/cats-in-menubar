@@ -434,6 +434,8 @@ final class HabitatView: NSView {
         NSGraphicsContext.saveGraphicsState()
         let clip = NSBezierPath()
         for lane in colony.lanes { clip.appendRect(NSRect(x: lane.lower, y: 0, width: lane.width, height: bounds.height)) }
+        // Between the two sides of the notch only the notch itself, which hides a crossing cat.
+        if let ends = colony.tunnelEnds() { clip.appendRect(NSRect(x: ends.left.upper, y: 0, width: ends.right.lower - ends.left.upper, height: bounds.height)) }
         clip.addClip()
         if showLanes {
             NSColor.systemMint.withAlphaComponent(0.15).setFill()

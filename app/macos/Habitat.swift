@@ -61,6 +61,8 @@ struct Cat {
     var swing = 0.0         // horizontal speed while carried by the mouse
     var escaping = false    // covered by a menu or icon, hurrying to the nearest free space
     var homeBound = false   // called back to the cat tower
+    var tunnelBound = false // walking to the notch to cross to the other side
+    var inTunnel = false    // passing behind the notch, unseen in the middle
     var home = false        // inside the cat tower icon, not drawn
     var outDelay = 0.0      // staggered exit from the tower
     var hopFrom = 0.0, hopTo = 0.0
@@ -94,6 +96,7 @@ final class Colony {
     var mood = 0.0          // from the power level: negative = more naps, positive = livelier
     var activity = 1        // 0 calm, 1 normal, 2 playful
     var homeX: Double?      // overlay x of the cat tower icon
+    var tunnel: Lane?       // the camera notch: nothing can be seen there, but cats may walk through it
     static let hopTime = 0.55
     static let turnTime = 0.36  // four turn-around frames at 0.09 s
     var random: () -> Double
@@ -118,7 +121,8 @@ final class Colony {
     }
     func reconcile() {
         for i in cats.indices {
-            if cats[i].home || cats[i].action == .hopping { continue }
+            if cats[i].home || cats[i].action == .hopping || cats[i].inTunnel { continue }
+            if cats[i].action == .held, carryLane(for: i) != nil, !lanes.contains(where: { $0.contains(cats[i].x, margin: cats[i].radius) }) { continue }
             // Existing positions stay stable when space grows; never walk across an obstacle.
             if let lane = lanes.first(where: { $0.contains(cats[i].x, margin: cats[i].radius) }) {
                 cats[i].destination = clamp(cats[i].destination, to: lane, for: i)
@@ -151,7 +155,7 @@ final class Colony {
     }
     static let stretchTime = 3.2
     func start(_ i: Int, _ action: CatAction, for duration: Double) {
-        cats[i].action = action; cats[i].remaining = duration; cats[i].elapsed = 0; cats[i].wiggle = 0
+        cats[i].action = action; cats[i].remaining = duration; cats[i].elapsed = 0; cats[i].wiggle = 0; cats[i].tunnelBound = false
     }
     func clamp(_ x: Double, to lane: Lane, for i: Int) -> Double {
         min(lane.upper - cats[i].radius, max(lane.lower + cats[i].radius, x))
@@ -166,7 +170,7 @@ final class Colony {
             cats[i].coat = unused.remove(at: min(unused.count - 1, Int(random() * Double(unused.count))))
             cats[i].size = CatSize.allCases[min(2, Int(random() * 3))]
             cats[i].home = false; cats[i].homeBound = false; cats[i].visible = false
-            cats[i].x = -100; cats[i].velocity = 0; cats[i].escaping = false
+            cats[i].x = -100; cats[i].velocity = 0; cats[i].escaping = false; cats[i].inTunnel = false
             start(i, .sitting, for: 2)
         }
         ball = nil
@@ -215,6 +219,46 @@ final class Colony {
             start(i, .chasing, for: 4)
             cats[i].destination = clamp(cats[friend].x, to: lane, for: i)
         }
+        // Sometimes a walk heads into the notch and comes out on the other side.
+        if !quiet, cats[i].action == .walking, random() < 0.25, let ends = tunnelEnds(), lane == ends.left || lane == ends.right {
+            cats[i].tunnelBound = true
+            cats[i].destination = lane == ends.left ? lane.upper - cats[i].radius : lane.lower + cats[i].radius
+        }
+    }
+    /// The free spaces directly on both sides of the notch, with nothing else in between.
+    func tunnelEnds() -> (left: Lane, right: Lane)? {
+        guard let tunnel else { return nil }
+        // Lanes stop 8 pt (the obstacle padding) short of the notch.
+        let gap = 0.0...9.0
+        guard let left = lanes.first(where: { gap.contains(tunnel.lower - $0.upper) }),
+              let right = lanes.first(where: { gap.contains($0.lower - tunnel.upper) }) else { return nil }
+        return (left, right)
+    }
+    private func crossTunnel(_ i: Int, _ dt: Double) {
+        guard let tunnel, let ends = tunnelEnds() else {
+            // The notch or the far side went away: come back out like any covered cat.
+            cats[i].inTunnel = false; escape(i, dt); return
+        }
+        let exitLane = cats[i].direction > 0 ? ends.right : ends.left
+        let exit = cats[i].direction > 0 ? exitLane.lower + cats[i].radius : exitLane.upper - cats[i].radius
+        let walk = 15 * cats[i].size.scale
+        if cats[i].x - cats[i].radius >= tunnel.lower && cats[i].x + cats[i].radius <= tunnel.upper {
+            // Out of sight it hurries, so the notch is a short wait rather than a long walk.
+            cats[i].velocity = cats[i].direction * 120 * cats[i].size.scale
+        } else {
+            // Going in and coming out it walks, like any other walk.
+            let speed = min(walk, abs(cats[i].velocity) + 30 * cats[i].size.scale * dt)
+            cats[i].velocity = cats[i].direction * speed
+        }
+        let step = min(abs(exit - cats[i].x), abs(cats[i].velocity) * dt)
+        cats[i].x += cats[i].direction * step
+        cats[i].gait += step; cats[i].phase += dt; cats[i].elapsed += dt
+        cats[i].destination = cats[i].x
+        guard abs(exit - cats[i].x) < 0.01 else { return }
+        cats[i].x = exit; cats[i].inTunnel = false
+        if cats[i].homeBound { start(i, .goingHome, for: .infinity); return }
+        start(i, .walking, for: 14)
+        cats[i].destination = clamp(exit + cats[i].direction * (30 + random() * 60), to: exitLane, for: i)
     }
     func step(_ elapsed: Double) {
         // Drawing can slow to 8 fps (2 fps at rest), but movement and sway still advance in real time.
@@ -240,7 +284,8 @@ final class Colony {
             if cats[i].home { comeOut(i, dt); continue }
             guard cats[i].visible else { continue }
             if cats[i].action == .hopping { hop(i, dt); continue }
-            guard let lane = lanes.first(where: { $0.contains(cats[i].x, margin: cats[i].radius) }) else { escape(i, dt); continue }
+            if cats[i].inTunnel { crossTunnel(i, dt); continue }
+            guard let lane = lanes.first(where: { $0.contains(cats[i].x, margin: cats[i].radius) }) ?? (cats[i].action == .held ? carryLane(for: i) : nil) else { escape(i, dt); continue }
             cats[i].escaping = false
             cats[i].hiddenFor = max(0, cats[i].hiddenFor - dt)
             cats[i].phase += dt
@@ -330,6 +375,8 @@ final class Colony {
                 switch cats[i].action {
                 case .playing, .goingHome: break
                 case .stalking: if cats[i].wiggle <= 0 { cats[i].wiggle = 0.7 + random() * 0.7 }
+                case .walking where cats[i].tunnelBound && tunnelEnds() != nil:
+                    cats[i].tunnelBound = false; cats[i].inTunnel = true
                 default: cats[i].remaining = 0
                 }
             }
@@ -372,7 +419,7 @@ final class Colony {
         for i in cats.indices where !cats[i].home {
             cats[i].homeBound = true
             if !cats[i].visible { cats[i].home = true; continue }
-            if cats[i].action != .hopping { start(i, .goingHome, for: .infinity) }
+            if cats[i].action != .hopping && !cats[i].inTunnel { start(i, .goingHome, for: .infinity) }
         }
     }
     /// Cats hop back out of the tower, a moment apart.
@@ -415,8 +462,16 @@ final class Colony {
         beginHop(i, from: homeX, to: spot, entering: false)
     }
     // Mouse handling: a held cat stays inside its own free interval and is never carried over menus or icons.
+    /// Where a held cat can be carried: its own free space, or both sides of the notch joined through it.
+    func carryLane(for i: Int) -> Lane? {
+        if let ends = tunnelEnds() {
+            let joined = Lane(lower: ends.left.lower, upper: ends.right.upper)
+            if joined.contains(cats[i].x, margin: cats[i].radius) { return joined }
+        }
+        return lanes.first { $0.contains(cats[i].x, margin: cats[i].radius) }
+    }
     func catIndex(at x: Double) -> Int? {
-        cats.indices.filter { cats[$0].visible && cats[$0].hiddenFor <= 0 && cats[$0].action != .hopping && abs(cats[$0].x - x) < 13 * cats[$0].size.scale }
+        cats.indices.filter { cats[$0].visible && cats[$0].hiddenFor <= 0 && cats[$0].action != .hopping && !cats[$0].inTunnel && abs(cats[$0].x - x) < 13 * cats[$0].size.scale }
             .min { abs(cats[$0].x - x) < abs(cats[$1].x - x) }
     }
     func grab(_ i: Int) {
@@ -424,8 +479,7 @@ final class Colony {
         start(i, .held, for: .infinity); cats[i].velocity = 0; cats[i].swing = 0; cats[i].heldLean = 0; cats[i].heldLeanVelocity = 0
     }
     func drag(_ i: Int, to x: Double, dt: Double) {
-        guard cats.indices.contains(i), cats[i].action == .held,
-              let lane = lanes.first(where: { $0.contains(cats[i].x, margin: cats[i].radius) }) else { return }
+        guard cats.indices.contains(i), cats[i].action == .held, let lane = carryLane(for: i) else { return }
         let next = clamp(x, to: lane, for: i)
         cats[i].swing += ((next - cats[i].x) / max(dt, 0.001) - cats[i].swing) * min(1, dt * 12)
         cats[i].x = next; cats[i].destination = next
@@ -433,6 +487,12 @@ final class Colony {
     func release(_ i: Int) {
         guard cats.indices.contains(i), cats[i].action == .held else { return }
         start(i, .grooming, for: 2 + random() * 2); cats[i].swing = 0
+        // Let go behind the notch: it walks out of the nearer side.
+        if !lanes.contains(where: { $0.contains(cats[i].x, margin: cats[i].radius) }), let ends = tunnelEnds() {
+            start(i, .walking, for: 14)
+            cats[i].direction = cats[i].x < (ends.left.upper + ends.right.lower) / 2 ? -1 : 1
+            cats[i].velocity = 0; cats[i].inTunnel = true
+        }
     }
     /// A ball drops at a random spot; every cat sharing that free space goes for it.
     func play() {

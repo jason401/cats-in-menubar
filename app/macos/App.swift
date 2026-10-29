@@ -289,12 +289,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             // An unreadable moment keeps the last good layout instead of making everyone vanish.
             if !snapshot.reliable && !self.colony.lanes.isEmpty { self.model.status = "Using last layout · \(snapshot.message)"; return }
             var obstacles = snapshot.obstacles
+            var notch: Lane?
             if screen.safeAreaInsets.top > 0, let left = screen.auxiliaryTopLeftArea, let right = screen.auxiliaryTopRightArea {
-                obstacles.append(Lane(lower: left.maxX - frame.minX, upper: right.minX - frame.minX))
+                notch = Lane(lower: left.maxX - frame.minX, upper: right.minX - frame.minX)
+                obstacles.append(notch!)
             }
+            self.colony.tunnel = notch
             let lanes = snapshot.reliable ? Habitat.freeLanes(width: frame.width, obstacles: obstacles) : []
             self.colony.updateLanes(lanes)
-            self.model.status = lanes.isEmpty ? (snapshot.reliable ? "No room right now. Cats will return when space opens up." : snapshot.message) : "\(lanes.count) safe area(s) · \(Int(lanes.reduce(0) { $0 + $1.width })) pt available"
+            self.model.status = lanes.isEmpty ? (snapshot.reliable ? "No room right now. Cats will return when space opens up." : snapshot.message) : "\(lanes.count) safe area(s) · \(Int(lanes.reduce(0) { $0 + $1.width })) pt available\(self.colony.tunnelEnds() == nil ? "" : " · notch tunnel open")"
             let visible = self.colony.cats.filter(\.visible).count
             self.model.catSummary = lanes.isEmpty ? (self.model.access ? "Waiting for empty space" : "Needs Accessibility access") :
                 "\(visible) cat\(visible == 1 ? "" : "s") · \(Int(lanes.reduce(0) { $0 + $1.width })) pt of room · \(self.model.power.label)"
