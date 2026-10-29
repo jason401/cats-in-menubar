@@ -82,3 +82,11 @@ Click and hold a cat to use its dangling sprite. Drag right and its body trails 
 By default each launch selects distinct random coats, random sizes and random positions in detected free space. In Settings → Cats → Your cats, select each coat and size. Editing enables **Keep my cats** to save the lineup. Turn it off for random appearances next launch; **Shuffle cats** randomizes immediately. Positions are always randomized, including for a saved lineup. Count remains 1–3 (default 3).
 
 `tools/test.sh` builds and runs the simulation, renders the full collection and held poses, and creates a size/speed comparison GIF in `build/previews/`. The source artwork is still a small set of illustrated key poses, not a fully hand-authored in-between animation. Pose-to-pose artwork consistency can be refined further after visual feedback.
+
+### Current v3 artwork preview
+
+All coat selections currently display the new orange animation set; selected coat and size preferences are preserved. The build imports 18 source sheets (62 poses) from `app/macos/Resources/Cats/v3/orange/`. To enable a future coat, add a complete set with the same filenames and pose order in `v3/<coat>/` and rebuild; missing sets fall back to orange. See `design/ART_GUIDE.md` section 7 for the current pipeline. Earlier 21-frame artwork remains archived in the source tree.
+
+The full 0–61 animation sequence and transition map is in `design/ANIMATION_MAP.md`. Walk/run artwork was redrawn (originals/prompts in `design/gait-redraw-v4/`). All sizes now share time-based walk10/run16/creep5 fps; only physical travel speed and acceleration vary with size. This replaces the earlier distance-based clock description.
+
+Motion v5 normalizes walk/run by authored eye landmarks instead of tail-inclusive width, preserving head size when running. Stretch now returns to standing. Source assets, previous images and prompts: `design/motion-v5/`. See ART_GUIDE section10 for registration requirements.

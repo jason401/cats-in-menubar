@@ -354,13 +354,15 @@ final class HabitatView: NSView {
         var fromFrame = -1
         var fromDirection = 1.0
         var since = 0.0
+        var sequence: [Int] = []
+        var sequenceDirection = 1.0
     }
     private var shown: [Int: Shown] = [:]
     static let blendTime = 0.15
     /// True while some cat is blending between poses; the app keeps full frame rate for it.
     var blending: Bool {
         let now = ProcessInfo.processInfo.systemUptime
-        return shown.values.contains { $0.fromFrame >= 0 && now - $0.since < HabitatView.blendTime }
+        return shown.values.contains { $0.fromFrame >= 0 && now - $0.since < max(HabitatView.blendTime, Double($0.sequence.count) * 0.09) }
     }
     private func drawCat(_ i: Int, baseline: CGFloat) {
         let cat = colony.cats[i]
@@ -369,14 +371,24 @@ final class HabitatView: NSView {
         let frame = SpriteAtlas.frameIndex(cat)
         let now = ProcessInfo.processInfo.systemUptime
         var memory = shown[i] ?? Shown(frame: frame, direction: cat.direction)
-        if SpriteAtlas.group(frame) != SpriteAtlas.group(memory.frame) || cat.direction != memory.direction {
-            memory = Shown(frame: frame, direction: cat.direction, fromFrame: memory.frame, fromDirection: memory.direction, since: now)
+        let inTransition = now - memory.since < Double(memory.sequence.count) * 0.09
+            && cat.action != .held && cat.action != .hopping
+        if (!inTransition && SpriteAtlas.group(frame) != SpriteAtlas.group(memory.frame)) || cat.direction != memory.direction {
+            let old = memory
+            memory = Shown(frame: frame, direction: cat.direction, fromFrame: old.frame, fromDirection: old.direction, since: now)
+            memory.sequence = cat.direction != old.direction ? [20,21,22,23] : SpriteAtlas.transition(from: old.frame, to: frame)
+            memory.sequenceDirection = cat.direction != old.direction ? old.direction : cat.direction
         } else { memory.frame = frame }
         shown[i] = memory
+        let step = Int(max(0, now - memory.since) / 0.09)
+        if memory.sequence.indices.contains(step), cat.action != .held && cat.action != .hopping {
+            SpriteAtlas.draw(cat, at: point, scale: 1, frame: memory.sequence[step], direction: memory.sequenceDirection)
+            return
+        }
         CatDrawing.cat(cat, at: point)
         // The old pose fades out on top of the new one, so there is never a see-through moment.
         let q = (now - memory.since) / HabitatView.blendTime
-        if memory.fromFrame >= 0 && q < 1 && cat.action != .hopping {
+        if memory.sequence.isEmpty && memory.fromFrame >= 0 && q < 1 && cat.action != .hopping {
             SpriteAtlas.draw(cat, at: point, scale: 1, frame: memory.fromFrame, direction: memory.fromDirection, alpha: CGFloat(1 - q))
         }
     }

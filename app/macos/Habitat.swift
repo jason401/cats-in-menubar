@@ -11,7 +11,7 @@ struct Lane: Equatable {
 
 // Coordinates are screen-local points. Occupied rectangles are expanded before subtraction.
 enum Habitat {
-    static let catRadius = 21.0
+    static let catRadius = 24.0
     static func freeLanes(width: Double, obstacles: [Lane], padding: Double = 8) -> [Lane] {
         guard width > 0 else { return [] }
         let blocked = obstacles.map { Lane(lower: max(0, $0.lower - padding), upper: min(width, $0.upper + padding)) }

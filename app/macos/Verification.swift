@@ -9,12 +9,61 @@ func runSelfTests() {
         if !condition() { fputs("FAIL: \(message)\n", stderr); exit(1) }
     }
     expect(SpriteAtlas.available, "approved sprite atlas is bundled; never substitute the old drawing")
+    for coat in 0..<8 {
+        let slug = ["orange", "black", "white", "silver", "cream", "tuxedo", "calico", "siamese"][coat]
+        let ownExists = FileManager.default.fileExists(atPath: Bundle.main.resourceURL!.appendingPathComponent("Cats/\(slug)/0.png").path)
+        expect(SpriteAtlas.artworkName(for: coat) == (ownExists ? slug : "orange"), "missing v3 coats share orange without changing preferences")
+        for action in CatAction.allCases {
+            for tick in 0..<100 {
+                var cat = Cat(x: 0, destination: 100, action: action, coat: coat)
+                cat.phase = Double(tick) * 0.1; cat.elapsed = cat.phase; cat.gait = Double(tick); cat.velocity = 15
+                expect((0..<SpriteAtlas.frameCount).contains(SpriteAtlas.frameIndex(cat)), "v3 animation frame stays in range")
+            }
+        }
+    }
+    expect(SpriteAtlas.transition(from: 0, to: 33) == [24,25,26,27,28,29,30,31,32], "rest transition reaches sleep through sitting and loaf")
+    expect(SpriteAtlas.transition(from: 33, to: 0) == [32,31,30,29,28,27,26,25,24], "waking reverses the transition art")
+    // Inspect rendered assets, not just metadata: switching to run must keep the eye scale and anchor.
+    for index in 4...19 {
+        let url = Bundle.main.resourceURL!.appendingPathComponent("Cats/orange/\(index).png")
+        let image = NSBitmapImageRep(data: try! Data(contentsOf: url))!.cgImage!
+        let ctx = CGContext(data: nil, width: image.width, height: image.height, bitsPerComponent: 8, bytesPerRow: image.width * 4,
+            space: CGColorSpace(name: CGColorSpace.sRGB)!, bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)!
+        ctx.draw(image, in: CGRect(x: 0, y: 0, width: image.width, height: image.height))
+        let pixels = ctx.data!.assumingMemoryBound(to: UInt8.self)
+        // Bitmap rows are top-down: eye is 256 - (24+97) = 135 pixels from the top.
+        let left = 270, bottom = 90, w = 60, h = 65
+        var mask = [Bool](repeating: false, count: w*h)
+        for y in 0..<h { for x in 0..<w {
+            let p = ((y+bottom)*image.width+x+left)*4
+            mask[y*w+x] = pixels[p+3] > 180 && max(pixels[p], pixels[p+1], pixels[p+2]) < 55
+        }}
+        var eyes: [[Int]] = []
+        for start in mask.indices where mask[start] {
+            var q = [start], cursor = 0; mask[start] = false
+            while cursor < q.count {
+                let p = q[cursor]; cursor += 1; let x = p%w, y = p/w
+                for (xx,yy) in [(x-1,y),(x+1,y),(x,y-1),(x,y+1)] where xx>=0 && yy>=0 && xx<w && yy<h {
+                    let n = yy*w+xx
+                    if mask[n] { mask[n]=false; q.append(n) }
+                }
+            }
+            if q.count > 30 && !q.contains(where: { $0%w == 0 || $0%w == w-1 || $0/w == 0 || $0/w == h-1 }) { eyes.append(q) }
+        }
+        expect(!eyes.isEmpty, "registered frame has a visible eye")
+        let eye = eyes.max(by: { $0.count < $1.count })!
+        let eyeX = Double(eye.map { $0%w+left }.reduce(0,+))/Double(eye.count)
+        let eyeY = Double(eye.map { $0/w+bottom }.reduce(0,+))/Double(eye.count)
+        let height = eye.map { $0/w }.max()! - eye.map { $0/w }.min()! + 1
+        expect(abs(eyeX-300) < 2 && abs(eyeY-135) < 2, "walk/run use the actual eye anchor")
+        expect((12...14).contains(height), "walk/run head feature does not shrink")
+    }
     let lanes = Habitat.freeLanes(width: 1000, obstacles: [Lane(lower: 0, upper: 220), Lane(lower: 800, upper: 1000)])
     expect(lanes == [Lane(lower: 228, upper: 792)], "menu padding")
     expect(Habitat.freeLanes(width: 500, obstacles: [Lane(lower: 0, upper: 500)]).isEmpty, "fully occupied")
     expect(Habitat.freeLanes(width: 520, obstacles: [Lane(lower: 20, upper: 300), Lane(lower: 200, upper: 450)]) == [Lane(lower: 458, upper: 520)], "overlapping obstacles merge")
     expect(Habitat.freeLanes(width: 500, obstacles: [Lane(lower: -100, upper: 600)]).isEmpty, "out of bounds clipping")
-    // Size changes screen speed and stride together, never the relative walking cadence.
+    // Size changes travel speed only; the animation clock does not read distance or size.
     var distances: [CatSize: Double] = [:]
     for size in CatSize.allCases {
         let motion = Colony(count: 1, random: { 0.5 })
@@ -29,9 +78,14 @@ func runSelfTests() {
         for i in 0..<80 {
             let time = Double(i) * 0.071 + 0.013
             var adult = Cat(x: 0, destination: 0, action: .walking, coat: 0)
-            adult.gait = 15 * time
-            var smaller = adult; smaller.size = size; smaller.gait *= size.scale
-            expect(SpriteAtlas.frameIndex(adult) == SpriteAtlas.frameIndex(smaller), "small cats do not cycle frames faster")
+            adult.phase = time; adult.gait = 15 * time; adult.velocity = 15
+            var smaller = adult; smaller.size = size; smaller.gait = 987 + time * 3; smaller.velocity *= size.scale
+            expect(SpriteAtlas.frameIndex(adult) == SpriteAtlas.frameIndex(smaller), "small cats do not cycle frames faster, even with unrelated travel distances")
+            adult.action = .running; adult.velocity = 58
+            smaller.action = .running; smaller.velocity = 58 * size.scale
+            expect(SpriteAtlas.frameIndex(adult) == SpriteAtlas.frameIndex(smaller), "run playback is time-based and size independent")
+            adult.action = .stalking; smaller.action = .stalking
+            expect(SpriteAtlas.frameIndex(adult) == SpriteAtlas.frameIndex(smaller), "creep playback is size independent")
         }
     }
     var frameRateDistances: [Double] = []
@@ -49,7 +103,7 @@ func runSelfTests() {
         held.updateLanes([Lane(lower: 0, upper: 900)])
         held.cats[0].x = 300; held.cats[0].coat = coat; held.cats[0].hiddenFor = 0
         held.grab(0)
-        expect(SpriteAtlas.frameIndex(held.cats[0]) == 18, "pickup uses the neutral dangling sprite, not sitting")
+        expect((60...61).contains(SpriteAtlas.frameIndex(held.cats[0])), "pickup uses the neutral dangling sprite, not sitting")
         // A moving cat that has stopped stands instead of freezing mid-stride.
         var stopped = held.cats[0]
         for action in [CatAction.walking, .running, .chasing, .goingHome] {
@@ -57,14 +111,14 @@ func runSelfTests() {
             expect(SpriteAtlas.frameIndex(stopped) == SpriteAtlas.standFrame, "stopped \(action) cat stands")
         }
         stopped.action = .walking; stopped.velocity = 12
-        expect(SpriteAtlas.group(SpriteAtlas.frameIndex(stopped)) == SpriteAtlas.group(0), "moving cat still walks")
+        expect(SpriteAtlas.group(SpriteAtlas.frameIndex(stopped)) == SpriteAtlas.group(4), "moving cat still walks")
         for _ in 0..<15 { held.cats[0].swing = 100; held.step(1.0 / 30) }
-        expect(SpriteAtlas.frameIndex(held.cats[0]) == 19, "dragging right makes the body trail left")
+        expect(held.cats[0].heldLean < -0.2, "dragging right makes the body trail left")
         for _ in 0..<25 { held.cats[0].swing = -100; held.step(1.0 / 30) }
-        expect(SpriteAtlas.frameIndex(held.cats[0]) == 20, "dragging left makes the body trail right")
+        expect(held.cats[0].heldLean > 0.2, "dragging left makes the body trail right")
         held.cats[0].swing = 0
         for _ in 0..<120 { held.step(1.0 / 30) }
-        expect(abs(held.cats[0].heldLean) < 0.01 && SpriteAtlas.frameIndex(held.cats[0]) == 18, "held sway damps to rest")
+        expect(abs(held.cats[0].heldLean) < 0.01 && (60...61).contains(SpriteAtlas.frameIndex(held.cats[0])), "held sway damps to rest")
         held.release(0)
         expect(held.cats[0].action == .grooming, "drop returns to grooming")
     }
@@ -229,16 +283,16 @@ func renderPreview(to path: String) {
     let heading: [NSAttributedString.Key: Any] = [.font: NSFont.systemFont(ofSize: 22, weight: .semibold), .foregroundColor: NSColor.white]
     ("Cats in Menubar · poses" as NSString).draw(at: NSPoint(x: 24, y: 584), withAttributes: heading)
     let label: [NSAttributedString.Key: Any] = [.font: NSFont.systemFont(ofSize: 11), .foregroundColor: NSColor.lightGray]
-    func sample(_ action: CatAction, coat: Int, velocity: Double = 0, gait: Double = 3, elapsed: Double = 0, wiggle: Double = 0, swing: Double = 0) -> Cat {
+    func sample(_ action: CatAction, coat: Int, velocity: Double = 0, phase: Double = 1.3, elapsed: Double = 0, wiggle: Double = 0, swing: Double = 0) -> Cat {
         var cat = Cat(x: 0, destination: 0, action: action, phase: 1.3, visible: true, coat: coat)
-        cat.velocity = velocity; cat.gait = gait; cat.elapsed = elapsed; cat.wiggle = wiggle; cat.swing = swing
+        cat.velocity = velocity; cat.phase = phase; cat.elapsed = elapsed; cat.wiggle = wiggle; cat.swing = swing
         return cat
     }
     let poses: [(String, Cat)] = [
-        ("walk", sample(.walking, coat: 0, velocity: 15)), ("run", sample(.running, coat: 1, velocity: 58, gait: 6.5)),
-        ("run gathered", sample(.running, coat: 1, velocity: 58, gait: 19.5)), ("stalk", sample(.stalking, coat: 2, wiggle: 0.5)),
+        ("walk", sample(.walking, coat: 0, velocity: 15)), ("run", sample(.running, coat: 1, velocity: 58, phase: 2 / SpriteAtlas.runFPS)),
+        ("run gathered", sample(.running, coat: 1, velocity: 58, phase: 0)), ("stalk", sample(.stalking, coat: 2, wiggle: 0.5)),
         ("pounce", sample(.pouncing, coat: 0, elapsed: 0.22)), ("stretch front", sample(.stretching, coat: 2, elapsed: 0.8)),
-        ("stretch back", sample(.stretching, coat: 0, elapsed: 2.4)), ("sit", sample(.sitting, coat: 1)),
+        ("stretch return", sample(.stretching, coat: 0, elapsed: 2.4)), ("sit", sample(.sitting, coat: 1)),
         ("groom", sample(.grooming, coat: 0)), ("loaf", sample(.loafing, coat: 2)),
         ("sleep", sample(.sleeping, coat: 1)), ("held", sample(.held, coat: 0, swing: 40)),
     ]
@@ -252,7 +306,7 @@ func renderPreview(to path: String) {
     }
     ("run cycle, actual size ×3" as NSString).draw(at: NSPoint(x: 24, y: 175), withAttributes: label)
     for frame in 0..<10 {
-        let cat = sample(.running, coat: 2, velocity: 58, gait: Double(frame) * 2.0)
+        let cat = sample(.running, coat: 2, velocity: 58, phase: Double(frame) / SpriteAtlas.runFPS)
         CatDrawing.cat(cat, at: NSPoint(x: CGFloat(70 + frame * 115), y: 95), scale: 3)
     }
     // Menu bar icon with 0-3 cats at home, enlarged and at actual size.
@@ -316,7 +370,7 @@ func renderLineup(to path: String) {
     let heading: [NSAttributedString.Key: Any] = [.font: NSFont.systemFont(ofSize: 24, weight: .semibold), .foregroundColor: NSColor.white]
     let label: [NSAttributedString.Key: Any] = [.font: NSFont.systemFont(ofSize: 12), .foregroundColor: NSColor.lightGray]
     ("Cats in Menubar · meet the cats" as NSString).draw(at: NSPoint(x: 24, y: 632), withAttributes: heading)
-    ("Kitten 64% / Young 82% / Adult 100% · original approved PNG / unchanged proportions" as NSString).draw(at: NSPoint(x: 24, y: 608), withAttributes: label)
+    ("Kitten 64% / Young 82% / Adult 100% · v3 artwork preview / missing coats use orange" as NSString).draw(at: NSPoint(x: 24, y: 608), withAttributes: label)
     for coat in 0..<8 {
         let left = CGFloat(24 + (coat % 4) * 278), base = CGFloat(coat < 4 ? 375 : 135)
         (CatAppearance.names[coat] as NSString).draw(at: NSPoint(x: left, y: base + 178), withAttributes: heading.merging([.font: NSFont.systemFont(ofSize: 15, weight: .semibold)]) { _, new in new })
@@ -384,7 +438,7 @@ func renderHeld(to path: String) {
     let heading: [NSAttributedString.Key: Any] = [.font: NSFont.systemFont(ofSize: 23, weight: .semibold), .foregroundColor: NSColor.white]
     let label: [NSAttributedString.Key: Any] = [.font: NSFont.systemFont(ofSize: 12), .foregroundColor: NSColor.lightGray]
     ("Pick up · drag · gently settle" as NSString).draw(at: NSPoint(x: 24, y: 600), withAttributes: heading)
-    ("Dedicated dangling artwork for every cat, with neutral / left-trailing / right-trailing poses" as NSString).draw(at: NSPoint(x: 24, y: 573), withAttributes: label)
+    ("Shared v3 dangling artwork / spring sway / coat choices preserved" as NSString).draw(at: NSPoint(x: 24, y: 573), withAttributes: label)
     for coat in 0..<8 {
         let left = CGFloat(24 + (coat % 4) * 278), base = CGFloat(coat < 4 ? 335 : 95)
         (CatAppearance.names[coat] as NSString).draw(at: NSPoint(x: left, y: base + 180), withAttributes: label)
