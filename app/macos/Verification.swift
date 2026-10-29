@@ -327,7 +327,7 @@ func runSelfTests() {
         edge.updateLanes([Lane(lower: 0, upper: 400)])
         for _ in 0..<30 { edge.step(1.0 / 30) }
         edge.cats[0].x = 200; edge.cats[0].velocity = 0; edge.cats[0].escaping = false
-        edge.ball = ToyBall(x: 5, velocity: 0, lifetime: 30, lane: edge.lanes[0])
+        edge.ball = Toy(x: 5, velocity: 0, lifetime: 30, lane: edge.lanes[0])
         edge.start(0, .playing, for: 30)
         var batted = false, stillFor = 0.0, longest = 0.0
         for _ in 0..<600 {
@@ -472,6 +472,30 @@ func runSelfTests() {
     colony.updateLanes([])
     expect(colony.cats.allSatisfy { !$0.visible } && colony.ball == nil, "unreadable or absent space hides everyone")
     colony.setCount(2); expect(colony.cats.count == 2, "count control")
+    // Each size has its own temperament: odds sum to 1, kittens play far more than adults.
+    for size in CatSize.allCases { expect(abs(size.temperament.weights.reduce(0, +) - 1) < 1e-9, "\(size) odds sum to 1") }
+    func lively(_ size: CatSize) -> Int {
+        var seed: UInt64 = 7
+        let c = Colony(count: 1, random: { seed = seed &* 6364136223846793005 &+ 1; return Double(seed >> 11) / Double(UInt64(1) << 53) })
+        c.updateLanes([Lane(lower: 0, upper: 600)])
+        c.cats[0].size = size
+        var count = 0
+        for _ in 0..<4000 {
+            c.cats[0].action = .sitting; c.ball = nil
+            c.choose(0, lane: c.lanes[0])
+            if [.running, .stalking, .playing, .chasing].contains(c.cats[0].action) { count += 1 }
+        }
+        return count
+    }
+    let (kittenLively, youngLively, adultLively) = (lively(.kitten), lively(.young), lively(.adult))
+    expect(kittenLively > youngLively && youngLively > adultLively * 2, "livelier when younger: \(kittenLively) \(youngLively) \(adultLively)")
+    // Toys: a dropped ball gets a color, a new one each time unless Settings fixes it.
+    var colors: [Int] = []
+    for _ in 0..<6 { colony.ball = nil; colors.append(colony.makeToy(x: 50, velocity: 0, lifetime: 5, lane: Lane(lower: 0, upper: 100)).color) }
+    expect(zip(colors, colors.dropFirst()).allSatisfy { $0 != $1 } && colors.allSatisfy { Toy.colors.indices.contains($0) }, "mixed ball colors change: \(colors)")
+    colony.toyColor = 2
+    expect(colony.makeToy(x: 50, velocity: 0, lifetime: 5, lane: Lane(lower: 0, upper: 100)).color == 2, "fixed ball color")
+    colony.toyColor = nil
     // Top apps: this process shows up, values are sane and the lists are ranked.
     let sampler = AppUsageSampler()
     _ = sampler.sample(now: Date())

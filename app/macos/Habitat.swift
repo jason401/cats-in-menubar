@@ -37,6 +37,24 @@ enum CatSize: Int, CaseIterable, Codable {
     case kitten, young, adult
     var scale: Double { switch self { case .kitten: 0.64; case .young: 0.82; case .adult: 1 } }
     var label: String { switch self { case .kitten: "Kitten"; case .young: "Young"; case .adult: "Adult" } }
+    var temperament: Temperament {
+        switch self {
+        // Kittens nap in short bursts and spend the rest running, hunting and playing.
+        case .kitten: Temperament(weights: [0.16, 0.06, 0.04, 0.05, 0.04, 0.17, 0.17, 0.15, 0.16], nap: 10...30, chase: 0.40, reaction: 0.4)
+        case .young: Temperament(weights: [0.20, 0.10, 0.08, 0.08, 0.05, 0.18, 0.12, 0.10, 0.09], nap: 18...50, chase: 0.25, reaction: 0.8)
+        // Adults mostly rest, groom and stroll; they still join a dropped toy, just a little later.
+        case .adult: Temperament(weights: [0.26, 0.14, 0.14, 0.11, 0.05, 0.18, 0.05, 0.05, 0.02], nap: 25...65, chase: 0.12, reaction: 1.4)
+        }
+    }
+}
+/// How a cat of one size spends its time.
+struct Temperament {
+    /// Chance of each next action, calm to lively, summing to 1: sleep, sit, loaf, groom, stretch,
+    /// walk, run, hunt, play. The Calm/Playful setting and the power level shift the pick along this order.
+    let weights: [Double]
+    let nap: ClosedRange<Double>    // seconds asleep
+    let chase: Double               // chance a walk turns into chasing a walking friend
+    let reaction: Double            // longest delay before going for a dropped toy
 }
 struct CatAppearance: Codable, Equatable {
     var coat: Int
@@ -89,12 +107,21 @@ struct Cat {
         set { coat = max(0, min(7, newValue.coat)); size = newValue.size }
     }
 }
-struct ToyBall {
+/// Toys share one slot on the colony: position, roll and lifetime here, the look in `CatDrawing.toy`,
+/// and how cats react in `Colony.advance` (`.playing`). A new toy adds a kind, its drawing and,
+/// if cats should treat it differently from a ball, its own branch in the playing step.
+enum ToyKind: String, CaseIterable, Codable {
+    case ball
+}
+struct Toy {
     var x: Double
     var velocity: Double
     var phase = 0.0
     var lifetime = 16.0
     var lane: Lane
+    var kind = ToyKind.ball
+    var color = 0           // index into `Toy.colors`
+    static let colors = ["Mint", "Red", "Blue", "Yellow", "Pink", "Purple", "Orange"]
 }
 
 final class Colony {
@@ -102,7 +129,9 @@ final class Colony {
     static let runSpeed = 58.0
     static let walkAcceleration = 12.0
     var cats: [Cat] = []
-    var ball: ToyBall?
+    var ball: Toy?          // the toy in play, if any (named for the first toy)
+    var toyColor: Int?      // a fixed color from Settings; nil picks a new one each time
+    private var lastToyColor = 0
     var lanes: [Lane] = []
     var quiet = false
     var mood = 0.0          // from the power level: negative = more naps, positive = livelier
@@ -197,20 +226,25 @@ final class Colony {
         if previous == .pouncing { start(i, .sitting, for: 3 + random() * 4); return }
         // Waking up usually comes with a good stretch.
         if (previous == .sleeping || previous == .loafing) && r < 0.65 { start(i, .stretching, for: Colony.stretchTime); return }
-        if r < 0.22 { start(i, .sleeping, for: 18 + random() * 45) }
-        else if r < 0.34 { start(i, .sitting, for: 4 + random() * 8) }
-        else if r < 0.44 { start(i, .loafing, for: 8 + random() * 12) }
-        else if r < 0.53 { start(i, .grooming, for: 4 + random() * 5) }
-        else if r < 0.58 { start(i, .stretching, for: Colony.stretchTime) }
-        else if r < 0.76 || lane.width < 120 {
+        let temperament = cats[i].size.temperament
+        var total = 0.0
+        var pick = temperament.weights.firstIndex { total += $0; return r < total } ?? temperament.weights.count - 1
+        // No room, or the Mac is in low power: no running, hunting or playing on their own, only walks.
+        if pick > 5 && (lane.width < 120 || mood <= PowerLevel.low.mood) { pick = 5 }
+        if pick == 0 { start(i, .sleeping, for: temperament.nap.lowerBound + random() * (temperament.nap.upperBound - temperament.nap.lowerBound)) }
+        else if pick == 1 { start(i, .sitting, for: 4 + random() * 8) }
+        else if pick == 2 { start(i, .loafing, for: 8 + random() * 12) }
+        else if pick == 3 { start(i, .grooming, for: 4 + random() * 5) }
+        else if pick == 4 { start(i, .stretching, for: Colony.stretchTime) }
+        else if pick == 5 {
             start(i, .walking, for: 14)
             cats[i].destination = clamp(lane.lower + random() * lane.width, to: lane, for: i)
-        } else if r < 0.85 {
+        } else if pick == 6 {
             // A sudden zoomie to the far side of the free space.
             start(i, .running, for: 10)
             let middle = (lane.lower + lane.upper) / 2
             cats[i].destination = clamp(cats[i].x < middle ? lane.upper - random() * lane.width * 0.25 : lane.lower + random() * lane.width * 0.25, to: lane, for: i)
-        } else if r < 0.93 {
+        } else if pick == 7 {
             // Hunt an imaginary bug: creep, wiggle, pounce.
             let side = random() < 0.5 ? -1.0 : 1.0
             let prey = clamp(cats[i].x + side * (45 + random() * 40), to: lane, for: i)
@@ -221,12 +255,12 @@ final class Colony {
                 cats[i].destination = prey - (prey > cats[i].x ? 1 : -1) * 20
             }
         } else {
-            if ball == nil { ball = ToyBall(x: cats[i].x, velocity: cats[i].direction * 34, lane: lane) }
+            if ball == nil { ball = makeToy(x: cats[i].x, velocity: cats[i].direction * 34, lifetime: 16, lane: lane) }
             if let toy = ball, lane.contains(toy.x, margin: 5) { start(i, .playing, for: 10 + random() * 8) }
             else { start(i, .sitting, for: 4) }
         }
         // A rare short chase, only within the same connected free interval.
-        if !quiet, cats[i].action == .walking, random() < 0.22,
+        if !quiet, cats[i].action == .walking, random() < temperament.chase,
            let friend = cats.indices.first(where: { $0 != i && cats[$0].visible && lane.contains(cats[$0].x, margin: cats[$0].radius) && cats[$0].action == .walking }) {
             start(i, .chasing, for: 4)
             cats[i].destination = clamp(cats[friend].x, to: lane, for: i)
@@ -548,8 +582,18 @@ final class Colony {
             cats[i].velocity = 0; cats[i].inTunnel = true
         }
     }
-    /// A ball drops at a random spot; every cat sharing that free space goes for it.
-    func play() {
+    /// A toy in the Settings color, or a color different from the last one.
+    func makeToy(_ kind: ToyKind = .ball, x: Double, velocity: Double, lifetime: Double, lane: Lane) -> Toy {
+        var color = toyColor ?? 0
+        if toyColor == nil {
+            color = min(Toy.colors.count - 2, Int(random() * Double(Toy.colors.count - 1)))
+            if color >= lastToyColor { color += 1 }
+        }
+        lastToyColor = color
+        return Toy(x: x, velocity: velocity, lifetime: lifetime, lane: lane, kind: kind, color: color)
+    }
+    /// A toy drops at a random spot; every cat sharing that free space goes for it.
+    func play(_ kind: ToyKind = .ball) {
         guard !quiet else { return }
         let wide = lanes.filter { $0.width >= 120 }
         func eligible(_ i: Int, _ lane: Lane) -> Bool {
@@ -559,10 +603,10 @@ final class Colony {
         let pool = withCats.isEmpty ? wide : withCats
         guard !pool.isEmpty else { return }
         let lane = pool[min(pool.count - 1, Int(random() * Double(pool.count)))]
-        ball = ToyBall(x: lane.lower + 10 + random() * (lane.width - 20), velocity: (random() - 0.5) * 60, lifetime: 22, lane: lane)
+        ball = makeToy(kind, x: lane.lower + 10 + random() * (lane.width - 20), velocity: (random() - 0.5) * 60, lifetime: 22, lane: lane)
         for i in cats.indices where eligible(i, lane) {
             start(i, .playing, for: 14 + random() * 8)
-            cats[i].pounceCooldown = random() * 0.8   // not everyone reacts at the same instant
+            cats[i].pounceCooldown = random() * cats[i].size.temperament.reaction   // kittens are first, adults take their time
         }
     }
 

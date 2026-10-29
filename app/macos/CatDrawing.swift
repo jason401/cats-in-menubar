@@ -329,10 +329,17 @@ enum CatDrawing {
             return true
         }
     }
-    static func ball(_ toy: ToyBall, baseline: CGFloat) {
+    /// Same order as `Toy.colors`.
+    static let toyColors: [NSColor] = [.systemMint, .systemRed, .systemBlue, .systemYellow, .systemPink, .systemPurple, .systemOrange]
+    static func toy(_ toy: Toy, baseline: CGFloat) {
+        switch toy.kind {
+        case .ball: ball(toy, baseline: baseline)
+        }
+    }
+    static func ball(_ toy: Toy, baseline: CGFloat) {
         let rect = NSRect(x: toy.x - 3, y: baseline + 1, width: 6, height: 6)
         NSColor(calibratedWhite: 0.1, alpha: 1).setFill(); NSBezierPath(ovalIn: rect.insetBy(dx: -1, dy: -1)).fill()
-        NSColor.systemMint.setFill(); NSBezierPath(ovalIn: rect).fill()
+        toyColors[max(0, min(toyColors.count - 1, toy.color))].setFill(); NSBezierPath(ovalIn: rect).fill()
         NSColor.white.withAlphaComponent(0.8).setFill()
         NSRect(x: toy.x + sin(toy.phase) * 1.5 - 0.5, y: baseline + 2, width: 1, height: 3).fill()
     }
@@ -444,7 +451,7 @@ final class HabitatView: NSView {
         }
         let baseline = max(0, floor((bounds.height - 22) / 2))
         for (i, cat) in colony.cats.enumerated() where !cat.escaping && cat.action != .hopping { drawCat(i, baseline: baseline) }
-        if let toy = colony.ball { CatDrawing.ball(toy, baseline: baseline) }
+        if let toy = colony.ball { CatDrawing.toy(toy, baseline: baseline) }
         NSGraphicsContext.restoreGraphicsState()
         // Cats leaving covered space or hopping into the tower may briefly pass over icons.
         for (i, cat) in colony.cats.enumerated() where cat.visible && (cat.escaping || cat.action == .hopping) {

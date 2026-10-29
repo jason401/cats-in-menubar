@@ -9,10 +9,11 @@ enum Pref {
     static let activity = "activity", adaptivePower = "adaptivePower", allowDrag = "allowDrag"
     static let nightQuiet = "nightQuiet", nightFrom = "nightFrom", nightTo = "nightTo"
     static let interval = "monitorInterval", topApps = "topApps"
+    static let toyColor = "toyColor"           // -1 = a different color each time
     static let showCPU = "showCPU", showMemory = "showMemory", showDisk = "showDisk", showBattery = "showBattery", showNetwork = "showNetwork"
     static let defaults: [String: Any] = [
         count: 3, fixedLineup: false, paused: false, quiet: false, activity: 1, adaptivePower: true, allowDrag: true,
-        nightQuiet: false, nightFrom: 23, nightTo: 7, interval: 2.0, topApps: 2,
+        nightQuiet: false, nightFrom: 23, nightTo: 7, interval: 2.0, topApps: 2, toyColor: -1,
         showCPU: true, showMemory: true, showDisk: true, showBattery: true, showNetwork: true,
     ]
 }
@@ -580,6 +581,7 @@ struct CatsTab: View {
     @AppStorage(Pref.nightQuiet) private var nightQuiet = false
     @AppStorage(Pref.nightFrom) private var nightFrom = 23
     @AppStorage(Pref.nightTo) private var nightTo = 7
+    @AppStorage(Pref.toyColor) private var toyColor = -1
     var body: some View {
         SettingsPage {
             SettingsCard(title: "Cats") {
@@ -593,6 +595,10 @@ struct CatsTab: View {
                 Divider()
                 SettingsRow(title: "Pick up") {
                     SettingsSwitch(title: "Pick up", isOn: $allowDrag).help("Drag a cat with the mouse. It stays inside its own empty space.")
+                }
+                Divider()
+                SettingsRow(title: "Ball color") {
+                    SettingsMenu(options: [("Mix it up", -1)] + Toy.colors.enumerated().map { ($0.element, $0.offset) }, selection: $toyColor)
                 }
             }
             SettingsCard(title: "Your cats") {
