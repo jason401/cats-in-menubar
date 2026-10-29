@@ -20,8 +20,13 @@ enum Pref {
 private func bytes(_ value: Double) -> String {
     ByteCountFormatter.string(fromByteCount: Int64(value), countStyle: .memory)
 }
+/// Short enough for up and down to share one line: "819 B/s", "21 KB/s", "1.4 MB/s".
 private func rate(_ value: Double) -> String {
-    ByteCountFormatter.string(fromByteCount: Int64(value), countStyle: .file) + "/s"
+    let units = ["B", "KB", "MB", "GB"]
+    var amount = max(0, value), unit = 0
+    while amount >= 1000 && unit < units.count - 1 { amount /= 1000; unit += 1 }
+    let number = unit == 0 || amount >= 10 ? String(Int(amount.rounded())) : String(format: "%.1f", amount)
+    return "\(number) \(units[unit])/s"
 }
 private func percent(_ value: Double) -> String { String(format: "%.1f%%", value * 100) }
 
@@ -215,7 +220,7 @@ private struct Traffic: View {
             Label { Text("Up \(rate(up))") } icon: { Image(systemName: "arrow.up").foregroundStyle(.orange) }
             Label { Text("Down \(rate(down))") } icon: { Image(systemName: "arrow.down").foregroundStyle(.blue) }
         }
-        .labelStyle(TightLabel()).font(.system(size: 11)).monospacedDigit().padding(.top, 1)
+        .labelStyle(TightLabel()).font(.system(size: 11)).monospacedDigit().lineLimit(1).fixedSize().padding(.top, 1)
     }
 }
 
