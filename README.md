@@ -4,7 +4,7 @@ A native macOS menu bar playground for two or three tiny cats. They nap, loaf, s
 
 ## Artwork
 
-Each coat is one authored sprite sheet in `app/macos/Resources/Cats/sheets/`: `<coat>.png` (8 × 16 cells of 102 × 68 px, adult cat at 2x) and `<coat>.json`, whose `animations` table names every behavior's cells. The app looks poses up only by those names, so art can be reordered or lengthened by editing that table. Orange, white and black have their own sheets; the other five coats use orange until theirs arrive. The build measures each pose and writes 1x/2x menu bar copies for the three cat sizes; it never rescales a single pose. Rules for drawing and importing art are in `design/ART_GUIDE.md`; behavior timing and connections in `design/cat-behaviors.docx`.
+Each coat is one authored sprite sheet in `app/macos/Resources/Cats/sheets/`: `<coat>.png` (8 × 16 cells of 102 × 68 px, adult cat at 2x) and `<coat>.json`, whose `animations` table names every behavior's cells. The app looks poses up only by those names, so art can be reordered or lengthened by editing that table. Orange, white, black, silver and cream have their own sheets; tuxedo, calico and Siamese use orange until theirs arrive. The build measures each pose and writes 1x/2x menu bar copies for the three cat sizes; it never rescales a single pose. Rules for drawing and importing art are in `design/ART_GUIDE.md`; behavior timing and connections in `design/cat-behaviors.docx`.
 
 Adult walking is 6 pt/s with a 9.6 pt stride (16 pictures over 1.6 s). Size scales speed and stride together: Kitten 64%, Young 82%, Adult 100%.
 

@@ -10,7 +10,7 @@
 | `app/macos/Resources/Cats/sheets/<색>.png` | 색마다 시트 한 장. 8열×16행 = 128칸, 칸 102×68px, 전체 816×1088px. 쓰지 않는 칸은 완전히 투명. |
 | `app/macos/Resources/Cats/sheets/<색>.json` | 칸 크기, 머리 기준 `headX`, 바닥선 `ground`, `pixelsPerPoint`(2), 걷기 보폭 `walkStride`, 그림 수 `frameCount`, 행동 목차 `animations`. |
 
-- 지금 있는 색: **orange, white, black**. 나머지 5색(silver, cream, tuxedo, calico, siamese)은 시트가 생길 때까지 orange 그림을 쓴다.
+- 지금 있는 색: **orange, white, black, silver, cream**. tuxedo, calico, siamese는 시트가 생길 때까지 orange 그림을 쓴다(초안은 `design/coat-drafts/`, 7절).
 - 시트는 **성묘가 2배 화면에서 보이는 크기 그대로**(2px = 1pt)다. 더 큰 원본을 런타임에 줄이지 않는다.
 - 빌드(`tools/prepare_assets.swift`)는 시트를 칸으로 자르기만 한다. 포즈 하나하나를 다시 자르거나 늘이거나 줄이지 않는다. 대신 칸마다 발 위치·좌우 끝을 재서 `sheet.json`에 적고, 1배/2배 화면 × 고양이 크기 3가지(0.64/0.82/1.0) 메뉴바용 시트 6장을 미리 만든다.
 
@@ -68,3 +68,18 @@
 - black은 어두운 메뉴바에서 잘 안 보인다. 필요하면 밝은 테두리를 따로 그린다.
 - turn 마지막 칸(31)은 몸이 칸 왼쪽에 있어 돌 때 옆으로 튀는지 실제 화면에서 확인해야 한다.
 - pounce 그림은 고양이 충돌 범위보다 조금 넓다.
+
+## 6. Silver·Cream 추가 (2026-10-29, 앱 적용)
+
+- orange의 70개 자세를 기준으로 silver(은회색 줄무늬), cream(연한 크림색 줄무늬) 시트와 동일한 json을 추가했다.
+- ImageGen 색상 참고안을 기준으로 정적 RGB 변환했다. 모든 픽셀의 alpha와 프레임 배치는 orange와 동일하며 분홍 귀·코는 유지한다. 런타임 색상 필터는 없다.
+- 두 시트를 직접 확인했고, 생성 시 전체 픽셀 alpha 및 동일한 metadata를 검증했다. 전체 test.sh는 로컬 서명 인증서가 없어 빌드 시작 전 중단됐다.
+
+## 7. Tuxedo·Calico·Siamese 초안 — 미적용 (2026-10-29)
+
+- GPT가 위치별 정적 무늬로 만든 세 시트는 **자세마다 무늬가 바뀐다**. 앱은 서기↔걷기↔앉기를 계속 오가므로 무늬가 깜빡이듯 바뀌어 보인다. 그래서 앱에 넣지 않고 `design/coat-drafts/`로 옮겼다. 비교: `design/coat-drafts/inconsistent-markings.png`.
+  - tuxedo: 서기(0)·기지개·웅크림은 몸 대부분이 흰색, 걷기·앉기는 몸 대부분이 검정.
+  - calico: 얼룩 위치·색이 자세마다 다르고, 귀·머리 주변에 직선(사각) 경계가 보인다. 정면(30)은 얼굴 전체가 검정.
+  - siamese: 걷기·앉기는 얼굴이 진한 갈색 마스크인데, 서기(0)·기지개·덮치기·공 치기는 얼굴이 밝다.
+- 고칠 때 기준: **같은 고양이로 보이도록 몸 부위별로 무늬를 고정**한다(예: tuxedo는 몸·머리 위·꼬리 검정, 가슴·네 발·주둥이 흰색; siamese는 얼굴 마스크·귀·네 발·꼬리 진한 갈색, 몸 크림색; calico는 몸통 위 얼룩 2–3개의 위치를 모든 자세에서 같게). 서기(0)를 기준으로 70장이 같은 무늬여야 한다. 직선 경계 금지.
+- 고친 시트는 `sheets/<색>.png|json`으로 옮기면 바로 적용된다.

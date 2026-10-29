@@ -8,7 +8,7 @@ Native macOS 14+ development app. Standalone bundle at `build/Cats in Menubar.ap
 
 ## Artwork
 
-- One authored sheet per coat: `app/macos/Resources/Cats/sheets/<coat>.png|json`, 8 × 16 cells of 102 × 68 px (adult at 2x), 70 poses, 58 empty cells. Orange, white and black exist; the other five coats fall back to orange.
+- One authored sheet per coat: `app/macos/Resources/Cats/sheets/<coat>.png|json`, 8 × 16 cells of 102 × 68 px (adult at 2x), 70 poses, 58 empty cells. Orange, white, black, silver and cream exist; tuxedo, calico and Siamese fall back to orange. Their GPT drafts in `design/coat-drafts/` were not installed because the markings change between poses (ART_GUIDE 7).
 - The json `animations` table names each behavior's cells; `SpriteAtlas.Pose` looks them up by name. No frame numbers in code.
 - `tools/prepare_assets.swift` slices the sheet, measures each pose (ground lift, left/right extent) into `sheet.json`, and writes 1x/2x × three-size menu bar copies. It never rescales a single pose.
 - Orange is GPT's style-unified redraw (stand cell kept); white and black are recolors of it. Black's stray amber specks (dark leg lines recolored as eye color) were cleaned before install.
@@ -36,6 +36,6 @@ Native macOS 14+ development app. Standalone bundle at `build/Cats in Menubar.ap
 ## Open items
 
 - Not yet watched live: the new orange/white/black art, turn frame 31 (drawn about 11 pt further left), pounce art slightly wider than the collision radius, black's contrast on a dark menu bar.
-- Silver, cream, tuxedo, calico and Siamese sheets are missing. The coat list is fixed at 8 in `prepare_assets.swift`, Settings and `CatAppearance`; dozens of designs need it data-driven.
+- Tuxedo, calico and Siamese need redrawn sheets with the same markings in every pose. The coat list is fixed at 8 in `prepare_assets.swift`, Settings and `CatAppearance`; dozens of designs need it data-driven.
 - Regenerate `design/cat-behaviors.docx` for the current walk speed and sheet.
 - Primary display only; Reduce Motion not implemented; zero transient overlap cannot be promised (sampled detection).
