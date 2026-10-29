@@ -99,6 +99,7 @@ final class Updater: ObservableObject {
                             try self.git("merge", "--ff-only", "-q", new)
                             self.report(["status": "building", "current": self.revision, "next": new], save: false)
                             // test.sh builds the app into build/ and runs the full self-test.
+                            defer { self.dropCompilerCache() }
                             try self.shell(["zsh", "tools/test.sh"], timeout: 30 * 60, step: "build and test")
                         } catch {
                             // Only this private, clean checkout can be reset; never a developer folder.
@@ -120,6 +121,12 @@ final class Updater: ObservableObject {
         handoff(staged: Bundle.main.bundleURL, next: revision)
     }
 
+    /// The Swift module cache (about 280 MB of prebuilt Apple frameworks) is only reused by the next
+    /// build, hours away; dropping it keeps the update folder small at the cost of a slower build.
+    private func dropCompilerCache() {
+        try? FileManager.default.removeItem(at: root.appendingPathComponent("build/module-cache"))
+    }
+
     private func setAvailable(_ next: String?) {
         DispatchQueue.main.async { if self.available != next { self.available = next } }
     }
@@ -138,10 +145,17 @@ final class Updater: ObservableObject {
         guard root.resolvingSymlinksInPath().path == root.path else {
             throw Failure(description: "Update source must not be a symbolic link")
         }
+        // The checkout keeps all commits (for the ancestry checks below) but only the file contents it
+        // actually checks out, so old artwork in the history is never downloaded. An older full clone
+        // is only a cache of this app, and is replaced once.
+        if FileManager.default.fileExists(atPath: root.path),
+           (try? git("config", "--get", "remote.origin.partialclonefilter")) != "blob:none" {
+            try FileManager.default.removeItem(at: root)
+        }
         if !FileManager.default.fileExists(atPath: root.path) {
             let temporary = Self.support.appendingPathComponent("source-clone-" + UUID().uuidString)
             defer { try? FileManager.default.removeItem(at: temporary) }
-            _ = try execute(["/usr/bin/git", "clone", "--branch", Self.channel, "--single-branch", Self.repository, temporary.path],
+            _ = try execute(["/usr/bin/git", "clone", "--filter=blob:none", "--branch", Self.channel, "--single-branch", Self.repository, temporary.path],
                             timeout: 180, step: "clone", directory: Self.support)
             try FileManager.default.moveItem(at: temporary, to: root)
         }

@@ -10,6 +10,7 @@ Native macOS 14+ development app. Standalone bundle at `build/Cats in Menubar.ap
 
 - Repository is public (2026-10-29). `main` is development; `stable` is what installed apps follow (`git push origin main:stable`, fast-forward only).
 - `Updater.swift` and `tools/install_app.py` are adapted from AI Illuminati: check stable (60 s, then 3 h), Update Now runs `tools/test.sh` in the app-owned checkout, then the installer verifies the signature against the running app, swaps `/Applications/Cats in Menubar.app`, starts it and rolls back unless it acknowledges. Builds record `CatsSourceRevision` in Info.plist. Waits while a cat is being dragged; restores the login item.
+- The update checkout is a blobless clone (`--filter=blob:none`): all commits for the ancestry checks, but only current file contents, about 20 MB instead of about 100 MB of history. An older full clone is replaced once. The Swift module cache (about 280 MB) is deleted after every update build.
 - Development builds in `build/` never update; `--install-self` moves one into `/Applications` explicitly.
 
 ## Artwork
