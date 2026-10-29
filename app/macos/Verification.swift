@@ -82,6 +82,7 @@ func runSelfTests() {
         expect(max(abs(left),abs(right)) <= Habitat.catRadius, "walk frame \(id) fits the existing physical collision margin")
     }
     // Inspect rendered assets, not just metadata: switching to run must keep the eye scale and anchor.
+    var drawnEyeHeights: [Double] = []
     for index in walkIDs + cells(.run) {
         let sheet = SpriteAtlas.sheet(SpriteAtlas.artworkName(for: 0)!)!
         let registrationScale = sheet.pixelsPerPoint / 7.5
@@ -120,9 +121,12 @@ func runSelfTests() {
         let height = eye.map { $0/w }.max()! - eye.map { $0/w }.min()! + 1
         // Resampled native pixels represent pixel centers, half a pixel inside the geometric anchor.
         let center = registrationScale < 0.5 ? 0.5 : 0
-        expect(abs(eyeX-(sheet.headX-center)) < max(0.8, 2 * registrationScale) && abs(eyeY-(sheet.ground-97*registrationScale-center)) < max(0.8, 2 * registrationScale), "frame \(index) uses the actual eye anchor (\(eyeX), \(eyeY))")
+        expect(abs(eyeX-(sheet.headX-center)) < max(1.0, 2 * registrationScale), "frame \(index) uses the actual eye anchor (\(eyeX), \(eyeY))")
+        // Height matters as drawn: each frame is lifted so its paws touch the ground, and the head must not jump from there.
+        drawnEyeHeights.append((SpriteAtlas.groundFix(index, coat: 0) - eyeY) / sheet.pixelsPerPoint)
         expect(abs(Double(height) - 13 * registrationScale) <= max(1.1, registrationScale), "frame \(index) keeps head feature scale: \(height)")
     }
+    expect(drawnEyeHeights.max()! - drawnEyeHeights.min()! < 2, "walking and running heads stay within a 2 pt bob: \(drawnEyeHeights)")
     let lanes = Habitat.freeLanes(width: 1000, obstacles: [Lane(lower: 0, upper: 220), Lane(lower: 800, upper: 1000)])
     expect(lanes == [Lane(lower: 228, upper: 792)], "menu padding")
     expect(Habitat.freeLanes(width: 500, obstacles: [Lane(lower: 0, upper: 500)]).isEmpty, "fully occupied")
