@@ -282,7 +282,7 @@ func runSelfTests() {
             }
             facing[i] = cat.direction
             if cat.visible && cat.action == .hopping {
-                expect(colony.cats[i].elapsed <= Colony.hopTime + 0.1, "tower hops are short")
+                expect(colony.cats[i].elapsed <= colony.cats[i].hopTotal + 0.1, "tower hops end on time")
             } else if cat.visible && cat.escaping {
                 // A covered cat must head for the nearest free spot and get there quickly.
                 escapeTicks[i] += 1
@@ -398,6 +398,43 @@ func runSelfTests() {
         notched.updateLanes(Habitat.freeLanes(width: 1200, obstacles: [Lane(lower: 0, upper: 150), Lane(lower: 500, upper: 1200)]))
         for _ in 0..<45 { notched.step(1.0 / 30) }
         expect(!notched.cats[0].inTunnel && notched.lanes.contains { $0.contains(notched.cats[0].x, margin: notched.cats[0].radius) }, "a closed tunnel lets the cat out on a free side")
+        // Called home from the far side of the notch: it runs through the notch, never leaps across it.
+        let homeward = Colony(count: 1, random: { 0.5 })
+        homeward.tunnel = notch; homeward.updateLanes(Habitat.freeLanes(width: 1200, obstacles: [Lane(lower: 0, upper: 150), notch]))
+        homeward.cats[0].x = 300; homeward.cats[0].destination = 300; homeward.cats[0].visible = true; homeward.cats[0].hiddenFor = 0
+        homeward.callHome(at: 1180)
+        var usedTunnel = false, longestHop = 0.0
+        for _ in 0..<1200 where !homeward.cats[0].home {
+            homeward.step(1.0 / 30)
+            usedTunnel = usedTunnel || homeward.cats[0].inTunnel
+            if homeward.cats[0].action == .hopping { longestHop = max(longestHop, abs(homeward.cats[0].hopTo - homeward.cats[0].hopFrom)) }
+        }
+        expect(homeward.cats[0].home && usedTunnel && longestHop < 40, "home past the notch is reached through it: tunnel \(usedTunnel), hop \(longestHop)")
+    }
+    // A covered cat dashes out: it speeds up (no instant slide), and its legs never cycle faster than a gallop.
+    do {
+        let dash = Colony(count: 1, random: { 0.5 })
+        dash.updateLanes([Lane(lower: 0, upper: 1000)])
+        dash.cats[0].x = 500; dash.cats[0].destination = 500; dash.cats[0].visible = true; dash.cats[0].hiddenFor = 0
+        dash.updateLanes([Lane(lower: 0, upper: 380)])
+        var ticks = 0, firstSpeed = -1.0, fastestLegs = 0.0
+        while dash.cats[0].escaping || ticks == 0 {
+            let gait = dash.cats[0].gait
+            dash.step(1.0 / 30); ticks += 1
+            if firstSpeed < 0 { firstSpeed = abs(dash.cats[0].velocity) }
+            fastestLegs = max(fastestLegs, (dash.cats[0].gait - gait) * 30)
+            if ticks > 60 { break }
+        }
+        expect(firstSpeed < 40 && ticks < 45, "an escape accelerates and is out within 1.5 s: first \(firstSpeed) pt/s, \(ticks) ticks")
+        expect(fastestLegs <= Colony.runSpeed * 1.01, "escape strides lengthen instead of the legs blurring: \(fastestLegs)")
+        // A far tower is run to over the icons, with the jump only at the tower.
+        let far = Colony(count: 1, random: { 0.5 })
+        far.updateLanes([Lane(lower: 0, upper: 300)])
+        far.cats[0].visible = true; far.cats[0].hiddenFor = 0
+        far.beginHop(0, from: 280, to: 480, entering: true)
+        far.step(1.0 / 30)
+        expect(far.cats[0].hopJump == nil && SpriteAtlas.cells(.run, coat: 0).contains(SpriteAtlas.frameIndex(far.cats[0])), "a long way to the tower is run, not glided")
+        expect(abs(far.cats[0].hopTotal - 200 / (55 * far.cats[0].size.scale)) < 0.01, "the run to a far tower goes at gallop speed")
     }
     // Calling the cats home: everyone ends up in the tower, then comes back out into free space.
     colony.updateLanes([Lane(lower: 0, upper: 600)])

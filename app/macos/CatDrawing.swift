@@ -64,7 +64,7 @@ enum CatDrawing {
         case .held: return held(cat, t)
         case .hopping:
             // A gathered spring, stretched in the air, tucked on landing.
-            let q = min(1, e / CGFloat(Colony.hopTime))
+            let q = CGFloat(cat.hopJump ?? 1)
             var pose = run(cycle: -.pi / 2 + q * 2 * .pi * 0.75, strength: 1, t: t)
             pose.lift = sin(q * .pi) * 7
             return pose

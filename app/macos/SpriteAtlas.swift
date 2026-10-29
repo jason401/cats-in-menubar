@@ -104,7 +104,11 @@ enum SpriteAtlas {
             // The medium crouch (first crouch cell) sits closest to the creeping height, so starting to creep does not pop up.
             if stopped { return at(.crouch, 0) }
             return cycle(.creep, creepStride)
-        case .pouncing, .hopping: return once(.pounce, cat.action == .hopping ? Colony.hopTime : 0.45)
+        case .pouncing: return once(.pounce, 0.45)
+        case .hopping:
+            // Running to (or from) a far tower, then the jump itself.
+            guard let q = cat.hopJump else { return cycle(.run, runStride) }
+            return at(.pounce, min(count(.pounce) - 1, Int(q * Double(count(.pounce)))))
         case .walking: return walking
         case .running, .chasing, .goingHome: return abs(cat.velocity) > 18 * cat.size.scale ? running : walking
         case .playing:
@@ -191,8 +195,8 @@ enum SpriteAtlas {
         guard let sheet = sheet(for: cat.coat), sheet.frames.indices.contains(index), var drawn = cell(index, coat: cat.coat) else { return false }
         var scale = scale * cat.size.scale
         var lift: CGFloat = 0
-        if cat.action == .hopping {
-            let q = CGFloat(min(1, cat.elapsed / Colony.hopTime))
+        if cat.action == .hopping, let jump = cat.hopJump {
+            let q = CGFloat(jump)
             scale *= cat.hopIn ? 1 - 0.55 * q * q : 0.45 + 0.55 * q
             lift = sin(q * .pi) * 7
         } else if cat.action == .pouncing { lift = sin(min(1, cat.elapsed / 0.45) * .pi) * 4.5 }
@@ -200,7 +204,7 @@ enum SpriteAtlas {
         let breathing: CGFloat = [.sleeping, .loafing].contains(cat.action) ? 1 + sin(cat.phase * 1.5) * 0.015 : 1
         // In the menu bar (scale 1) draw the cell from the sheet shrunk at build time for this screen and cat size,
         // snapped to the pixel grid; previews at other scales and the brief tower hop draw the original.
-        let pixels = scale == cat.size.scale && cat.action != .hopping ? CGFloat(density) : 0
+        let pixels = scale == cat.size.scale && (cat.action != .hopping || cat.hopJump == nil) ? CGFloat(density) : 0
         func snap(_ value: CGFloat) -> CGFloat { pixels > 0 ? (value * pixels).rounded() / pixels : value }
         // The cell bottom sits 24 source px below the ground line.
         let bottom = sheet.ground - Double(sheet.cellHeight) + sheet.frames[index].lift

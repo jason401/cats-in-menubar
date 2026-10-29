@@ -7,6 +7,7 @@ struct Lane: Equatable {
     func contains(_ x: Double, margin: Double = 0) -> Bool {
         x >= lower + margin && x <= upper - margin
     }
+    func distance(to x: Double) -> Double { max(0, lower - x, x - upper) }
 }
 
 // Coordinates are screen-local points. Occupied rectangles are expanded before subtraction.
@@ -60,6 +61,7 @@ struct Cat {
     var heldLeanVelocity = 0.0
     var swing = 0.0         // horizontal speed while carried by the mouse
     var escaping = false    // covered by a menu or icon, hurrying to the nearest free space
+    var escapeTop = 0.0     // top speed of the current escape dash
     var homeBound = false   // called back to the cat tower
     var tunnelBound = false // walking to the notch to cross to the other side
     var inTunnel = false    // passing behind the notch, unseen in the middle
@@ -67,6 +69,13 @@ struct Cat {
     var outDelay = 0.0      // staggered exit from the tower
     var hopFrom = 0.0, hopTo = 0.0
     var hopIn = true
+    var hopTotal = Colony.hopTime  // a far tower is reached by running, with the jump only at the tower end
+    /// Progress 0...1 through the tower jump itself, or nil while running to or from it.
+    var hopJump: Double? {
+        let start = hopIn ? hopTotal - Colony.hopTime : 0
+        guard elapsed >= start, elapsed <= start + Colony.hopTime else { return nil }
+        return min(1, (elapsed - start) / Colony.hopTime)
+    }
     var action: CatAction = .sitting
     var remaining = 5.0
     var phase = 0.0
@@ -90,6 +99,7 @@ struct ToyBall {
 
 final class Colony {
     static let walkSpeed = 6.0
+    static let runSpeed = 58.0
     static let walkAcceleration = 12.0
     var cats: [Cat] = []
     var ball: ToyBall?
@@ -248,13 +258,15 @@ final class Colony {
             cats[i].phase += dt; cats[i].elapsed += dt
             return
         }
-        let walk = Self.walkSpeed * cats[i].size.scale
+        // Called home it runs; otherwise it strolls in and out like any walk.
+        let walk = (cats[i].homeBound ? 55 : Self.walkSpeed) * cats[i].size.scale
+        let pace = (cats[i].homeBound ? 90 : Self.walkAcceleration) * cats[i].size.scale
         if cats[i].x - cats[i].radius >= tunnel.lower && cats[i].x + cats[i].radius <= tunnel.upper {
             // Out of sight it hurries, so the notch is a short wait rather than a long walk.
             cats[i].velocity = cats[i].direction * 120 * cats[i].size.scale
         } else {
             // Going in and coming out it walks, like any other walk.
-            let speed = min(walk, abs(cats[i].velocity) + Self.walkAcceleration * cats[i].size.scale * dt)
+            let speed = min(walk, abs(cats[i].velocity) + pace * dt)
             cats[i].velocity = cats[i].direction * speed
         }
         let step = min(abs(exit - cats[i].x), abs(cats[i].velocity) * dt)
@@ -335,7 +347,18 @@ final class Colony {
                     if cats[i].stuck > 2.5 { start(i, .sitting, for: 3 + random() * 3); cats[i].stuck = 0 }
                 } else { cats[i].action = .sitting; cats[i].remaining = 3 }
             }
-            if cats[i].action == .goingHome, let homeX {
+            if cats[i].action == .goingHome, let homeX, let ends = tunnelEnds(),
+               let homeLane = lanes.min(by: { $0.distance(to: homeX) < $1.distance(to: homeX) }),
+               (lane == ends.left && homeLane == ends.right) || (lane == ends.right && homeLane == ends.left) {
+                // Home is past the notch: run through it instead of leaping across.
+                let inward = lane == ends.left ? 1.0 : -1.0
+                cats[i].destination = inward > 0 ? lane.upper - cats[i].radius : lane.lower + cats[i].radius
+                if abs(cats[i].destination - cats[i].x) < 0.5 && abs(cats[i].velocity) < 0.5 {
+                    if cats[i].direction != inward { cats[i].direction = inward; cats[i].turnHold = Self.turnTime; cats[i].turnCooldown = 0.6 }
+                    cats[i].inTunnel = true
+                    continue
+                }
+            } else if cats[i].action == .goingHome, let homeX {
                 cats[i].destination = clamp(homeX, to: lane, for: i)
                 // One cat at a time hops from the edge of the free space into the tower.
                 if abs(cats[i].destination - cats[i].x) < 0.5 && abs(cats[i].velocity) < 0.5 && !cats.contains(where: { $0.action == .hopping && $0.hopIn }) {
@@ -357,7 +380,7 @@ final class Colony {
             let (baseSpeed, baseAccel): (Double, Double) = switch cats[i].action {
             case .walking: (Self.walkSpeed, Self.walkAcceleration)
             case .goingHome: (55, 90)
-            case .running: (58, 90)
+            case .running: (Self.runSpeed, 90)
             case .chasing: (50, 90)
             case .playing: (30, 70)
             case .stalking: (6, 20)
@@ -413,12 +436,14 @@ final class Colony {
         let fresh = !cats[i].escaping
         cats[i].escaping = true
         cats[i].direction = spot > x ? 1 : -1
-        if fresh { cats[i].velocity = 0 }
-        // Farther escapes are quicker dashes, so a covered cat is always out within about a second.
-        if !cats[i].escaping || cats[i].velocity == 0 { cats[i].velocity = cats[i].direction * max(90, abs(spot - x)) }
-        let step = min(abs(spot - x), abs(cats[i].velocity) * dt)
+        if fresh { cats[i].velocity = 0; cats[i].escapeTop = max(70 * cats[i].size.scale, abs(spot - x)) }
+        // A real dash: it speeds up quickly to a top speed set so even a far escape is out within about a second.
+        let speed = min(cats[i].escapeTop, abs(cats[i].velocity) + 700 * cats[i].size.scale * dt)
+        cats[i].velocity = cats[i].direction * speed
+        let step = min(abs(spot - x), speed * dt)
         cats[i].x += cats[i].direction * step
-        cats[i].gait += step
+        // Faster than a gallop, strides lengthen instead of the legs blurring.
+        cats[i].gait += step / max(1, speed / (Self.runSpeed * cats[i].size.scale))
         cats[i].phase += dt
         if abs(spot - cats[i].x) < 0.01 { cats[i].x = spot; cats[i].velocity = 0; start(i, .sitting, for: 1 + random() * 2) }
         cats[i].destination = cats[i].x
@@ -449,13 +474,17 @@ final class Colony {
     func beginHop(_ i: Int, from: Double, to: Double, entering: Bool) {
         start(i, .hopping, for: .infinity)
         cats[i].hopFrom = from; cats[i].hopTo = to; cats[i].hopIn = entering
+        // Farther than one jump: run the rest at gallop speed over the icons.
+        cats[i].hopTotal = max(Colony.hopTime, abs(to - from) / (55 * cats[i].size.scale))
         cats[i].direction = to >= from ? 1 : -1
         cats[i].velocity = 0; cats[i].escaping = false
     }
     private func hop(_ i: Int, _ dt: Double) {
         cats[i].phase += dt; cats[i].elapsed += dt
-        let q = min(1, cats[i].elapsed / Colony.hopTime)
+        let q = min(1, cats[i].elapsed / cats[i].hopTotal)
+        let before = cats[i].x
         cats[i].x = cats[i].hopFrom + (cats[i].hopTo - cats[i].hopFrom) * q
+        cats[i].gait += abs(cats[i].x - before)
         cats[i].destination = cats[i].x
         guard q >= 1 else { return }
         if cats[i].hopIn { cats[i].home = true; cats[i].visible = false; start(i, .sitting, for: 2) }
