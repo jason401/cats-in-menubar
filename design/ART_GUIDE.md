@@ -331,3 +331,13 @@ xcrun swift tools/onion_strip.swift build/previews/walk-check.png app/macos/Reso
 - `build/style-all/import.swift`는 열린 눈 크기와 동작별 공통 배율로 같은 물리적 고양이 크기를 맞춘다. 감은 눈은 크기 추정에 쓰지 않고, 앉기·수면·웅크리기 등 실제 자세에 따른 높이/길이 차이는 유지한다. 매달림은 머리 크기와 캔버스 여백을 고려한 공통 배율0.265를 쓴다. 동작별 값은 `build/style-all/scales.json`에 있다.
 - 결과: `walk/orange.png`(816×1088), `walk/style-review.png`(번호 포함 전체 확대), `walk/walk-grid.png`, `walk/walk-loop.gif` 갱신. `orange.json` 동작/셀 순서는 유지했다. 앱 원본 리소스·실행 앱은 변경하지 않았다.
 - 검증: 첫 번째 칸 픽셀 동일, 69개 수정 셀 비어 있지 않음, 상하좌우 캔버스 경계에서 잘린 불투명 픽셀 없음, 예약58칸 투명. 전체 확대본 및 걷기 onion 검수. 생성 시 일부 포즈의 세부 관절/무늬는 원본과 차이가 있어 원본 포즈의 픽셀 일치나 모든 전환의 완벽한 연속성을 보장하지 않는다.
+
+## 18. White·Black 70포즈 시트 (2026-10-28)
+
+- 사용자 요청: 통일된 `walk/orange.png`를 기준으로 white 및 black 추가. 결과는 `walk/white.png`, `walk/black.png`와 동일한 구조의 각 JSON이다. 각816×1088px, 102×68px셀, 70포즈/58투명예약칸.
+- ImageGen으로 같은 기준 캐릭터의 white/black 색 기준을 제작했다. 참조 결과: Projects/generated_images/exec-55b63d0b-9117-41f1-9760-08b6f8ebb6c5.png(white), exec-7d2d6132-ee90-4e4f-81c7-4b2420487a70.png(black).
+- 포즈·크기·정렬이 다시 변하지 않도록 `build/coat-variants/make_coats.swift`에서 최종 orange의 색 채널만 정적 변환했다. white는 아이보리와 옅은 따뜻한 그림자, black은 차콜과 어두운 윤곽/호박색 눈이다. 귀와 코의 분홍색은 유지한다. 런타임 필터가 아니라 별도 저작 PNG이며 앱 리소스에는 아직 적용하지 않았다.
+- 각 atlas는 원본 orange와 모든 픽셀의 alpha가 동일함을 검사했다. 실루엣·셀 좌표·프레임 순서·동작 타이밍은 동일하고, 재생성/개별 크기 조절을 하지 않았다. white-review.png, black-review.png 및 white-walk.gif, black-walk.gif를 같은 폴더에 저장했다.
+- **앱 적용(2026-10-28, Claude):** `sheets/white.png|json`, `sheets/black.png|json`으로 넣었다. 빌드가 자동으로 집어 coat 목록이 orange·black·white 자체 그림, 나머지 5색은 orange 대체가 됐다.
+- black 정리: 색 변환 때 orange의 어두운 다리·목 선까지 호박색(눈 색)으로 바뀌어 다리·몸에 노란 점이 찍혀 있었다. orange의 실제 눈 위치 근처 호박색만 남기고, 나머지 호박색 점과 6px 이하 흰 점은 주변 털색 중간값으로 칠했다(alpha는 그대로). `walk/black.png`·`black-review.png`도 정리본으로 바꿨다.
+- 주의: 검정 고양이는 어두운 메뉴바에서 대비가 낮다(미리보기 `build/previews/lineup.png`). 필요하면 밝은 외곽선을 따로 그려야 한다.
