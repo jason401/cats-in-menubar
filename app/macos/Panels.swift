@@ -77,18 +77,18 @@ struct DashboardView: View {
                     }
                 }
                 if showDisk {
-                    StatSection(icon: "externaldrive.fill", title: "Storage: \(percent(s.diskUsed / max(1, s.diskTotal))) used") {
+                    StatSection(icon: "externaldrive.fill", title: "Storage: \(percent(s.diskUsed / max(1, s.diskTotal))) used", open: { openSystemSettings("com.apple.settings.Storage") }, help: "Open Storage settings") {
                         Detail(nil, "\(bytes(s.diskUsed)) / \(bytes(s.diskTotal))")
                         Meter(value: s.diskUsed / max(1, s.diskTotal))
                     }
                 }
                 if showBattery {
                     if s.hasBattery {
-                        StatSection(icon: s.charging ? "battery.100.bolt" : "battery.75", title: "Battery: \(Int(s.batteryLevel * 100))%") {
+                        StatSection(icon: s.charging ? "battery.100.bolt" : "battery.75", title: "Battery: \(Int(s.batteryLevel * 100))%", open: { openSystemSettings("com.apple.Battery-Settings.extension") }, help: "Open Battery settings") {
                             Detail(nil, s.charging ? "Charging" : (s.onAC ? "On power adapter" : "On battery"))
                         }
                     } else {
-                        StatSection(icon: "bolt.fill", title: "Power: Adapter") { EmptyView() }
+                        StatSection(icon: "bolt.fill", title: "Power: Adapter", open: { openSystemSettings("com.apple.Battery-Settings.extension") }, help: "Open Energy settings") { EmptyView() }
                     }
                 }
                 if showNetwork {
@@ -145,6 +145,11 @@ private struct UpdateBanner: View {
     }
 }
 
+/// A System Settings page by its extension ID (listed in /System/Library/ExtensionKit/Extensions).
+private func openSystemSettings(_ pane: String) {
+    if let url = URL(string: "x-apple.systempreferences:" + pane) { NSWorkspace.shared.open(url) }
+}
+
 private func openActivityMonitor() {
     NSWorkspace.shared.openApplication(at: URL(fileURLWithPath: "/System/Applications/Utilities/Activity Monitor.app"),
                                        configuration: NSWorkspace.OpenConfiguration())
@@ -173,6 +178,7 @@ private struct StatSection<Content: View>: View {
     let title: String
     /// Clicking the section opens a related app (Activity Monitor for CPU and memory).
     var open: (() -> Void)? = nil
+    var help = "Open Activity Monitor"
     @ViewBuilder var content: Content
     @StateObject private var hover = Hover()
     private var hovering: Bool { hover.on }
@@ -197,7 +203,7 @@ private struct StatSection<Content: View>: View {
         .contentShape(Rectangle())
         .onHover { hover.on = $0 }
         .onTapGesture { open?() }
-        .help(open == nil ? "" : "Open Activity Monitor")
+        .help(open == nil ? "" : help)
         .overlay(alignment: .bottom) { Divider().opacity(0.6) }
     }
 }
