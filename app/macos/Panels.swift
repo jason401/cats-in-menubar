@@ -103,20 +103,26 @@ struct DashboardView: View {
                 if showNetwork {
                     if let wifi = s.wifi {
                         StatSection(icon: "wifi", title: wifi.name.map { "Wi-Fi: \($0)" } ?? "Wi-Fi", open: { openSystemSettings("com.apple.wifi-settings-extension") }, help: "Open Wi-Fi settings") {
-                            HStack(spacing: 4) {
-                                Text("Security:").foregroundStyle(.secondary)
-                                Text(wifi.security).foregroundStyle(wifi.secure ? Color.primary : Color.orange)
-                                if !wifi.secure { Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(.orange) }
-                            }.font(.system(size: 11))
-                            Detail("Signal", "\(wifi.signal) (\(wifi.rssi) dBm)")
-                            Detail("Band", wifi.rate > 0 ? "\(wifi.band) · \(Int(wifi.rate)) Mbps" : wifi.band)
-                            Detail("Local IP", s.localIP)
-                            Traffic(up: s.upload, down: s.download)
+                            HStack(alignment: .top, spacing: 10) {
+                                VStack(alignment: .leading, spacing: 2) {
+                                    HStack(spacing: 4) {
+                                        Text("Security:").foregroundStyle(.secondary)
+                                        Text(wifi.security).foregroundStyle(wifi.secure ? Color.primary : Color.orange)
+                                        if !wifi.secure { Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(.orange) }
+                                    }.font(.system(size: 11))
+                                    Detail("Signal", "\(wifi.signal) (\(wifi.rssi) dBm)")
+                                    Detail("Band", wifi.rate > 0 ? "\(wifi.band) · \(Int(wifi.rate)) Mbps" : wifi.band)
+                                    Detail("Local IP", s.localIP)
+                                }.frame(width: detailColumn, alignment: .leading)
+                                Traffic(up: s.upload, down: s.download)
+                            }
                         }
                     } else {
                         StatSection(icon: s.networkName == "Offline" ? "wifi.slash" : "cable.connector", title: "Network: \(s.networkName)", open: { openSystemSettings("com.apple.Network-Settings.extension") }, help: "Open Network settings") {
-                            Detail("Local IP", s.localIP)
-                            Traffic(up: s.upload, down: s.download)
+                            HStack(alignment: .top, spacing: 10) {
+                                Detail("Local IP", s.localIP).frame(width: detailColumn, alignment: .leading)
+                                Traffic(up: s.upload, down: s.download)
+                            }
                         }
                     }
                 }
@@ -137,7 +143,7 @@ struct DashboardView: View {
             }
         }
         .padding(14)
-        .frame(width: 340)
+        .frame(width: 380)
     }
 }
 
@@ -234,11 +240,14 @@ private struct Traffic: View {
     let up: Double
     let down: Double
     var body: some View {
-        HStack(spacing: 10) {
+        // Laid out like the top-app lists: a small title, then up and down on their own lines.
+        VStack(alignment: .leading, spacing: 2) {
+            Text("Traffic").font(.system(size: 10)).foregroundStyle(.tertiary)
             Label { Text("Up \(rate(up))") } icon: { Image(systemName: "arrow.up").foregroundStyle(.orange) }
             Label { Text("Down \(rate(down))") } icon: { Image(systemName: "arrow.down").foregroundStyle(.blue) }
         }
-        .labelStyle(TightLabel()).font(.system(size: 11)).monospacedDigit().lineLimit(1).fixedSize().padding(.top, 1)
+        .labelStyle(TightLabel()).font(.system(size: 11)).monospacedDigit().lineLimit(1)
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 }
 
@@ -263,7 +272,7 @@ private struct Pressure: View {
 }
 
 /// The CPU and memory details share one width, so both top-app lists start at the same place.
-private let detailColumn: CGFloat = 122
+private let detailColumn: CGFloat = 160
 
 /// The heaviest apps, name on the left and amount on the right.
 private struct TopApps: View {
