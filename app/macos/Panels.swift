@@ -52,7 +52,10 @@ struct DashboardView: View {
         let s = system.stats
         VStack(alignment: .leading, spacing: 10) {
             HStack(spacing: 10) {
-                Image(nsImage: TowerIcon.app(size: 34))
+                // The menu bar tower in the same quiet cat-eared tile as the stat badges below.
+                Image(nsImage: TowerIcon.menuBar()).resizable().renderingMode(.template).foregroundStyle(.primary)
+                    .frame(width: 20, height: 20).frame(width: 34, height: 34).padding(.top, 7)
+                    .background(CatTile().fill(Color.primary.opacity(0.12)))
                 VStack(alignment: .leading, spacing: 2) {
                     Text("Cats in Menubar").font(.headline)
                     Text(paused ? "Cats are paused" : model.catSummary).font(.caption).foregroundStyle(.secondary).lineLimit(2)
