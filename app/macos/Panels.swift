@@ -66,7 +66,7 @@ struct DashboardView: View {
                         HStack(alignment: .top, spacing: 10) {
                             VStack(alignment: .leading, spacing: 2) {
                                 Detail("System", percent(s.cpuSystem)); Detail("User", percent(s.cpuUser))
-                            }.fixedSize()
+                            }.frame(width: detailColumn, alignment: .leading)
                             TopApps(title: "Most CPU, 1 min", apps: s.topCPU, count: topApps, value: percent)
                         }
                         Sparkline(values: system.cpuHistory).frame(height: 22).padding(.top, 2)
@@ -79,7 +79,7 @@ struct DashboardView: View {
                             VStack(alignment: .leading, spacing: 2) {
                                 Detail("App", bytes(s.memoryApp))
                                 Detail("Wired", bytes(s.memoryWired)); Detail("Compressed", bytes(s.memoryCompressed))
-                            }.fixedSize()
+                            }.frame(width: detailColumn, alignment: .leading)
                             TopApps(title: "Most memory", apps: s.topMemory, count: topApps, value: bytes)
                         }
                         Meter(value: s.memoryUsed / max(1, s.memoryTotal))
@@ -261,6 +261,9 @@ private struct Pressure: View {
         }.font(.system(size: 11))
     }
 }
+
+/// The CPU and memory details share one width, so both top-app lists start at the same place.
+private let detailColumn: CGFloat = 122
 
 /// The heaviest apps, name on the left and amount on the right.
 private struct TopApps: View {
