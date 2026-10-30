@@ -91,6 +91,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         updater.isBusy = { [weak self] in self?.habitatView?.dragging != nil || self?.habitatView?.lasering == true }
         updater.start()
         if CommandLine.arguments.contains("--install-self") { updater.installSelf() }
+        ScrollReverser.shared.apply()
         if !defaults.bool(forKey: "hasLaunched") || !MenuBarMonitor.trusted {
             showSettings(); defaults.set(true, forKey: "hasLaunched")
         }
@@ -136,6 +137,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let interval = max(defaults.double(forKey: Pref.interval), model.power.sampleFloor)
         if interval != monitorInterval { monitorInterval = interval; system.start(interval: interval) }
         if paused { overlay?.orderOut(nil) } else { scan() }
+        ScrollReverser.shared.apply()
     }
     func syncLineup() {
         let appearances = colony.cats.map(\.appearance)
@@ -274,7 +276,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         if overCatAllowed != hovering { hovering = overCatAllowed; if !overCatAllowed { NSCursor.arrow.set() } }
     }
     func scan() {
-        model.access = MenuBarMonitor.trusted
+        // A newly granted Accessibility permission also lets the scroll reverser start.
+        if model.access != MenuBarMonitor.trusted { model.access = MenuBarMonitor.trusted; ScrollReverser.shared.apply() }
         guard !suspended, !paused, let screen = NSScreen.screens.first else { return }
         let frame = screen.frame
         // The reserved band is the real bar height (30 pt on macOS 27, not NSStatusBar.thickness).

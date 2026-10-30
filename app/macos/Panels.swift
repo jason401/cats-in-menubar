@@ -11,10 +11,11 @@ enum Pref {
     static let interval = "monitorInterval", topApps = "topApps"
     static let toyColor = "toyColor"           // -1 = a different color each time
     static let laser = "laserPointer"
+    static let scrollReverse = "scrollReverse", scrollSources = "scrollSources"
     static let showCPU = "showCPU", showMemory = "showMemory", showDisk = "showDisk", showBattery = "showBattery", showNetwork = "showNetwork"
     static let defaults: [String: Any] = [
         count: 3, fixedLineup: false, paused: false, quiet: false, activity: 1, adaptivePower: true, allowDrag: true,
-        nightQuiet: false, nightFrom: 23, nightTo: 7, interval: 2.0, topApps: 2, toyColor: -1, laser: true,
+        nightQuiet: false, nightFrom: 23, nightTo: 7, interval: 2.0, topApps: 2, toyColor: -1, laser: true, scrollReverse: false,
         showCPU: true, showMemory: true, showDisk: true, showBattery: true, showNetwork: true,
     ]
 }
@@ -702,10 +703,79 @@ struct MonitorTab: View {
     }
 }
 
+/// Scroll Reverser's settings: one switch, then each scrolling source that has been used, with its direction.
+struct ScrollTab: View {
+    @ObservedObject var reverser: ScrollReverser
+    @AppStorage(Pref.scrollReverse) private var enabled = false
+    var body: some View {
+        SettingsPage {
+            SettingsCard(title: "Scroll direction") {
+                SettingsRow(title: "Reverse") {
+                    SettingsSwitch(title: "Reverse scrolling", isOn: $enabled).help("Sets the scrolling direction of each trackpad, mouse and app separately.")
+                }
+                SettingsNote(text: note)
+            }
+            SettingsCard(title: "Sources") {
+                if reverser.rows.isEmpty {
+                    SettingsNote(text: "Scroll with each trackpad or mouse and it appears here. New trackpads start Natural, mice Classic.")
+                }
+                ForEach(reverser.rows) { row in
+                    if row.id != reverser.rows.first?.id { Divider() }
+                    ScrollSourceView(row: row, reverser: reverser)
+                }
+            }
+        }
+    }
+    private var note: String {
+        if !enabled { return "Off: macOS's own scrolling direction applies everywhere." }
+        if reverser.otherAppRunning { return "Paused while Scroll Reverser is running, so scrolling is never reversed twice. Quit it to use this." }
+        if !reverser.running { return "Needs Accessibility access (General tab)." }
+        return "On. Each source below follows its own setting."
+    }
+}
+
+private struct ScrollSourceView: View {
+    let row: ScrollSourceRow
+    let reverser: ScrollReverser
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            HStack {
+                VStack(alignment: .leading, spacing: 1) {
+                    Text(row.title).font(.system(size: 11, weight: .medium)).lineLimit(1)
+                    Text(row.subtitle).font(.system(size: 10)).foregroundStyle(.secondary)
+                }
+                Spacer()
+                Button { reverser.forget(row.key) } label: { Image(systemName: "xmark.circle.fill").foregroundStyle(.tertiary) }
+                    .buttonStyle(.plain).help("Forget this source")
+            }
+            let verticalModes: [ScrollMode] = row.hasDeviceDirection ? [.natural, .classic, .unchanged] : [.reversed, .unchanged]
+            HStack(spacing: 6) {
+                Text("Vertical").font(.system(size: 10)).foregroundStyle(.secondary).frame(width: 52, alignment: .leading)
+                SettingsMenu(options: verticalModes.map { ($0.label, $0) }, selection: binding(\.vertical))
+            }
+            HStack(spacing: 6) {
+                Text("Horizontal").font(.system(size: 10)).foregroundStyle(.secondary).frame(width: 52, alignment: .leading)
+                SettingsMenu(options: [ScrollMode.matchVertical, .reversed, .unchanged].map { ($0.label, $0) }, selection: binding(\.horizontal))
+            }
+            if !row.continuous {
+                HStack(spacing: 6) {
+                    Text("Wheel step").font(.system(size: 10)).foregroundStyle(.secondary).frame(width: 52, alignment: .leading)
+                    SettingsMenu(options: [("macOS default", 0)] + [1, 2, 3, 4, 5, 6, 8, 10, 15, 20].map { ($0 == 1 ? "1 line" : "\($0) lines", $0) },
+                                 selection: Binding(get: { row.stepEnabled ? row.stepSize : 0 },
+                                                    set: { var r = row; r.stepEnabled = $0 > 0; if $0 > 0 { r.stepSize = $0 }; reverser.update(r) }))
+                }
+            }
+        }.padding(.horizontal, 10).padding(.vertical, 5)
+    }
+    private func binding(_ path: WritableKeyPath<ScrollSourceRow, ScrollMode>) -> Binding<ScrollMode> {
+        Binding(get: { row[keyPath: path] }, set: { var r = row; r[keyPath: path] = $0; reverser.update(r) })
+    }
+}
+
 /// Toolbar tabs at a fixed size, like AI Face's settings window.
 final class SettingsWindowController: NSObject {
     static let size = NSSize(width: 334, height: 460)
-    static let tabs: [(String, String)] = [("General", "gearshape"), ("Cats", "pawprint"), ("Monitor", "gauge.with.dots.needle.33percent")]
+    static let tabs: [(String, String)] = [("General", "gearshape"), ("Cats", "pawprint"), ("Scroll", "arrow.up.arrow.down"), ("Monitor", "gauge.with.dots.needle.33percent")]
     let model: AppModel
     let state = SettingsState()
     private(set) var window: NSWindow?
@@ -715,6 +785,7 @@ final class SettingsWindowController: NSObject {
         switch index {
         case 0: AnyView(GeneralTab(model: model, state: state))
         case 1: AnyView(CatsTab(model: model))
+        case 2: AnyView(ScrollTab(reverser: ScrollReverser.shared))
         default: AnyView(MonitorTab())
         }
     }

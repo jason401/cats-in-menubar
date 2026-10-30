@@ -487,6 +487,44 @@ func runSelfTests() {
         for _ in 0..<150 { pointer.step(1.0 / 30) }
         expect(!pointer.cats.contains { $0.action == .playing }, "with the dot gone, the cats stop playing")
     }
+    // Scroll reversing follows Scroll Reverser's rule: devices Natural/Classic against what macOS already did,
+    // apps Reversed/Unchanged, horizontal matching vertical unless set, and a wheel click made N lines.
+    do {
+        for (mode, natural, flips) in [(ScrollMode.natural, true, false), (.natural, false, true), (.classic, true, true), (.classic, false, false),
+                                       (.unchanged, true, false), (.unchanged, false, false), (.reversed, true, true), (.reversed, false, true)] {
+            expect(mode.reverses(natural: natural) == flips, "\(mode) with natural=\(natural) reverses: \(flips)")
+        }
+        let trackpad = ScrollSourceRow(key: "t", kind: .device, category: .trackpad, name: nil, continuous: true)
+        let mouse = ScrollSourceRow(key: "m", kind: .device, category: .mouse, name: nil, continuous: false)
+        let app = ScrollSourceRow(key: "a", kind: .app, category: .other, name: nil, continuous: true)
+        expect(trackpad.vertical == .natural && mouse.vertical == .classic && app.vertical == .unchanged, "new trackpads natural, mice classic, apps unchanged")
+        expect(trackpad.adjustment(natural: false) == .init(reverseVertical: true, reverseHorizontal: true, stepSize: 0), "a classic trackpad is made natural both ways")
+        expect(mouse.adjustment(natural: false) == .init(reverseVertical: false, reverseHorizontal: false, stepSize: 3), "a classic mouse stays, with 3-line wheel steps")
+        var sideways = trackpad; sideways.horizontal = .unchanged
+        expect(sideways.adjustment(natural: false).reverseHorizontal == false, "horizontal can be set apart from vertical")
+        // Smooth scrolling: every delta flips, including point and fixed-point values.
+        let smooth = CGEvent(scrollWheelEvent2Source: nil, units: .pixel, wheelCount: 2, wheel1: 12, wheel2: -5, wheel3: 0)!
+        let before = [smooth.getIntegerValueField(.scrollWheelEventPointDeltaAxis1), smooth.getIntegerValueField(.scrollWheelEventPointDeltaAxis2)]
+        applyScrollAdjustment(trackpad.adjustment(natural: false), to: smooth, hid: nil)
+        expect([smooth.getIntegerValueField(.scrollWheelEventPointDeltaAxis1), smooth.getIntegerValueField(.scrollWheelEventPointDeltaAxis2)] == before.map { -$0 }
+               && smooth.getDoubleValueField(.scrollWheelEventFixedPtDeltaAxis1) < 0, "smooth scroll deltas are reversed: \(before)")
+        // A wheel click: one line becomes three, reversed when asked.
+        let click = CGEvent(scrollWheelEvent2Source: nil, units: .line, wheelCount: 1, wheel1: 1, wheel2: 0, wheel3: 0)!
+        applyScrollAdjustment(mouse.adjustment(natural: false), to: click, hid: nil)
+        expect(click.getIntegerValueField(.scrollWheelEventDeltaAxis1) == 3, "a wheel click scrolls the step size")
+        var reversedMouse = mouse; reversedMouse.vertical = .natural
+        let click2 = CGEvent(scrollWheelEvent2Source: nil, units: .line, wheelCount: 1, wheel1: 1, wheel2: 0, wheel3: 0)!
+        applyScrollAdjustment(reversedMouse.adjustment(natural: false), to: click2, hid: nil)
+        expect(click2.getIntegerValueField(.scrollWheelEventDeltaAxis1) == -3, "a natural mouse wheel scrolls the other way")
+        let untouched = CGEvent(scrollWheelEvent2Source: nil, units: .pixel, wheelCount: 1, wheel1: 7, wheel2: 0, wheel3: 0)!
+        applyScrollAdjustment(app.adjustment(natural: false), to: untouched, hid: nil)
+        expect(untouched.getIntegerValueField(.scrollWheelEventPointDeltaAxis1) == 7, "unchanged sources pass through")
+        // Device keys: the serial when there is one; the name for built-in devices without IDs; trackpads by acceleration type.
+        let builtIn = deviceSource(kind: .device, properties: [kIOHIDProductKey: "Apple Internal Keyboard / Trackpad", "HIDScrollAccelerationType": "HIDTrackpadScrollAcceleration"], trackpadDriver: false)
+        expect(builtIn.key == "device||||Apple Internal Keyboard / Trackpad" && builtIn.category == .trackpad, "built-in trackpad key: \(builtIn.key)")
+        let wireless = deviceSource(kind: .device, properties: [kIOHIDProductKey: "Mouse|1", kIOHIDTransportKey: "Bluetooth", kIOHIDVendorIDKey: 76, kIOHIDProductIDKey: 617, kIOHIDSerialNumberKey: "AB#C"], trackpadDriver: false)
+        expect(wireless.key == "device|Bluetooth|76|617|sn:AB%23C" && wireless.category == .mouse, "mouse key: \(wireless.key)")
+    }
     // Calling the cats home: everyone ends up in the tower, then comes back out into free space.
     colony.updateLanes([Lane(lower: 0, upper: 600)])
     for _ in 0..<60 { colony.step(1.0 / 30) }
