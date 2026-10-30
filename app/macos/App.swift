@@ -88,7 +88,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         startTimers()
         scan()
         let updater = Updater.shared
-        updater.isBusy = { [weak self] in self?.habitatView?.dragging != nil }
+        updater.isBusy = { [weak self] in self?.habitatView?.dragging != nil || self?.habitatView?.lasering == true }
         updater.start()
         if CommandLine.arguments.contains("--install-self") { updater.installSelf() }
         if !defaults.bool(forKey: "hasLaunched") || !MenuBarMonitor.trusted {
@@ -266,7 +266,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let inside = overlay.frame.contains(mouse)
         let overCat = inside && colony.catIndex(at: mouse.x - overlay.frame.minX) != nil
         let overCatAllowed = overCat && defaults.bool(forKey: Pref.allowDrag)
-        let catching = view.dragging != nil || overCatAllowed
+        // With the laser on, empty menu bar space takes the press too (nothing else uses it).
+        let overFree = inside && defaults.bool(forKey: Pref.laser) && colony.lanes.contains { $0.contains(mouse.x - overlay.frame.minX) }
+        let catching = view.dragging != nil || view.lasering || overCatAllowed || overFree
         if overlay.ignoresMouseEvents == catching { overlay.ignoresMouseEvents = !catching }
         if overCatAllowed && view.dragging == nil { NSCursor.openHand.set() }
         if overCatAllowed != hovering { hovering = overCatAllowed; if !overCatAllowed { NSCursor.arrow.set() } }

@@ -334,7 +334,21 @@ enum CatDrawing {
     static func toy(_ toy: Toy, baseline: CGFloat) {
         switch toy.kind {
         case .ball: ball(toy, baseline: baseline)
+        case .laser: laser(toy, baseline: baseline)
         }
+    }
+    /// A red pointer dot on the floor of the menu bar, with a soft glow.
+    static func laser(_ toy: Toy, baseline: CGFloat) {
+        let fade = CGFloat(min(1, toy.lifetime / 0.25))
+        let center = NSPoint(x: toy.x, y: baseline + 3)
+        func dot(_ radius: CGFloat, _ color: NSColor) {
+            color.setFill()
+            NSBezierPath(ovalIn: NSRect(x: center.x - radius, y: center.y - radius, width: radius * 2, height: radius * 2)).fill()
+        }
+        dot(5, NSColor.systemRed.withAlphaComponent(0.18 * fade))
+        dot(3, NSColor.systemRed.withAlphaComponent(0.45 * fade))
+        dot(1.7, NSColor(calibratedRed: 1, green: 0.15, blue: 0.1, alpha: fade))
+        dot(0.7, NSColor.white.withAlphaComponent(0.85 * fade))
     }
     static func ball(_ toy: Toy, baseline: CGFloat) {
         let rect = NSRect(x: toy.x - 3, y: baseline + 1, width: 6, height: 6)
@@ -349,6 +363,7 @@ final class HabitatView: NSView {
     let colony: Colony
     var showLanes = false
     private(set) var dragging: Int?
+    private(set) var lasering = false
     private var grabOffset = 0.0
     private var lastDrag = 0.0
     init(colony: Colony, frame: NSRect) { self.colony = colony; super.init(frame: frame) }
@@ -421,11 +436,17 @@ final class HabitatView: NSView {
     }
     override func mouseDown(with event: NSEvent) {
         let point = convert(event.locationInWindow, from: nil)
-        guard let i = colony.catIndex(at: point.x) else { return }
+        let canDrag = UserDefaults.standard.bool(forKey: Pref.allowDrag)
+        guard canDrag, let i = colony.catIndex(at: point.x) else {
+            // Empty menu bar space: press and hold for the laser pointer.
+            if UserDefaults.standard.bool(forKey: Pref.laser) && colony.laser(at: point.x) { lasering = true; needsDisplay = true }
+            return
+        }
         dragging = i; grabOffset = 0; lastDrag = event.timestamp
         colony.grab(i); colony.drag(i, to: point.x, dt: 1.0 / 30); NSCursor.closedHand.set(); needsDisplay = true
     }
     override func mouseDragged(with event: NSEvent) {
+        if lasering { colony.laser(at: convert(event.locationInWindow, from: nil).x); return }
         guard let i = dragging else { return }
         let point = convert(event.locationInWindow, from: nil)
         colony.drag(i, to: point.x + grabOffset, dt: event.timestamp - lastDrag)
@@ -434,6 +455,7 @@ final class HabitatView: NSView {
     override func mouseUp(with event: NSEvent) { endDrag(); NSCursor.openHand.set() }
     func endDrag() {
         if let i = dragging { colony.release(i); needsDisplay = true }
+        if lasering { colony.laserOff(); lasering = false }
         dragging = nil
     }
     override func draw(_ dirtyRect: NSRect) {

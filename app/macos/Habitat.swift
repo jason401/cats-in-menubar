@@ -112,6 +112,8 @@ struct Cat {
 /// if cats should treat it differently from a ball, its own branch in the playing step.
 enum ToyKind: String, CaseIterable, Codable {
     case ball
+    /// A red dot that follows the pointer while the user presses on empty menu bar space.
+    case laser
 }
 struct Toy {
     var x: Double
@@ -121,6 +123,8 @@ struct Toy {
     var lane: Lane
     var kind = ToyKind.ball
     var color = 0           // index into `Toy.colors`
+    var speed = 0.0         // laser: how fast the dot is moving (smoothed), so cats chase or stalk
+    var moved = 0.0         // laser: pointer travel since the last step
     static let colors = ["Mint", "Red", "Blue", "Yellow", "Pink", "Purple", "Orange"]
 }
 
@@ -220,6 +224,12 @@ final class Colony {
     func choose(_ i: Int, lane: Lane) {
         let previous = cats[i].action
         if cats[i].homeBound { start(i, .goingHome, for: .infinity); return }
+        // While the laser is lit, cats keep after it; a pounce is followed by a short look before the next chase.
+        if !quiet, let dot = ball, dot.kind == .laser, dot.lifetime > 1, lane.contains(dot.x) {
+            start(i, .playing, for: 30)
+            cats[i].pounceCooldown = previous == .pouncing ? 0.4 + random() * 0.6 : 0
+            return
+        }
         // The Calm/Playful setting and the power level shift the choice between naps and running or hunting.
         let r = min(0.999, max(0, random() + Double(activity - 1) * 0.12 + mood))
         if quiet { start(i, .sleeping, for: 18 + random() * 50); return }
@@ -324,7 +334,13 @@ final class Colony {
     }
     private func advance(_ dt: Double) {
         if quiet { ball = nil }
-        if var toy = ball {
+        if var toy = ball, toy.kind == .laser {
+            // The pointer moves the dot; it stays lit while pressed and fades just after release.
+            toy.lifetime -= dt
+            toy.speed += (toy.moved / dt - toy.speed) * min(1, dt * 8)
+            toy.moved = 0
+            ball = toy.lifetime > 0 ? toy : nil
+        } else if var toy = ball {
             toy.lifetime -= dt
             toy.x += toy.velocity * dt
             toy.velocity *= pow(0.94, dt * 30)
@@ -356,8 +372,21 @@ final class Colony {
             cats[i].turnCooldown = max(0, cats[i].turnCooldown - dt)
             cats[i].turnHold = max(0, cats[i].turnHold - dt)
             cats[i].pounceCooldown = max(0, cats[i].pounceCooldown - dt)
-            if cats[i].action == .playing {
-                if var toy = ball, lane.contains(toy.x, margin: 5) {
+            if cats[i].action == .playing, let dot = ball, dot.kind == .laser, lane.contains(dot.x) {
+                let side = dot.x >= cats[i].x ? 1.0 : -1.0
+                if cats[i].pounceCooldown > 0 {
+                    cats[i].destination = cats[i].x
+                } else if abs(dot.x - cats[i].x) < 28 * cats[i].size.scale && dot.speed < 20
+                            && cats[i].direction == side && abs(cats[i].velocity) < 5 {
+                    // The dot holds still right in front: crouch, wiggle, pounce on it.
+                    start(i, .stalking, for: 8)
+                    cats[i].target = dot.x; cats[i].destination = cats[i].x
+                    cats[i].wiggle = 0.35 + random() * 0.5
+                } else {
+                    cats[i].destination = clamp(dot.x - side * 12 * cats[i].size.scale, to: lane, for: i)
+                }
+            } else if cats[i].action == .playing {
+                if var toy = ball, toy.kind == .ball, lane.contains(toy.x, margin: 5) {
                     // Side is taken from where the ball is, not where the cat faces, so it cannot oscillate.
                     let side = toy.x >= cats[i].x ? 1.0 : -1.0
                     let spot = clamp(toy.x - side * 11 * cats[i].size.scale, to: lane, for: i)
@@ -400,6 +429,13 @@ final class Colony {
                     continue
                 }
             }
+            if cats[i].action == .stalking && cats[i].wiggle > 0, let dot = ball, dot.kind == .laser, lane.contains(dot.x) {
+                // Eyes on the dot: aim at where it is now, and give up the pounce if it darts away.
+                cats[i].target = dot.x
+                if abs(dot.x - cats[i].x) > 45 * cats[i].size.scale || (dot.x - cats[i].x) * cats[i].direction < 0 {
+                    start(i, .playing, for: 30)
+                }
+            }
             if cats[i].action == .stalking && cats[i].wiggle > 0 {
                 cats[i].wiggle -= dt
                 if cats[i].wiggle <= 0 {
@@ -416,7 +452,7 @@ final class Colony {
             case .goingHome: (55, 90)
             case .running: (Self.runSpeed, 90)
             case .chasing: (50, 90)
-            case .playing: (30, 70)
+            case .playing: ball?.kind == .laser ? (Self.runSpeed, 160) : (30, 70)
             case .stalking: (6, 20)
             case .pouncing: (75, 400)
             default: (0, 70)  // idle actions also stop quickly
@@ -592,13 +628,34 @@ final class Colony {
         lastToyColor = color
         return Toy(x: x, velocity: velocity, lifetime: lifetime, lane: lane, kind: kind, color: color)
     }
+    private func eligible(_ i: Int, _ lane: Lane) -> Bool {
+        cats[i].visible && !cats[i].homeBound && !cats[i].inTunnel && ![.held, .hopping].contains(cats[i].action) && lane.contains(cats[i].x, margin: cats[i].radius)
+    }
+    /// Laser pointer: pressing on empty menu bar space lights a red dot that follows the pointer,
+    /// always inside the free space where the press started. Returns false where there is no free space.
+    @discardableResult func laser(at x: Double) -> Bool {
+        if var dot = ball, dot.kind == .laser, dot.lifetime > 1 {
+            let next = min(dot.lane.upper - 3, max(dot.lane.lower + 3, x))
+            dot.moved += abs(next - dot.x); dot.x = next
+            ball = dot
+            return true
+        }
+        guard !quiet, let lane = lanes.first(where: { $0.contains(x) }) else { return false }
+        ball = Toy(x: min(lane.upper - 3, max(lane.lower + 3, x)), velocity: 0, lifetime: .infinity, lane: lane, kind: .laser)
+        for i in cats.indices where eligible(i, lane) {
+            start(i, .playing, for: 30)
+            cats[i].pounceCooldown = random() * cats[i].size.temperament.reaction   // kittens notice first
+        }
+        return true
+    }
+    /// Letting go switches the dot off; it fades out over a moment.
+    func laserOff() {
+        if var dot = ball, dot.kind == .laser { dot.lifetime = min(dot.lifetime, 0.25); ball = dot }
+    }
     /// A toy drops at a random spot; every cat sharing that free space goes for it.
     func play(_ kind: ToyKind = .ball) {
         guard !quiet else { return }
         let wide = lanes.filter { $0.width >= 120 }
-        func eligible(_ i: Int, _ lane: Lane) -> Bool {
-            cats[i].visible && !cats[i].homeBound && ![.held, .hopping].contains(cats[i].action) && lane.contains(cats[i].x, margin: cats[i].radius)
-        }
         let withCats = wide.filter { lane in cats.indices.contains { eligible($0, lane) } }
         let pool = withCats.isEmpty ? wide : withCats
         guard !pool.isEmpty else { return }

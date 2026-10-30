@@ -454,6 +454,39 @@ func runSelfTests() {
         expect(far.cats[0].hopJump == nil && SpriteAtlas.cells(.run, coat: 0).contains(SpriteAtlas.frameIndex(far.cats[0])), "a long way to the tower is run, not glided")
         expect(abs(far.cats[0].hopTotal - 200 / (55 * far.cats[0].size.scale)) < 0.01, "the run to a far tower goes at gallop speed")
     }
+    // Laser pointer: a press on free space lights a dot the cats chase; held still in front of a cat, it gets pounced.
+    do {
+        var seed: UInt64 = 5
+        let pointer = Colony(count: 3, random: { seed = seed &* 6364136223846793005 &+ 1; return Double(seed >> 11) / Double(UInt64(1) << 53) })
+        pointer.updateLanes([Lane(lower: 100, upper: 700), Lane(lower: 800, upper: 1000)])
+        for i in pointer.cats.indices { pointer.cats[i].x = 200 + Double(i) * 120; pointer.cats[i].destination = pointer.cats[i].x; pointer.cats[i].visible = true; pointer.cats[i].hiddenFor = 0 }
+        expect(!pointer.laser(at: 750), "no laser dot outside free space")
+        expect(pointer.laser(at: 650) && pointer.ball?.kind == .laser, "pressing on free space lights the dot")
+        pointer.laser(at: 760)
+        expect(pointer.ball!.x <= 697, "the dot stays inside the free space where the press started")
+        expect(pointer.cats.allSatisfy { $0.action == .playing }, "every cat in that space goes for the dot")
+        // Sweep the dot back and forth: cats run after it.
+        var ran = false
+        for step in 0..<240 {
+            pointer.laser(at: 400 + sin(Double(step) / 20) * 250)
+            pointer.step(1.0 / 30)
+            ran = ran || pointer.cats.contains { abs($0.velocity) > 20 * $0.size.scale }
+        }
+        expect(ran, "cats run after a moving dot")
+        // Hold it still: someone stalks and pounces on it.
+        var pounced = false
+        for _ in 0..<360 {
+            pointer.laser(at: pointer.ball!.x)
+            pointer.step(1.0 / 30)
+            pounced = pounced || pointer.cats.contains { $0.action == .pouncing }
+        }
+        expect(pounced, "a dot held still gets pounced")
+        pointer.laserOff()
+        for _ in 0..<12 { pointer.step(1.0 / 30) }
+        expect(pointer.ball == nil, "letting go switches the dot off")
+        for _ in 0..<150 { pointer.step(1.0 / 30) }
+        expect(!pointer.cats.contains { $0.action == .playing }, "with the dot gone, the cats stop playing")
+    }
     // Calling the cats home: everyone ends up in the tower, then comes back out into free space.
     colony.updateLanes([Lane(lower: 0, upper: 600)])
     for _ in 0..<60 { colony.step(1.0 / 30) }

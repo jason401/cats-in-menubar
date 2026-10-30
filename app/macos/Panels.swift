@@ -10,10 +10,11 @@ enum Pref {
     static let nightQuiet = "nightQuiet", nightFrom = "nightFrom", nightTo = "nightTo"
     static let interval = "monitorInterval", topApps = "topApps"
     static let toyColor = "toyColor"           // -1 = a different color each time
+    static let laser = "laserPointer"
     static let showCPU = "showCPU", showMemory = "showMemory", showDisk = "showDisk", showBattery = "showBattery", showNetwork = "showNetwork"
     static let defaults: [String: Any] = [
         count: 3, fixedLineup: false, paused: false, quiet: false, activity: 1, adaptivePower: true, allowDrag: true,
-        nightQuiet: false, nightFrom: 23, nightTo: 7, interval: 2.0, topApps: 2, toyColor: -1,
+        nightQuiet: false, nightFrom: 23, nightTo: 7, interval: 2.0, topApps: 2, toyColor: -1, laser: true,
         showCPU: true, showMemory: true, showDisk: true, showBattery: true, showNetwork: true,
     ]
 }
@@ -575,6 +576,7 @@ struct CatsTab: View {
     @AppStorage(Pref.count) private var count = 3
     @AppStorage(Pref.paused) private var paused = false
     @AppStorage(Pref.allowDrag) private var allowDrag = true
+    @AppStorage(Pref.laser) private var laser = true
     @AppStorage(Pref.activity) private var activity = 1
     @AppStorage(Pref.adaptivePower) private var adaptivePower = true
     @AppStorage(Pref.quiet) private var quiet = false
@@ -595,6 +597,10 @@ struct CatsTab: View {
                 Divider()
                 SettingsRow(title: "Pick up") {
                     SettingsSwitch(title: "Pick up", isOn: $allowDrag).help("Drag a cat with the mouse. It stays inside its own empty space.")
+                }
+                Divider()
+                SettingsRow(title: "Laser pointer") {
+                    SettingsSwitch(title: "Laser pointer", isOn: $laser).help("Press and hold on empty menu bar space: a red dot follows the pointer and the cats chase it.")
                 }
                 Divider()
                 SettingsRow(title: "Ball color") {
