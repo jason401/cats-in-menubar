@@ -340,8 +340,10 @@ private struct PanelButton: View {
                 Image(systemName: icon).font(.system(size: 14))
                 Text(label).font(.system(size: 10))
             }.frame(maxWidth: .infinity).padding(.vertical, 6)
+            // A plain button only takes clicks on drawn pixels; the shape makes the whole square clickable.
+            .background(RoundedRectangle(cornerRadius: 8).fill(Color.primary.opacity(0.06)))
+            .contentShape(RoundedRectangle(cornerRadius: 8))
         }.buttonStyle(.plain)
-        .background(RoundedRectangle(cornerRadius: 8).fill(Color.primary.opacity(0.06)))
     }
 }
 
