@@ -345,10 +345,11 @@ enum CatDrawing {
             color.setFill()
             NSBezierPath(ovalIn: NSRect(x: center.x - radius, y: center.y - radius, width: radius * 2, height: radius * 2)).fill()
         }
-        dot(5, NSColor.systemRed.withAlphaComponent(0.18 * fade))
-        dot(3, NSColor.systemRed.withAlphaComponent(0.45 * fade))
-        dot(1.7, NSColor(calibratedRed: 1, green: 0.15, blue: 0.1, alpha: fade))
-        dot(0.7, NSColor.white.withAlphaComponent(0.85 * fade))
+        // Small and see-through, so it reads as light on the bar rather than a solid ball.
+        dot(3.5, NSColor.systemRed.withAlphaComponent(0.12 * fade))
+        dot(2, NSColor.systemRed.withAlphaComponent(0.3 * fade))
+        dot(1.1, NSColor(calibratedRed: 1, green: 0.2, blue: 0.15, alpha: 0.75 * fade))
+        dot(0.45, NSColor.white.withAlphaComponent(0.5 * fade))
     }
     static func ball(_ toy: Toy, baseline: CGFloat) {
         let rect = NSRect(x: toy.x - 3, y: baseline + 1, width: 6, height: 6)
