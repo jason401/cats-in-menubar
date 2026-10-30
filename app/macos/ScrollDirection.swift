@@ -2,9 +2,10 @@ import Cocoa
 import IOKit
 import IOKit.hid
 
-// Scroll reversing, per scrolling source, the way Scroll Reverser 2 does it
-// (https://github.com/pilotmoon/Scroll-Reverser, Apache License 2.0; the event tap, source
-// identification and reversing rule follow its MouseTap, ScrollSource and SourceTable).
+// Scroll direction per scrolling source. A derivative work of Scroll Reverser
+// (https://github.com/pilotmoon/Scroll-Reverser, Copyright 2011 Nicholas Moore, Apache License 2.0):
+// the event tap, source identification and reversing rule follow its MouseTap, ScrollSource and
+// SourceTable, rewritten in Swift. See THIRD_PARTY_NOTICES.md and LICENSES/Apache-2.0.txt.
 // An event tap sees every scroll event before apps do, attributes it to a device or app,
 // and flips the sign of its deltas when that source's setting asks for it.
 
@@ -197,8 +198,8 @@ private final class ScrollSourceIdentifier {
 // MARK: The event tap
 
 /// Runs the tap on its own thread, so cat drawing never delays scrolling.
-final class ScrollReverser: ObservableObject {
-    static let shared = ScrollReverser()
+final class ScrollDirection: ObservableObject {
+    static let shared = ScrollDirection()
     static let scrollReverserID = "com.pilotmoon.scroll-reverser"
     /// Rows the user sees, most recently used first. Main thread only.
     @Published private(set) var rows: [ScrollSourceRow] = []
@@ -234,7 +235,7 @@ final class ScrollReverser: ObservableObject {
 
     private func start() {
         let thread = Thread { [weak self] in self?.runTap() }
-        thread.name = "Scroll reverser"
+        thread.name = "Scroll direction"
         thread.qualityOfService = .userInteractive
         self.thread = thread
         thread.start()
@@ -244,14 +245,14 @@ final class ScrollReverser: ObservableObject {
         if let loop { CFRunLoopStop(loop) }
         thread = nil
         running = false
-        AppModel.log("Scroll reverser stopped")
+        AppModel.log("Scroll direction stopped")
     }
     private func runTap() {
         let mask = CGEventMask(1) << CGEventType.scrollWheel.rawValue
         guard let port = CGEvent.tapCreate(tap: .cgSessionEventTap, place: .tailAppendEventTap, options: .defaultTap,
                                            eventsOfInterest: mask, callback: scrollTapCallback,
                                            userInfo: Unmanaged.passUnretained(self).toOpaque()) else {
-            AppModel.log("Scroll reverser could not start its event tap (Accessibility needed)")
+            AppModel.log("Scroll direction could not start its event tap (Accessibility needed)")
             DispatchQueue.main.async { self.thread = nil; self.running = false }
             return
         }
@@ -259,7 +260,7 @@ final class ScrollReverser: ObservableObject {
         lock.lock(); tapPort = port; tapLoop = CFRunLoopGetCurrent(); lock.unlock()
         CFRunLoopAddSource(CFRunLoopGetCurrent(), source, .commonModes)
         DispatchQueue.main.async { self.running = true }
-        AppModel.log("Scroll reverser started")
+        AppModel.log("Scroll direction started")
         CFRunLoopRun()
         CFMachPortInvalidate(port)
         lock.lock(); tapPort = nil; tapLoop = nil; lock.unlock()
@@ -322,7 +323,7 @@ final class ScrollReverser: ObservableObject {
 
 private func scrollTapCallback(proxy: CGEventTapProxy, type: CGEventType, event: CGEvent, userInfo: UnsafeMutableRawPointer?) -> Unmanaged<CGEvent>? {
     guard let userInfo else { return Unmanaged.passUnretained(event) }
-    let reverser = Unmanaged<ScrollReverser>.fromOpaque(userInfo).takeUnretainedValue()
+    let reverser = Unmanaged<ScrollDirection>.fromOpaque(userInfo).takeUnretainedValue()
     // macOS switches a slow or interrupted tap off; switch it straight back on.
     if type == .tapDisabledByTimeout || type == .tapDisabledByUserInput { reverser.reenable(); return Unmanaged.passUnretained(event) }
     if type == .scrollWheel { reverser.handle(event) }

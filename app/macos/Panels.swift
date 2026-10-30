@@ -523,6 +523,12 @@ struct GeneralTab: View {
                     Text(version).foregroundStyle(.secondary)
                 }
                 SettingsNote(text: "No analytics. The only network request is the update check against the public GitHub repository.")
+                Divider()
+                SettingsRow(title: "Acknowledgements") {
+                    SettingsAction(title: "Show") {
+                        if let url = Bundle.main.url(forResource: "THIRD_PARTY_NOTICES", withExtension: "md") { NSWorkspace.shared.open(url) }
+                    }
+                }
             }
         }
     }
@@ -705,7 +711,7 @@ struct MonitorTab: View {
 
 /// Scroll Reverser's settings: one switch, then each scrolling source that has been used, with its direction.
 struct ScrollTab: View {
-    @ObservedObject var reverser: ScrollReverser
+    @ObservedObject var reverser: ScrollDirection
     @AppStorage(Pref.scrollReverse) private var enabled = false
     var body: some View {
         SettingsPage {
@@ -714,6 +720,7 @@ struct ScrollTab: View {
                     SettingsSwitch(title: "Reverse scrolling", isOn: $enabled).help("Sets the scrolling direction of each trackpad, mouse and app separately.")
                 }
                 SettingsNote(text: note)
+                SettingsNote(text: "Based on Scroll Reverser by Nicholas Moore (Apache License 2.0). Details: General → About → Acknowledgements.")
             }
             SettingsCard(title: "Sources") {
                 if reverser.rows.isEmpty {
@@ -736,7 +743,7 @@ struct ScrollTab: View {
 
 private struct ScrollSourceView: View {
     let row: ScrollSourceRow
-    let reverser: ScrollReverser
+    let reverser: ScrollDirection
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
             HStack {
@@ -785,7 +792,7 @@ final class SettingsWindowController: NSObject {
         switch index {
         case 0: AnyView(GeneralTab(model: model, state: state))
         case 1: AnyView(CatsTab(model: model))
-        case 2: AnyView(ScrollTab(reverser: ScrollReverser.shared))
+        case 2: AnyView(ScrollTab(reverser: ScrollDirection.shared))
         default: AnyView(MonitorTab())
         }
     }

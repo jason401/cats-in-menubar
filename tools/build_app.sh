@@ -22,6 +22,8 @@ xcrun swiftc -swift-version 5 -O -target "$(uname -m)-apple-macos14.0" \
 iconutil -c icns "$STAGING/AppIcon.iconset" -o "$APP/Contents/Resources/AppIcon.icns"
 # The updater runs this bundled installer to swap /Applications safely.
 cp tools/install_app.py "$APP/Contents/Resources/"
+# Third-party notices travel with the app (Apache-2.0 requires the NOTICE and license with the work).
+cp THIRD_PARTY_NOTICES.md LICENSES/Apache-2.0.txt "$APP/Contents/Resources/"
 # The built commit is how the updater compares this app with the stable branch.
 REVISION=$(git rev-parse HEAD)
 BUILD=$(git rev-list --count HEAD)

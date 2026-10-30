@@ -9,6 +9,8 @@ func runSelfTests() {
         if !condition() { fputs("FAIL: \(message)\n", stderr); exit(1) }
     }
     expect(SpriteAtlas.available, "approved sprite atlas is bundled; never substitute the old drawing")
+    expect(["THIRD_PARTY_NOTICES.md", "Apache-2.0.txt"].allSatisfy { FileManager.default.fileExists(atPath: Bundle.main.resourceURL!.appendingPathComponent($0).path) },
+           "third-party notices and the Apache license ship inside the app")
     for coat in 0..<8 {
         let slug = ["orange", "black", "white", "silver", "cream", "tuxedo", "calico", "siamese"][coat]
         let ownExists = FileManager.default.fileExists(atPath: Bundle.main.resourceURL!.appendingPathComponent("Cats/\(slug)/sheet.json").path)
