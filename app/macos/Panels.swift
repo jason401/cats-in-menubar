@@ -62,18 +62,27 @@ struct DashboardView: View {
             VStack(spacing: 0) {
                 if showCPU {
                     StatSection(icon: "gauge.with.dots.needle.67percent", title: "CPU: \(percent(s.cpu))", open: openActivityMonitor) {
-                        Detail("System", percent(s.cpuSystem)); Detail("User", percent(s.cpuUser))
+                        // Details on the left, the heaviest apps beside them, so the panel stays short.
+                        HStack(alignment: .top, spacing: 10) {
+                            VStack(alignment: .leading, spacing: 2) {
+                                Detail("System", percent(s.cpuSystem)); Detail("User", percent(s.cpuUser))
+                            }.fixedSize()
+                            TopApps(title: "Most CPU, 1 min", apps: s.topCPU, count: topApps, value: percent)
+                        }
                         Sparkline(values: system.cpuHistory).frame(height: 22).padding(.top, 2)
-                        TopApps(title: "Most CPU, last minute", apps: s.topCPU, count: topApps, value: percent)
                     }
                 }
                 if showMemory {
                     StatSection(icon: "square.stack.3d.up.fill", title: "Memory: \(percent(s.memoryUsed / max(1, s.memoryTotal)))", open: openActivityMonitor) {
                         Pressure(level: s.pressureLevel, value: s.memoryPressure)
-                        Detail("App Memory", bytes(s.memoryApp))
-                        Detail("Wired Memory", bytes(s.memoryWired)); Detail("Compressed", bytes(s.memoryCompressed))
+                        HStack(alignment: .top, spacing: 10) {
+                            VStack(alignment: .leading, spacing: 2) {
+                                Detail("App", bytes(s.memoryApp))
+                                Detail("Wired", bytes(s.memoryWired)); Detail("Compressed", bytes(s.memoryCompressed))
+                            }.fixedSize()
+                            TopApps(title: "Most memory", apps: s.topMemory, count: topApps, value: bytes)
+                        }
                         Meter(value: s.memoryUsed / max(1, s.memoryTotal))
-                        TopApps(title: "Most memory", apps: s.topMemory, count: topApps, value: bytes)
                     }
                 }
                 if showDisk {
@@ -128,7 +137,7 @@ struct DashboardView: View {
             }
         }
         .padding(14)
-        .frame(width: 300)
+        .frame(width: 340)
     }
 }
 
@@ -261,8 +270,8 @@ private struct TopApps: View {
     let value: (Double) -> String
     var body: some View {
         if count > 0 && !apps.isEmpty {
-            VStack(alignment: .leading, spacing: 1) {
-                Text(title).font(.system(size: 10)).foregroundStyle(.tertiary).padding(.top, 5)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(title).font(.system(size: 10)).foregroundStyle(.tertiary)
                 ForEach(Array(apps.prefix(count).enumerated()), id: \.offset) { _, app in
                     HStack {
                         Text(app.name).lineLimit(1).truncationMode(.tail)
