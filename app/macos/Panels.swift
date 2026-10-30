@@ -93,7 +93,7 @@ struct DashboardView: View {
                 }
                 if showNetwork {
                     if let wifi = s.wifi {
-                        StatSection(icon: "wifi", title: wifi.name.map { "Wi-Fi: \($0)" } ?? "Wi-Fi") {
+                        StatSection(icon: "wifi", title: wifi.name.map { "Wi-Fi: \($0)" } ?? "Wi-Fi", open: { openSystemSettings("com.apple.wifi-settings-extension") }, help: "Open Wi-Fi settings") {
                             HStack(spacing: 4) {
                                 Text("Security:").foregroundStyle(.secondary)
                                 Text(wifi.security).foregroundStyle(wifi.secure ? Color.primary : Color.orange)
@@ -105,7 +105,7 @@ struct DashboardView: View {
                             Traffic(up: s.upload, down: s.download)
                         }
                     } else {
-                        StatSection(icon: s.networkName == "Offline" ? "wifi.slash" : "cable.connector", title: "Network: \(s.networkName)") {
+                        StatSection(icon: s.networkName == "Offline" ? "wifi.slash" : "cable.connector", title: "Network: \(s.networkName)", open: { openSystemSettings("com.apple.Network-Settings.extension") }, help: "Open Network settings") {
                             Detail("Local IP", s.localIP)
                             Traffic(up: s.upload, down: s.download)
                         }
