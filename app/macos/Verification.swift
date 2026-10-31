@@ -527,6 +527,34 @@ func runSelfTests() {
         let wireless = deviceSource(kind: .device, properties: [kIOHIDProductKey: "Mouse|1", kIOHIDTransportKey: "Bluetooth", kIOHIDVendorIDKey: 76, kIOHIDProductIDKey: 617, kIOHIDSerialNumberKey: "AB#C"], trackpadDriver: false)
         expect(wireless.key == "device|Bluetooth|76|617|sn:AB%23C" && wireless.category == .mouse, "mouse key: \(wireless.key)")
     }
+    // Changing displays: the chosen display if it is there and has a menu bar, else the main one;
+    // status items keep their distance from the right edge; the cats walk home, then come out on the new bar.
+    do {
+        let main = DisplayInfo(id: "A", name: "Built-in", hasMenuBar: true)
+        let side = DisplayInfo(id: "B", name: "LG", hasMenuBar: true)
+        let bare = DisplayInfo(id: "C", name: "TV", hasMenuBar: false)
+        expect(Displays.pick(chosen: "B", available: [main, side])?.id == "B", "the chosen display is used")
+        expect(Displays.pick(chosen: "", available: [main, side])?.id == "A", "no choice means the main display")
+        expect(Displays.pick(chosen: "B", available: [main])?.id == "A", "an unplugged choice falls back to the main display")
+        expect(Displays.pick(chosen: "C", available: [main, bare])?.id == "A", "a display without a menu bar falls back to the main display")
+        let tower = Displays.mapRightAligned(NSRect(x: 1300, y: 952, width: 22, height: 30), from: NSRect(x: 0, y: 0, width: 1512, height: 982), to: NSRect(x: 1512, y: 0, width: 2560, height: 1440))
+        expect(tower.minX == 3860 && tower.maxY == 1440, "the tower sits the same distance from the right edge on the other menu bar: \(tower)")
+        let moving = Colony(count: 3, random: { 0.5 })
+        moving.updateLanes([Lane(lower: 0, upper: 600)])
+        for i in moving.cats.indices { moving.cats[i].x = 100 + Double(i) * 150; moving.cats[i].destination = moving.cats[i].x; moving.cats[i].visible = true; moving.cats[i].hiddenFor = 0 }
+        moving.callHome(at: 640)
+        var steps = 0
+        while !moving.cats.allSatisfy(\.home) && steps < 450 { moving.step(1.0 / 30); steps += 1 }
+        expect(moving.cats.allSatisfy(\.home), "everyone walks home before the move, within 15 s: \(steps) steps")
+        moving.sendHomeNow(); moving.homeX = nil
+        moving.updateLanes([Lane(lower: 0, upper: 1400)])
+        moving.letOut(at: 1440)
+        for _ in 0..<300 { moving.step(1.0 / 30) }
+        expect(moving.cats.allSatisfy { $0.visible && !$0.home && moving.lanes[0].contains($0.x, margin: $0.radius) }, "then everyone comes out on the new menu bar")
+        // A screen that vanishes: everyone goes straight inside, unseen.
+        moving.sendHomeNow()
+        expect(moving.cats.allSatisfy { $0.home && !$0.visible } && moving.ball == nil, "an unplugged screen sends everyone home at once")
+    }
     // Calling the cats home: everyone ends up in the tower, then comes back out into free space.
     colony.updateLanes([Lane(lower: 0, upper: 600)])
     for _ in 0..<60 { colony.step(1.0 / 30) }

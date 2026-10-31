@@ -12,10 +12,11 @@ enum Pref {
     static let toyColor = "toyColor"           // -1 = a different color each time
     static let laser = "laserPointer"
     static let scrollReverse = "scrollReverse", scrollSources = "scrollSources"
+    static let display = "catDisplay", displayName = "catDisplayName"   // "" = the main display
     static let showCPU = "showCPU", showMemory = "showMemory", showDisk = "showDisk", showBattery = "showBattery", showNetwork = "showNetwork"
     static let defaults: [String: Any] = [
         count: 3, fixedLineup: false, paused: false, quiet: false, activity: 1, adaptivePower: true, allowDrag: true,
-        nightQuiet: false, nightFrom: 23, nightTo: 7, interval: 2.0, topApps: 2, toyColor: -1, laser: true, scrollReverse: false,
+        nightQuiet: false, nightFrom: 23, nightTo: 7, interval: 2.0, topApps: 2, toyColor: -1, laser: true, scrollReverse: false, display: "",
         showCPU: true, showMemory: true, showDisk: true, showBattery: true, showNetwork: true,
     ]
 }
@@ -611,6 +612,22 @@ struct UpdatesCard: View {
 }
 
 struct CatsTab: View {
+    @AppStorage(Pref.display) private var display = ""
+    @AppStorage(Pref.displayName) private var displayName = ""
+    /// The main display first, then every connected one; a chosen display that is unplugged stays listed.
+    private var displayOptions: [(String, String)] {
+        var options = [("Main display", "")] + model.displays.map { ($0.name + ($0.hasMenuBar ? "" : " (no menu bar)"), $0.id) }
+        if !display.isEmpty && !model.displays.contains(where: { $0.id == display }) {
+            options.append(((displayName.isEmpty ? "Display" : displayName) + " (not connected)", display))
+        }
+        return options
+    }
+    private var displayChoice: Binding<String> {
+        Binding(get: { display }, set: { id in
+            display = id
+            displayName = model.displays.first { $0.id == id }?.name ?? ""
+        })
+    }
     @ObservedObject var model: AppModel
     @AppStorage(Pref.count) private var count = 3
     @AppStorage(Pref.paused) private var paused = false
@@ -626,6 +643,9 @@ struct CatsTab: View {
     var body: some View {
         SettingsPage {
             SettingsCard(title: "Cats") {
+                SettingsRow(title: "Display") { SettingsMenu(options: displayOptions, selection: displayChoice) }
+                SettingsNote(text: model.moveStatus ?? "Changing the display: the cats run home, then come out on the new menu bar.")
+                Divider()
                 SettingsRow(title: "Cats") { SettingsSegments(options: [("1", 1), ("2", 2), ("3", 3)], selection: $count) }
                 Divider()
                 SettingsRow(title: "At home") {

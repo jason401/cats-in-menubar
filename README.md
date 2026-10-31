@@ -43,7 +43,7 @@ open "build/Cats in Menubar.app"
 The cat menu bar icon opens settings. Grant **Accessibility** access to **Cats in Menubar** in System Settings → Privacy & Security → Accessibility. The app stays hidden until it can read a usable menu layout. Use **Show safe space** to check detected free regions, then disable it for normal use.
 
 - Two or three cats; pause/hide; quiet time; bring out a ball.
-- Primary display only in this first version.
+- One display at a time: Settings → Cats → Display picks it (default: the main display). Changing it, the cats run home, then come out of the tower on the new menu bar.
 - Cats and toys stay within connected free intervals, with 8 pt of clearance around occupied regions.
 - If an occupied region expands over a cat, the cat disappears immediately after detection, then reappears in available space. It never deliberately traverses an occupied interval.
 - Overlay clicks pass through to the menu bar, except directly over a cat: cats can be picked up and dragged within their own free space.

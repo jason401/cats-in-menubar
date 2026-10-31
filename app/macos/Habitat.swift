@@ -542,6 +542,16 @@ final class Colony {
             if cats[i].action != .hopping && !cats[i].inTunnel { start(i, .goingHome, for: .infinity) }
         }
     }
+    /// Everyone still outside goes straight into the tower, unseen: the screen they were on went away,
+    /// or the walk home took too long.
+    func sendHomeNow() {
+        for i in cats.indices where !cats[i].home {
+            cats[i].home = true; cats[i].visible = false; cats[i].homeBound = true
+            cats[i].inTunnel = false; cats[i].escaping = false; cats[i].velocity = 0
+            start(i, .sitting, for: 2)
+        }
+        ball = nil
+    }
     /// Cats hop back out of the tower, a moment apart.
     func letOut(at x: Double) {
         homeX = x

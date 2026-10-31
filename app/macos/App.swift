@@ -6,6 +6,9 @@ final class AppModel: ObservableObject {
     @Published var status = "Checking menu layout…" { didSet { if status != oldValue { AppModel.log(status) } } }
     @Published var catSummary = "Looking for empty space…"
     @Published var catsAway = false     // called into the cat tower
+    @Published var displays: [DisplayInfo] = []
+    @Published var moveStatus: String?  // "Moving to …" while the cats walk home to change screens
+    @Published var shownDisplay = ""    // the display the cats are on now
     @Published var power = PowerLevel.full
     @Published var lineup: [CatAppearance] = []
     @Published var keepLineup = false
@@ -40,6 +43,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     var lastTick = ProcessInfo.processInfo.systemUptime
     var epoch = 0
     var lastScreen: NSRect = .zero
+    // Changing screens: the cats walk home on this one, then come out on the next.
+    var shownDisplay: String? { didSet { model.shownDisplay = shownDisplay ?? "" } }
+    var moveTarget: String?
+    var moveStarted = 0.0
+    var pendingLetOut = false
     var lastHeight: CGFloat = 0
     var suspended = false
     var hovering = false
@@ -215,10 +223,52 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
     @objc func play() { guard !paused else { return }; colony.play() }
+    /// The tower icon in screen coordinates, on the menu bar the cats are using. macOS shows status
+    /// items on every display's menu bar at the same distance from the right edge.
+    var towerRect: NSRect? {
+        guard let button = statusItem.button, let window = button.window else { return nil }
+        let rect = window.convertToScreen(button.convert(button.bounds, to: nil))
+        guard let from = NSScreen.screens.first(where: { $0.frame.contains(NSPoint(x: rect.midX, y: rect.midY)) })?.frame,
+              lastScreen != .zero, from != lastScreen else { return rect }
+        return Displays.mapRightAligned(rect, from: from, to: lastScreen)
+    }
     /// Overlay x of the tower icon's center.
     var towerX: Double? {
-        guard let button = statusItem.button, let window = button.window, let overlay else { return nil }
-        return window.convertToScreen(button.convert(button.bounds, to: nil)).midX - overlay.frame.minX
+        guard let rect = towerRect, let overlay else { return nil }
+        return rect.midX - overlay.frame.minX
+    }
+    /// The screen the cats are on now (mid-move, still the old one).
+    var currentScreen: NSScreen? {
+        shownDisplay.flatMap(Displays.screen(id:)) ?? Displays.target(chosen: defaults.string(forKey: Pref.display) ?? "")
+    }
+    /// Starts or finishes a move to the display chosen in Settings.
+    func updateDisplay() {
+        let displays = Displays.all
+        if model.displays != displays { model.displays = displays }
+        guard let target = Displays.target(chosen: defaults.string(forKey: Pref.display) ?? ""), let targetID = Displays.id(of: target) else { return }
+        guard let shown = shownDisplay else { shownDisplay = targetID; return }
+        // The screen they were on is gone: they cannot run home there, so they wait inside and come out on the new one.
+        if Displays.screen(id: shown) == nil { finishMove(to: targetID); return }
+        if let moving = moveTarget {
+            if moving != targetID { moveTarget = targetID; model.moveStatus = "Moving to \(target.localizedName)…" }
+            if colony.cats.allSatisfy(\.home) || ProcessInfo.processInfo.systemUptime - moveStarted > 15 { finishMove(to: targetID) }
+            return
+        }
+        guard targetID != shown else { return }
+        // Nobody out to watch the walk: switch right away.
+        if paused || model.catsAway || overlay?.isVisible != true || !colony.cats.contains(where: \.visible) { finishMove(to: targetID); return }
+        moveTarget = targetID; moveStarted = ProcessInfo.processInfo.systemUptime
+        model.moveStatus = "Moving to \(target.localizedName)…"
+        AppModel.log("Moving cats to \(target.localizedName)")
+        if let x = towerX { colony.callHome(at: x) }
+    }
+    private func finishMove(to id: String) {
+        colony.sendHomeNow()
+        shownDisplay = id; moveTarget = nil; model.moveStatus = nil
+        colony.homeX = nil
+        pendingLetOut = !model.catsAway
+        epoch += 1   // drop any scan of the old screen still in flight
+        AppModel.log("Cats now live on \(Displays.screen(id: id)?.localizedName ?? id)")
     }
     func toggleHome() {
         guard let x = towerX else { return }
@@ -257,6 +307,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         if !lively && frame % model.power.idleEvery != 0 { return }
         let dt = now - lastTick; lastTick = now
         if colony.homeX == nil, let x = towerX { colony.homeX = x }
+        if moveTarget != nil && colony.cats.allSatisfy(\.home) { updateDisplay(); scan() }
         guard !paused, !suspended, overlay?.isVisible == true else { return }
         colony.step(dt)
         habitatView?.invalidateCats()
@@ -278,10 +329,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     func scan() {
         // A newly granted Accessibility permission also lets the scroll reverser start.
         if model.access != MenuBarMonitor.trusted { model.access = MenuBarMonitor.trusted; ScrollDirection.shared.apply() }
-        guard !suspended, !paused, let screen = NSScreen.screens.first else { return }
+        updateDisplay()
+        guard !suspended, !paused, let screen = currentScreen else { return }
         let frame = screen.frame
-        // The reserved band is the real bar height (30 pt on macOS 27, not NSStatusBar.thickness).
-        let height = max(frame.maxY - screen.visibleFrame.maxY, screen.safeAreaInsets.top)
+        let height = Displays.barHeight(of: screen)
         // A hidden/auto-hidden menu bar is deliberately not a playground.
         guard height >= NSStatusBar.system.thickness - 2 else {
             overlay?.orderOut(nil); colony.updateLanes([]); model.status = "Cats are resting while the menu bar is hidden."; return
@@ -300,7 +351,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             overlay = panel; habitatView = view; lastScreen = frame; lastHeight = height
         }
         let generation = epoch
-        let ownRect = statusItem.button.flatMap { button in button.window?.convertToScreen(button.convert(button.bounds, to: nil)) }
+        let ownRect = towerRect
         monitor.scan(screen: frame, barHeight: height, ownItem: ownRect) { [weak self] snapshot in
             guard let self, generation == self.epoch, !self.paused, !self.suspended else { return }
             // An unreadable moment keeps the last good layout instead of making everyone vanish.
@@ -314,6 +365,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             self.colony.tunnel = notch
             let lanes = snapshot.reliable ? Habitat.freeLanes(width: frame.width, obstacles: obstacles) : []
             self.colony.updateLanes(lanes)
+            // Just moved here: the cats come out of this screen's tower.
+            if self.pendingLetOut && !lanes.isEmpty, let x = self.towerX { self.colony.letOut(at: x); self.pendingLetOut = false }
             self.model.status = lanes.isEmpty ? (snapshot.reliable ? "No room right now. Cats will return when space opens up." : snapshot.message) : "\(lanes.count) safe area(s) · \(Int(lanes.reduce(0) { $0 + $1.width })) pt available\(self.colony.tunnelEnds() == nil ? "" : " · notch tunnel open")"
             let visible = self.colony.cats.filter(\.visible).count
             self.model.catSummary = lanes.isEmpty ? (self.model.access ? "Waiting for empty space" : "Needs Accessibility access") :
