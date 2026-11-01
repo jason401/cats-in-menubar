@@ -247,19 +247,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         if model.displays != displays { model.displays = displays }
         guard let target = Displays.target(chosen: defaults.string(forKey: Pref.display) ?? ""), let targetID = Displays.id(of: target) else { return }
         guard let shown = shownDisplay else { shownDisplay = targetID; return }
-        // The screen they were on is gone: they cannot run home there, so they wait inside and come out on the new one.
-        if Displays.screen(id: shown) == nil { finishMove(to: targetID); return }
         if let moving = moveTarget {
             if moving != targetID { moveTarget = targetID; model.moveStatus = "Moving to \(target.localizedName)…" }
-            // No time limit: the walk ends when nobody is left outside who can still walk. Cats hidden with
-            // the menu bar (full-screen apps, auto-hide), paused or asleep cannot, so they go in at once.
-            let walking = !paused && !suspended && overlay?.isVisible == true && colony.cats.contains { !$0.home && $0.visible }
-            if !walking { finishMove(to: targetID) }
+            // No time limit, and out of sight they still walk home (hidden menu bar, unplugged screen).
+            // Only pausing, or nobody left outside, ends it at once.
+            if paused || !colony.cats.contains(where: { !$0.home && $0.visible }) { finishMove(to: targetID) }
             return
         }
         guard targetID != shown else { return }
-        // Nobody out to watch the walk: switch right away.
-        if paused || model.catsAway || overlay?.isVisible != true || !colony.cats.contains(where: \.visible) { finishMove(to: targetID); return }
+        // Nobody out to walk home: switch right away.
+        if paused || model.catsAway || !colony.cats.contains(where: { !$0.home && $0.visible }) { finishMove(to: targetID); return }
         moveTarget = targetID
         model.moveStatus = "Moving to \(target.localizedName)…"
         AppModel.log("Moving cats to \(target.localizedName)")
@@ -312,7 +309,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let dt = now - lastTick; lastTick = now
         if colony.homeX == nil, let x = towerX { colony.homeX = x }
         if moveTarget != nil && colony.cats.allSatisfy(\.home) { updateDisplay(); scan() }
-        guard !paused, !suspended, overlay?.isVisible == true else { return }
+        // Out of sight (hidden menu bar, unplugged screen) the cats carry on as usual; only pausing stops them.
+        guard !paused, !suspended else { return }
         colony.step(dt)
         habitatView?.invalidateCats()
     }
@@ -334,14 +332,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // A newly granted Accessibility permission also lets the scroll reverser start.
         if model.access != MenuBarMonitor.trusted { model.access = MenuBarMonitor.trusted; ScrollDirection.shared.apply() }
         updateDisplay()
+        // Their screen was unplugged mid-walk: they finish the walk home on its last layout, unseen.
+        if moveTarget != nil, let shown = shownDisplay, Displays.screen(id: shown) == nil { overlay?.orderOut(nil); return }
         guard !suspended, !paused, let screen = currentScreen else { return }
         let frame = screen.frame
         let height = Displays.barHeight(of: screen)
         // A hidden/auto-hidden menu bar is deliberately not a playground.
-        // The cats go inside the tower while it is hidden (full-screen apps, auto-hide) and come back out after.
+        // While it is hidden (full-screen apps, auto-hide) the cats run home out of sight on the last layout,
+        // and come back out when it returns.
         guard height >= NSStatusBar.system.thickness - 2 else {
-            if !barHidden { barHidden = true; colony.sendHomeNow(); habitatView?.endDrag() }
-            overlay?.orderOut(nil); colony.updateLanes([]); model.status = "Cats are resting in the tower while the menu bar is hidden."; return
+            if !barHidden {
+                barHidden = true; habitatView?.endDrag()
+                if !model.catsAway, let x = colony.homeX ?? towerX { colony.callHome(at: x) }
+            }
+            overlay?.orderOut(nil); model.status = "Cats are resting in the tower while the menu bar is hidden."; return
         }
         if barHidden { barHidden = false; pendingLetOut = !model.catsAway }
         if frame != lastScreen || height != lastHeight {
