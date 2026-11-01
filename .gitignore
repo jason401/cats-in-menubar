@@ -1,3 +1,15 @@
 .DS_Store
 build/
 *.log
+
+# Local credentials and signing material must never be published.
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.p12
+*.pfx
+*.mobileprovision
+__pycache__/
+*.pyc

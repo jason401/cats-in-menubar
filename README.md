@@ -1,97 +1,117 @@
 # Cats in Menubar
 
-A native macOS menu bar playground for two or three tiny cats. They nap, loaf, stretch, groom, walk, sometimes run or hunt an imaginary bug, chase one another, and play with a ball in the space between menus and status icons.
+Tiny cats living in the empty space of your Mac's menu bar. They walk, nap, loaf, stretch, groom, chase each other, and play while you work.
 
-## Artwork
+Free and open source. Native Swift, AppKit and SwiftUI. macOS 14 or later.
 
-Each coat is one authored sprite sheet in `app/macos/Resources/Cats/sheets/`: `<coat>.png` (8 × 16 cells of 102 × 68 px, adult cat at 2x) and `<coat>.json`, whose `animations` table names every behavior's cells. The app looks poses up only by those names, so art can be reordered or lengthened by editing that table. Orange, white, black, silver and cream have their own sheets; tuxedo, calico and Siamese use orange until theirs arrive. The build measures each pose and writes 1x/2x menu bar copies for the three cat sizes; it never rescales a single pose. Rules for drawing and importing art are in `design/ART_GUIDE.md`; behavior timing and connections in `design/cat-behaviors.docx`.
+![Rendered preview of the cats and their poses](docs/assets/cats.png)
 
-Adult walking is 6 pt/s with a 9.6 pt stride (16 pictures over 1.6 s). Size scales speed and stride together: Kitten 64%, Young 82%, Adult 100%.
+*Rendered artwork preview, not a capture of a user's desktop.*
 
-## Run
+## Features
 
-Requires macOS 14 or later and Apple's Command Line Tools. No package dependencies or API keys.
+- One to three cats, eight coat choices, and kitten / young / adult sizes. Save a favorite lineup or shuffle it.
+- Pick cats up, bring out a ball, or let them chase the laser pointer.
+- Cats use the available menu bar space, return to their tower, and can travel behind a MacBook notch.
+- Choose which display the cats live on; pause them, call them home, or set quiet hours.
+- A compact dashboard for CPU, memory, storage, battery and network activity.
+- Optional scroll direction controls for individual scrolling sources, off by default.
+- Adaptive animation rates for system load, temperature and Low Power Mode; optional launch at login.
 
-Create the dedicated local signing identity once, then build:
+## Download and install
+
+Open **[GitHub Releases](https://github.com/jason401/cats-in-menubar/releases)** and choose a release asset:
+
+| Download | Use |
+| --- | --- |
+| `Cats-in-Menubar-<version>-macOS-arm64.zip` | Prebuilt app for Apple silicon (M-series Macs), with installation instructions and license notices. |
+| `SHA256SUMS.txt` | Checksums of that release's downloads. |
+| Source code | Inspect the source. To build, use the Git clone instructions below; GitHub's automatic source archives do not include the Git metadata required by the build. |
+
+**The first release is being prepared; until an app ZIP is published, use [Build from source](#build-from-source).** No Intel or universal prebuilt download is currently provided. Building on an Intel Mac requires separate verification.
+
+1. Download the app ZIP and, optionally, `SHA256SUMS.txt` from the same release. Check the filename, release notes and architecture.
+2. For an integrity check, put those two files in one folder and run `shasum -a 256 -c SHA256SUMS.txt` there. A matching checksum detects a damaged download; it does not establish the publisher's identity.
+3. Unzip the download. Quit any existing copy, then drag **Cats in Menubar.app** to **Applications**. Keep the included license and notice files when redistributing it.
+4. Open the app. It runs in the menu bar, rather than opening a regular document window.
+5. Grant **Accessibility** in System Settings → Privacy & Security → Accessibility. This lets the cats find available menu bar space. Depending on your macOS version, the permission may appear under Device Control and Data Access.
+
+### macOS security warnings
+
+This project is distributed without an Apple Developer Program account. Prebuilt apps are **locally signed, not Developer ID signed or notarized by Apple**. Local signing does not make the developer verified by Apple or prove that the app is safe.
+
+macOS may say that it cannot verify the developer or check the app for malicious software. If you have reviewed the source/release and trust this exact download:
+
+1. Try opening the app once in Finder.
+2. Go to **System Settings → Privacy & Security**, find the message about **Cats in Menubar**, and choose **Open Anyway**.
+3. Confirm the app name and choose **Open** if you want to proceed.
+
+See [Apple's instructions for opening apps safely](https://support.apple.com/en-us/102445). If macOS reports that the app **will damage your computer**, contains malware, or has been modified/damaged, stop and investigate or download a fresh copy. Do not treat every security alert as the normal unidentified-developer warning. Do not disable Gatekeeper globally or run blanket quarantine-removal commands.
+
+### Updates: prebuilt app versus source build
+
+**Prebuilt ZIP:** use manual updates from Releases. Turn off automatic update checks in Settings → General → Updates. Quit the app and replace it with the next downloaded app. macOS may ask you to grant Accessibility again.
+
+**Source build:** the installed app can check this repository's `stable` branch and build updates locally after you click **Update Now**. Apple's Command Line Tools and the same persistent local signing identity must remain available. Checks are enabled by default and can be disabled in Settings.
+
+These are different paths: the existing updater pins the running app's signing identity. A prebuilt app signed on the publisher's Mac cannot be replaced through that updater by a build signed with a different key on your Mac. This release preparation does not change the updater or weaken that check. A GitHub Release does not automatically change `stable`.
+
+## Build from source
+
+Requires macOS 14+, Apple's Command Line Tools (including Git, Swift and the system developer Python), and an internet connection for the clone/update checks. Full Xcode, API keys and third-party runtime packages are not required.
+
+Install the Command Line Tools if needed, then wait for Apple's installer to finish:
 
 ```sh
+xcode-select --install
+```
+
+Clone the stable channel, create this app's local signing identity, and test/build it:
+
+```sh
+git clone --filter=blob:none --branch stable https://github.com/jason401/cats-in-menubar.git
+cd cats-in-menubar
 zsh tools/setup_signing.sh
+zsh tools/test.sh
 ```
 
-To install, build once and move it to `/Applications` (the installed copy updates itself afterwards):
+The signing setup creates a dedicated key and certificate in your login keychain and adds user-level trust limited to code signing. It may prompt for keychain access. It does not use an Apple Developer account or change TLS trust. Read `tools/setup_signing.sh` before running it. Do not share your signing private key or export it into the repository.
+
+For a development preview:
 
 ```sh
-zsh tools/build_app.sh
-open "build/Cats in Menubar.app" --args --install-self
-```
-
-### Updates
-
-Settings → General → **Updates**. The copy in `/Applications` checks the public repository's `stable` branch 60 seconds after launch and every 3 hours, and only *checks*. When a new version exists, **Update Now** appears in Settings and in the panel; nothing installs until you click it. It then tests, builds and signs that version on this Mac (`~/Library/Application Support/Cats in Menubar/source`; your development folder is never touched), swaps the app, and keeps the previous app if anything fails or the new app does not start. If you are holding a cat, it waits until you put it down. Log: `~/Library/Application Support/Cats in Menubar/updates/install.log`.
-
-Developers commit to `main`; only tested commits go to stable with `git push origin main:stable`.
-
-### Development build
-
-Double-click **Build Cats in Menubar.command** to build and install this checkout, or run (the build stays in `build/`):
-
-```sh
-zsh tools/build_app.sh
 open "build/Cats in Menubar.app"
 ```
 
-The cat menu bar icon opens settings. Grant **Accessibility** access to **Cats in Menubar** in System Settings → Privacy & Security → Accessibility. The app stays hidden until it can read a usable menu layout. Use **Show safe space** to check detected free regions, then disable it for normal use.
+To install your locally built copy (quit any running copy first):
 
-- Two or three cats; pause/hide; quiet time; bring out a ball.
-- One display at a time: Settings → Cats → Display picks it (default: the main display). Changing it, the cats run home, then come out of the tower on the new menu bar.
-- Cats and toys stay within connected free intervals, with 8 pt of clearance around occupied regions.
-- If an occupied region expands over a cat, the cat disappears immediately after detection, then reappears in available space. It never deliberately traverses an occupied interval.
-- Overlay clicks pass through to the menu bar, except directly over a cat: cats can be picked up and dragged within their own free space.
-- No screen capture, screen-recording permission, network requests, AI services, or downloaded artwork. Accessibility traversal reads roles, positions, sizes, visibility and child structure, not menu text.
-- Preferences live in the app's own UserDefaults domain, `local.catsinmenubar`.
+```sh
+open "build/Cats in Menubar.app" --args --install-self
+```
+
+The installer targets `/Applications/Cats in Menubar.app`. If a prebuilt app with a different signing identity is already installed, the installer intentionally refuses to replace it. Quit and remove that copy before installing your own build, then re-grant Accessibility if prompted. Keep your local signing identity for future builds.
+
+For development work, check out `main`. Build outputs and previews stay in ignored `build/`. To package an existing verified build without publishing it, run `python3 tools/package_release.py --version v0.1.0 --app "build/Cats in Menubar.app" --output build/releases/v0.1.0`. The output includes installation instructions, license notices and SHA-256 checksums.
+
+## Privacy and permissions
+
+- No AI service, API key, advertising or analytics is used by the running app.
+- Menu layout detection reads Accessibility roles, positions, sizes, visibility and structure, not menu text. It does not request Screen Recording or capture your screen.
+- The dashboard reads local system/process/network statistics. Optional Location permission is requested to display the Wi-Fi network name; the app does not request location coordinates.
+- The optional scroll feature observes scrolling events to identify their source and change their direction. It is not a keystroke logger.
+- The installed app's update checks contact GitHub and download repository data. Clicking **Update Now** runs the repository's build and test scripts locally. The previous README's claim of no network requests was inaccurate.
+- Preferences, diagnostics and update files remain on your Mac. Avoid posting raw dashboard screenshots or logs containing network names, local IPs, process names or local paths.
 
 ## Current limitations
 
-This is an early prototype, not a guarantee of zero overlap. Layout polling runs every 0.4 seconds; a newly appearing item can overlap a cat before detection. App switches hide the overlay while layout is refreshed. Stale or unreadable layouts hide all cats. Some third-party status items may not expose complete Accessibility information; live coverage must be verified for the user's menu bar. No public single API supplies an authoritative map of every menu bar item.
+This is an experimental personal project. Menu layout detection is sampled, so zero transient overlap cannot be guaranteed. Menu bar managers, automatically hidden bars, multiple displays and future macOS versions can expose compatibility issues. Some system integration uses private macOS APIs. Reduce Motion is not yet implemented, and coat markings/animation transitions may need further polish. The MIT license provides no warranty.
 
-Automatic menu bar hiding is treated conservatively: if the reserved menu bar region is absent, cats hide. Full-screen spaces, notch layouts, menu bar managers, and external-display changes need live compatibility testing. All cats currently share one ball; exact non-overlap between cats is not enforced. macOS Reduce Motion and launch at login are follow-up work.
+## AI-assisted development
 
-Builds require the persistent **Cats in Menubar Local Signing** identity created by `tools/setup_signing.sh`. The build stops if it is missing; there is no ad-hoc fallback. Signing is done in a temporary candidate bundle before the final bundle is replaced.
+This project was developed with assistance from AI coding tools, including ChatGPT/Codex and Claude. The cat artwork was also created and edited with AI assistance. Product decisions, integration and review are directed by the maintainer; AI assistance is not an Apple endorsement or a guarantee that the code or art is error-free.
 
-When migrating from the first ad-hoc prototype, the existing permission can appear enabled while the new app reports no access. Re-register the new app in System Settings → Privacy & Security → **Device Control and Data Access** (called **Accessibility** on earlier macOS versions). Toggle the app off/on, or remove and add the current `build/Cats in Menubar.app` if macOS still retains the previous signature. Future builds keep the same app identity.
+## License and acknowledgements
 
-The setup script only creates this app's own non-exportable local key and code-signing certificate; trust is limited to code signing, and only Apple's codesign tool is preauthorized. It does not alter TLS trust or other apps' keys. A custom persistent identity can be supplied with `CATS_SIGNING_IDENTITY`.
+Original project contributions are available under the **[MIT License](LICENSE)**, copyright © 2026 **jason401**.
 
-Existing AI Face / AI Illuminati identities, apps and data are never modified or reused automatically. The app bundle is standalone; it does not execute source files from this checkout.
-
-## Verify
-
-```sh
-zsh tools/test.sh
-"build/Cats in Menubar.app/Contents/MacOS/CatsInMenubar" --diagnostics
-```
-
-The first command builds and checks interval subtraction, obstacle changes, disconnected regions, hidden states, quiet time and ball bounds through 30,000 reproducible simulation steps. It also renders `build/previews/cats.png`. Diagnostics reads the live menu geometry without requesting permission and reports whether it is usable.
-
-## Debugging
-
-Status changes are appended to `~/Library/Logs/CatsInMenubar.log`. `open -n "build/Cats in Menubar.app" --args --probe` logs menu bar roles and frames (no text).
-
-## Layout
-
-- `app/macos/Habitat.swift`: interval geometry and behavior simulation.
-- `app/macos/SpriteAtlas.swift`: sprite sheets, named poses, animation timing and transitions.
-- `app/macos/CatDrawing.swift`: overlay drawing and cached cat thumbnails.
-- `app/macos/TowerIcon.swift`: cat-tower menu bar and app icon.
-- `app/macos/MenuBarMonitor.swift`: background Accessibility layout scan.
-- `app/macos/App.swift`: app lifecycle, transparent panel, settings and menu.
-- `app/macos/Probe.swift`: development probe of menu bar structure.
-- `app/macos/Verification.swift`: reproducible simulation checks and artwork preview.
-- `tools/`: build and verification scripts.
-
-
-## Cats
-
-By default each launch selects distinct random coats, random sizes and random positions in detected free space. In Settings → Cats → Your cats, select each coat and size. Editing enables **Keep my cats** to save the lineup; **Shuffle cats** randomizes immediately. Count is 1–3 (default 3).
-
-Click and hold a cat to pick it up: its body trails opposite to the drag and settles with a damped spring. Release returns to grooming. Held cats stay inside their connected free interval, and can be carried across a MacBook notch.
+The scroll direction feature is derived from **Scroll Reverser** by Nicholas Moore and retains the **Apache License 2.0** conditions and attribution. See [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) and [LICENSES/Apache-2.0.txt](LICENSES/Apache-2.0.txt). The MIT license does not replace third-party licenses or grant rights to third-party trademarks, Apple frameworks, system fonts or system symbols.

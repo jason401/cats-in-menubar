@@ -1,7 +1,7 @@
 #!/usr/bin/python3
 """Install a locally signed Cats in Menubar build into /Applications. Runs detached.
 
-Adapted from AI Illuminati's installer: verify the signature against the running app, swap,
+Verify the signature against the running app, swap,
 start the new app, and roll back unless it acknowledges startup."""
 import argparse
 import ctypes

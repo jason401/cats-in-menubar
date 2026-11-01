@@ -349,7 +349,7 @@ private struct PanelButton: View {
 }
 
 // MARK: Settings window
-// Same look as AI Face and AI Illuminati: toolbar tabs, titled cards of one-line rows, small text.
+// Settings use toolbar tabs, titled cards of one-line rows, and small text.
 
 struct SettingsPage<Content: View>: View {
     @ViewBuilder var content: Content
@@ -573,7 +573,7 @@ private var version: String {
     return revision.isEmpty ? short : "\(short) (\(revision))"
 }
 
-// The places the app keeps things, opened in Finder from Settings (as in AI Illuminati).
+// App storage locations, opened in Finder from Settings.
 enum DataFolders {
     static func open(_ folder: URL) {
         try? FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
@@ -586,7 +586,7 @@ enum DataFolders {
     }
 }
 
-/// Like AI Illuminati's "Updates & storage": checks run on their own, installing waits for the button.
+/// Update checks run automatically; installation waits for the button.
 struct UpdatesCard: View {
     @ObservedObject var updater: Updater
     var body: some View {
@@ -831,7 +831,7 @@ private struct ScrollSourceView: View {
     }
 }
 
-/// Toolbar tabs at a fixed size, like AI Face's settings window.
+/// Toolbar tabs in a fixed-size settings window.
 final class SettingsWindowController: NSObject {
     static let size = NSSize(width: 334, height: 460)
     static let tabs: [(String, String)] = [("General", "gearshape"), ("Cats", "pawprint"), ("Scroll", "arrow.up.arrow.down"), ("Monitor", "gauge.with.dots.needle.33percent")]

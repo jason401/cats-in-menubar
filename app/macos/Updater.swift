@@ -2,7 +2,7 @@ import Cocoa
 import Darwin
 import ServiceManagement
 
-// stable is the deployment channel (same scheme as AI Illuminati). Only the app-owned checkout in
+// stable is the deployment channel. Only the app-owned checkout in
 // Application Support is ever changed; developer folders are never read or updated by the app.
 // Each Mac tests and builds with its own local signing identity.
 final class Updater: ObservableObject {
