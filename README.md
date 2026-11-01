@@ -4,9 +4,9 @@ Tiny cats living in the empty space of your Mac's menu bar. They walk, nap, loaf
 
 Free and open source. Native Swift, AppKit and SwiftUI. macOS 14 or later.
 
-![Rendered preview of the cats and their poses](docs/assets/cats.png)
+![Cats walking, resting and playing in the macOS menu bar](docs/assets/menubar-demo.gif)
 
-*Rendered artwork preview, not a capture of a user's desktop.*
+*Actual screen recording of Cats in Menubar.*
 
 ## Features
 
