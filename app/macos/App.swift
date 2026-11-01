@@ -47,6 +47,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     var shownDisplay: String? { didSet { model.shownDisplay = shownDisplay ?? "" } }
     var moveTarget: String?
     var pendingLetOut = false
+    var barHidden = false   // the cats went inside when the menu bar hid; they come back out when it returns
     var lastHeight: CGFloat = 0
     var suspended = false
     var hovering = false
@@ -337,9 +338,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let frame = screen.frame
         let height = Displays.barHeight(of: screen)
         // A hidden/auto-hidden menu bar is deliberately not a playground.
+        // The cats go inside the tower while it is hidden (full-screen apps, auto-hide) and come back out after.
         guard height >= NSStatusBar.system.thickness - 2 else {
-            overlay?.orderOut(nil); colony.updateLanes([]); model.status = "Cats are resting while the menu bar is hidden."; return
+            if !barHidden { barHidden = true; colony.sendHomeNow(); habitatView?.endDrag() }
+            overlay?.orderOut(nil); colony.updateLanes([]); model.status = "Cats are resting in the tower while the menu bar is hidden."; return
         }
+        if barHidden { barHidden = false; pendingLetOut = !model.catsAway }
         if frame != lastScreen || height != lastHeight {
             overlay?.close()
             let panel = NSPanel(contentRect: NSRect(x: frame.minX, y: frame.maxY - height, width: frame.width, height: height), styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: false)
