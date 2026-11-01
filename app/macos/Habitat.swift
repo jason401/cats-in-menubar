@@ -554,6 +554,14 @@ final class Colony {
         }
         ball = nil
     }
+    /// At launch everyone waits in the tower and hops out one by one once there is free space.
+    func startInTower() {
+        for i in cats.indices {
+            cats[i].home = true; cats[i].visible = false; cats[i].homeBound = false
+            cats[i].outDelay = 0.6 + Double(i) * 0.7
+            start(i, .sitting, for: 2)
+        }
+    }
     /// Cats hop back out of the tower, a moment apart.
     func letOut(at x: Double) {
         homeX = x

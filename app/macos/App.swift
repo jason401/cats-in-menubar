@@ -77,7 +77,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         model.changed = { [weak self] in self?.applyOptions() }
         model.play = { [weak self] in self?.play() }
         model.home = { [weak self] in self?.toggleHome() }
-        // Each launch starts with cats outside. A saved lineup overrides only appearance, never location.
+        // Each launch the cats hop out of the tower one by one. A saved lineup overrides only appearance, never location.
         defaults.set(false, forKey: "catsHome")
         model.keepLineup = defaults.bool(forKey: Pref.fixedLineup)
         model.configureCat = { [weak self] i, appearance in self?.configureCat(i, appearance) }
@@ -86,6 +86,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         system.updated = { [weak self] stats in self?.systemUpdated(stats) }
         NotificationCenter.default.addObserver(self, selector: #selector(preferencesChanged), name: UserDefaults.didChangeNotification, object: nil)
         applyOptions()
+        colony.startInTower()
         let workspace = NSWorkspace.shared.notificationCenter
         workspace.addObserver(self, selector: #selector(layoutChanged), name: NSWorkspace.didActivateApplicationNotification, object: nil)
         workspace.addObserver(self, selector: #selector(layoutChanged), name: NSWorkspace.activeSpaceDidChangeNotification, object: nil)

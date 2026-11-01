@@ -563,6 +563,22 @@ func runSelfTests() {
         moving.sendHomeNow()
         expect(moving.cats.allSatisfy { $0.home && !$0.visible } && moving.ball == nil, "an unplugged screen sends everyone home at once")
     }
+    // Launch: everyone starts in the tower and hops out one by one.
+    do {
+        let launch = Colony(count: 3, random: { 0.5 })
+        launch.startInTower()
+        launch.updateLanes([Lane(lower: 0, upper: 900)])
+        launch.homeX = 1000
+        expect(launch.cats.allSatisfy { $0.home && !$0.visible }, "at launch nobody is out yet")
+        var outAt: [Int] = []
+        for step in 0..<300 {
+            launch.step(1.0 / 30)
+            let out = launch.cats.filter { !$0.home }.count
+            if out > outAt.count { outAt.append(step) }
+        }
+        expect(outAt.count == 3 && outAt[0] < outAt[1] && outAt[1] < outAt[2], "launch: cats come out one at a time: \(outAt)")
+        expect(launch.cats.allSatisfy { $0.visible && launch.lanes[0].contains($0.x, margin: $0.radius) }, "launch: everyone ends up in the free space")
+    }
     // Calling the cats home: everyone ends up in the tower, then comes back out into free space.
     colony.updateLanes([Lane(lower: 0, upper: 600)])
     for _ in 0..<60 { colony.step(1.0 / 30) }
