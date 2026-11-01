@@ -20,21 +20,27 @@ Free and open source. Native Swift, AppKit and SwiftUI. macOS 14 or later.
 
 ## Download and install
 
-Open **[GitHub Releases](https://github.com/jason401/cats-in-menubar/releases)** and choose a release asset:
+Open **[GitHub Releases](https://github.com/jason401/cats-in-menubar/releases)** and download the app ZIP. **The ZIP is all you need to install the app.**
 
 | Download | Use |
 | --- | --- |
 | `Cats-in-Menubar-<version>-macOS-arm64.zip` | Prebuilt app for Apple silicon (M-series Macs), with installation instructions and license notices. |
-| `SHA256SUMS.txt` | Checksums of that release's downloads. |
+| `SHA256SUMS.txt` | Optional download integrity check; not needed to install or run the app. |
 | Source code | Inspect the source. To build, use the Git clone instructions below; GitHub's automatic source archives do not include the Git metadata required by the build. |
 
 **The first release is being prepared; until an app ZIP is published, use [Build from source](#build-from-source).** No Intel or universal prebuilt download is currently provided. Building on an Intel Mac requires separate verification.
 
-1. Download the app ZIP and, optionally, `SHA256SUMS.txt` from the same release. Check the filename, release notes and architecture.
-2. For an integrity check, put those two files in one folder and run `shasum -a 256 -c SHA256SUMS.txt` there. A matching checksum detects a damaged download; it does not establish the publisher's identity.
-3. Unzip the download. Quit any existing copy, then drag **Cats in Menubar.app** to **Applications**. Keep the included license and notice files when redistributing it.
-4. Open the app. It runs in the menu bar, rather than opening a regular document window.
-5. Grant **Accessibility** in System Settings → Privacy & Security → Accessibility. This lets the cats find available menu bar space. Depending on your macOS version, the permission may appear under Device Control and Data Access.
+1. Download `Cats-in-Menubar-<version>-macOS-arm64.zip` for your Apple silicon Mac.
+2. Unzip it. Quit any existing copy, then drag **Cats in Menubar.app** to **Applications**. Keep the included license and notice files when redistributing it.
+3. Open the app. It runs in the menu bar, rather than opening a regular document window.
+4. Grant **Accessibility** in System Settings → Privacy & Security → Accessibility. This lets the cats find available menu bar space. Depending on your macOS version, the permission may appear under Device Control and Data Access.
+
+<details>
+<summary>Optional: verify the ZIP download</summary>
+
+`SHA256SUMS.txt` contains the expected SHA-256 checksum of the ZIP. You can skip this file for normal installation. To check that the download is intact, download it from the same release, place it beside the ZIP, and run `shasum -a 256 -c SHA256SUMS.txt` in that folder. A matching checksum does not by itself authenticate the publisher.
+
+</details>
 
 ### macOS security warnings
 

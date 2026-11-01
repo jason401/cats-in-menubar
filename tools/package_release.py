@@ -85,8 +85,8 @@ Tiny cats for your Mac's menu bar, with toys, coat/size choices, a local system 
 
 ## Download
 
-- **{filename}** — prebuilt {arch} app for macOS {minimum}+.
-- **SHA256SUMS.txt** — download integrity checksum; not publisher authentication.
+- **{filename}** — prebuilt {arch} app for macOS {minimum}+. **This ZIP is all you need to install the app.**
+- **SHA256SUMS.txt** — optional integrity check. Not needed to install or run the app; not publisher authentication.
 - Source: https://github.com/jason401/cats-in-menubar/tree/{revision}
 
 Source revision: `{revision}`. App bundle version: `{info.get('CFBundleShortVersionString', 'unknown')}` ({info.get('CFBundleVersion', 'unknown')}).
