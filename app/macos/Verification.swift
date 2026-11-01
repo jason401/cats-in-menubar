@@ -542,10 +542,18 @@ func runSelfTests() {
         let moving = Colony(count: 3, random: { 0.5 })
         moving.updateLanes([Lane(lower: 0, upper: 600)])
         for i in moving.cats.indices { moving.cats[i].x = 100 + Double(i) * 150; moving.cats[i].destination = moving.cats[i].x; moving.cats[i].visible = true; moving.cats[i].hiddenFor = 0 }
+        moving.grab(0)
         moving.callHome(at: 640)
+        expect(moving.cats[0].action == .goingHome, "a held cat is put down and heads home with the others")
+        moving.play()
+        expect(moving.ball == nil && !moving.laser(at: 300), "no ball or laser while the cats walk home")
+        expect(moving.catIndex(at: moving.cats[1].x) == nil, "nobody can be picked up on the way home")
+        moving.grab(1)
+        expect(moving.cats[1].action != .held, "grabbing a cat on its way home does nothing")
         var steps = 0
-        while !moving.cats.allSatisfy(\.home) && steps < 450 { moving.step(1.0 / 30); steps += 1 }
-        expect(moving.cats.allSatisfy(\.home), "everyone walks home before the move, within 15 s: \(steps) steps")
+        while !moving.cats.allSatisfy(\.home) && steps < 3000 { moving.step(1.0 / 30); steps += 1 }
+        expect(moving.cats.allSatisfy(\.home), "everyone walks home before the move: \(steps) steps")
+        expect(!moving.walkingHome, "once everyone is in, toys work again")
         moving.sendHomeNow(); moving.homeX = nil
         moving.updateLanes([Lane(lower: 0, upper: 1400)])
         moving.letOut(at: 1440)

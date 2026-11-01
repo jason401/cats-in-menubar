@@ -532,6 +532,8 @@ final class Colony {
     // MARK: Cat tower
     var homeCount: Int { cats.filter(\.home).count }
     var anyHomeBound: Bool { cats.contains { $0.homeBound || $0.home } }
+    /// Someone is still on the way to the tower: no toys, laser or picking up until everyone is in.
+    var walkingHome: Bool { cats.contains { $0.homeBound && !$0.home } }
     /// Everyone runs toward the tower icon and hops in, one by one.
     func callHome(at x: Double) {
         homeX = x
@@ -543,7 +545,7 @@ final class Colony {
         }
     }
     /// Everyone still outside goes straight into the tower, unseen: the screen they were on went away,
-    /// or the walk home took too long.
+    /// or nobody outside can still walk (hidden with the menu bar, or paused).
     func sendHomeNow() {
         for i in cats.indices where !cats[i].home {
             cats[i].home = true; cats[i].visible = false; cats[i].homeBound = true
@@ -605,11 +607,12 @@ final class Colony {
         return lanes.first { $0.contains(cats[i].x, margin: cats[i].radius) }
     }
     func catIndex(at x: Double) -> Int? {
-        cats.indices.filter { cats[$0].visible && cats[$0].hiddenFor <= 0 && cats[$0].action != .hopping && !cats[$0].inTunnel && abs(cats[$0].x - x) < 13 * cats[$0].size.scale }
+        guard !walkingHome else { return nil }
+        return cats.indices.filter { cats[$0].visible && cats[$0].hiddenFor <= 0 && cats[$0].action != .hopping && !cats[$0].inTunnel && abs(cats[$0].x - x) < 13 * cats[$0].size.scale }
             .min { abs(cats[$0].x - x) < abs(cats[$1].x - x) }
     }
     func grab(_ i: Int) {
-        guard cats.indices.contains(i), cats[i].visible else { return }
+        guard cats.indices.contains(i), cats[i].visible, !cats[i].homeBound else { return }
         start(i, .held, for: .infinity); cats[i].velocity = 0; cats[i].swing = 0; cats[i].heldLean = 0; cats[i].heldLeanVelocity = 0
     }
     func drag(_ i: Int, to x: Double, dt: Double) {
@@ -650,7 +653,7 @@ final class Colony {
             ball = dot
             return true
         }
-        guard !quiet, let lane = lanes.first(where: { $0.contains(x) }) else { return false }
+        guard !quiet, !walkingHome, let lane = lanes.first(where: { $0.contains(x) }) else { return false }
         ball = Toy(x: min(lane.upper - 3, max(lane.lower + 3, x)), velocity: 0, lifetime: .infinity, lane: lane, kind: .laser)
         for i in cats.indices where eligible(i, lane) {
             start(i, .playing, for: 30)
@@ -664,7 +667,7 @@ final class Colony {
     }
     /// A toy drops at a random spot; every cat sharing that free space goes for it.
     func play(_ kind: ToyKind = .ball) {
-        guard !quiet else { return }
+        guard !quiet, !walkingHome else { return }
         let wide = lanes.filter { $0.width >= 120 }
         let withCats = wide.filter { lane in cats.indices.contains { eligible($0, lane) } }
         let pool = withCats.isEmpty ? wide : withCats

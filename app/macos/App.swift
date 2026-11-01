@@ -46,7 +46,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     // Changing screens: the cats walk home on this one, then come out on the next.
     var shownDisplay: String? { didSet { model.shownDisplay = shownDisplay ?? "" } }
     var moveTarget: String?
-    var moveStarted = 0.0
     var pendingLetOut = false
     var lastHeight: CGFloat = 0
     var suspended = false
@@ -251,15 +250,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         if Displays.screen(id: shown) == nil { finishMove(to: targetID); return }
         if let moving = moveTarget {
             if moving != targetID { moveTarget = targetID; model.moveStatus = "Moving to \(target.localizedName)…" }
-            if colony.cats.allSatisfy(\.home) || ProcessInfo.processInfo.systemUptime - moveStarted > 15 { finishMove(to: targetID) }
+            // No time limit: the walk ends when nobody is left outside who can still walk. Cats hidden with
+            // the menu bar (full-screen apps, auto-hide), paused or asleep cannot, so they go in at once.
+            let walking = !paused && !suspended && overlay?.isVisible == true && colony.cats.contains { !$0.home && $0.visible }
+            if !walking { finishMove(to: targetID) }
             return
         }
         guard targetID != shown else { return }
         // Nobody out to watch the walk: switch right away.
         if paused || model.catsAway || overlay?.isVisible != true || !colony.cats.contains(where: \.visible) { finishMove(to: targetID); return }
-        moveTarget = targetID; moveStarted = ProcessInfo.processInfo.systemUptime
+        moveTarget = targetID
         model.moveStatus = "Moving to \(target.localizedName)…"
         AppModel.log("Moving cats to \(target.localizedName)")
+        habitatView?.endDrag()   // a held cat is put down and runs home with the others
         if let x = towerX { colony.callHome(at: x) }
     }
     private func finishMove(to id: String) {
@@ -272,7 +275,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
     func toggleHome() {
         guard let x = towerX else { return }
-        if model.catsAway { colony.letOut(at: x) } else { colony.callHome(at: x) }
+        if model.catsAway { colony.letOut(at: x) } else { habitatView?.endDrag(); colony.callHome(at: x) }
         model.catsAway.toggle()
         defaults.set(model.catsAway, forKey: "catsHome")
     }
