@@ -323,6 +323,25 @@ func runSelfTests() {
     var pounced = false
     for _ in 0..<600 where !pounced { colony.step(1.0 / 30); pounced = colony.cats[0].action == .pouncing }
     expect(pounced, "stalking leads to a pounce")
+    // Space taken over a cat: it is pulled out dangling like a held cat, then set down at the edge.
+    do {
+        let pulled = Colony(count: 1, random: { 0.5 })
+        pulled.updateLanes([Lane(lower: 0, upper: 600)])
+        for _ in 0..<30 { pulled.step(1.0 / 30) }
+        pulled.cats[0].x = 400; pulled.cats[0].destination = 400; pulled.cats[0].visible = true; pulled.cats[0].hiddenFor = 0
+        pulled.updateLanes([Lane(lower: 0, upper: 250)])
+        var dangled = true, wasPulled = false, steps = 0
+        while steps < 90 && (steps == 0 || pulled.cats[0].escaping) {
+            pulled.step(1.0 / 30); steps += 1
+            if pulled.cats[0].escaping {
+                wasPulled = true
+                dangled = dangled && SpriteAtlas.cells(.held, coat: pulled.cats[0].coat).contains(SpriteAtlas.frameIndex(pulled.cats[0]))
+            }
+        }
+        expect(wasPulled && dangled, "a covered cat is pulled out in the held pose, not running")
+        expect(!pulled.cats[0].escaping && pulled.lanes[0].contains(pulled.cats[0].x, margin: pulled.cats[0].radius) && pulled.cats[0].action == .grooming,
+               "then it is set down in the free space and grooms: \(pulled.cats[0].action)")
+    }
     // A ball resting at the very end of the free space is still batted, and no cat freezes while playing.
     do {
         let edge = Colony(count: 1, random: { 0.5 })
@@ -437,16 +456,14 @@ func runSelfTests() {
         nudge.cats[0].x = 300; nudge.cats[0].destination = 300; nudge.cats[0].direction = -1
         nudge.cats[0].visible = true; nudge.cats[0].hiddenFor = 0
         nudge.updateLanes([Lane(lower: 300 - r + 4, upper: 1000)])
-        var slidWhileTurning = false, facedOut = false, farthest = 0.0
+        var turned = false, pulled = false
         for _ in 0..<60 {
-            let before = nudge.cats[0].x, turning = nudge.cats[0].escaping && nudge.cats[0].turnHold > 0
             nudge.step(1.0 / 30)
-            if turning && nudge.cats[0].x != before { slidWhileTurning = true }
-            if nudge.cats[0].escaping && nudge.cats[0].turnHold <= 0 { facedOut = nudge.cats[0].direction == 1 }
-            farthest = max(farthest, nudge.cats[0].x)
+            if nudge.cats[0].direction != -1 || nudge.cats[0].turnHold > 0 { turned = true }
+            if nudge.cats[0].escaping { pulled = true }
         }
-        expect(!slidWhileTurning && facedOut, "a cat facing the shrinking side turns before it moves")
-        expect(farthest - (300 + 4) > 30 * nudge.cats[0].size.scale, "a small shrink makes the cat run clear, not get nudged: \(farthest)")
+        expect(pulled && !turned, "a cat pulled out from under a shrinking edge dangles without turning around")
+        expect(abs(nudge.cats[0].x - (300 + 4)) < 0.5 && nudge.cats[0].action == .grooming, "it is set down right inside the edge: \(nudge.cats[0].x) \(nudge.cats[0].action)")
         // A far tower is run to over the icons, with the jump only at the tower.
         let far = Colony(count: 1, random: { 0.5 })
         far.updateLanes([Lane(lower: 0, upper: 300)])

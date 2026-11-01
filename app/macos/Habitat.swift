@@ -78,7 +78,9 @@ struct Cat {
     var heldLean = 0.0
     var heldLeanVelocity = 0.0
     var swing = 0.0         // horizontal speed while carried by the mouse
-    var escaping = false    // covered by a menu or icon, hurrying to the nearest free space
+    /// Drawn dangling: picked up with the mouse, or being pulled out from under a menu or icon.
+    var dangling: Bool { action == .held || escaping }
+    var escaping = false    // covered by a menu or icon: pulled out to the nearest free space, dangling as if held
     var escapeTop = 0.0     // top speed of the current escape dash
     var homeBound = false   // called back to the cat tower
     var tunnelBound = false // walking to the notch to cross to the other side
@@ -497,6 +499,8 @@ final class Colony {
         }
     }
     /// Runs straight to the closest free spot; only used while the cat is already covered.
+    /// Space was taken over the cat: it is pulled out to the nearest free space by the scruff, dangling and
+    /// swaying like a cat picked up with the mouse, and set down at the edge.
     func escape(_ i: Int, _ dt: Double) {
         guard !lanes.isEmpty else { cats[i].visible = false; return }
         let x = cats[i].x
@@ -505,29 +509,25 @@ final class Colony {
         if cats[i].action != .running { start(i, .running, for: 3) }
         if !cats[i].escaping {
             cats[i].escaping = true
-            cats[i].velocity = 0
+            cats[i].velocity = 0; cats[i].swing = 0; cats[i].heldLean = 0; cats[i].heldLeanVelocity = 0; cats[i].turnHold = 0
             cats[i].escapeTop = max(70 * cats[i].size.scale, abs(spot - x) / 0.8)
-            // Facing the wrong way: turn first, so the turn frames never slide.
-            if cats[i].direction != way { cats[i].direction = way; cats[i].turnHold = Colony.turnTime }
         }
         cats[i].phase += dt; cats[i].elapsed += dt
-        if cats[i].turnHold > 0 { cats[i].turnHold = max(0, cats[i].turnHold - dt); return }
-        cats[i].direction = way
-        // A real dash: it speeds up quickly to a top speed set so even a far escape is out within about a second.
+        // Pulled quickly to a top speed set so even a far escape is out within about a second.
         let speed = min(cats[i].escapeTop, abs(cats[i].velocity) + 700 * cats[i].size.scale * dt)
         cats[i].velocity = way * speed
         let step = min(abs(spot - x), speed * dt)
         cats[i].x += way * step
-        // Faster than a gallop, strides lengthen instead of the legs blurring.
-        cats[i].gait += step / max(1, speed / (Self.runSpeed * cats[i].size.scale))
         cats[i].destination = cats[i].x
+        // The same dangling sway as a held cat.
+        cats[i].swing += (cats[i].velocity - cats[i].swing) * min(1, dt * 12)
+        let target = -max(-1, min(1, cats[i].swing / 100))
+        cats[i].heldLeanVelocity += ((target - cats[i].heldLean) * 80 - cats[i].heldLeanVelocity * 8) * dt
+        cats[i].heldLean = max(-1.1, min(1.1, cats[i].heldLean + cats[i].heldLeanVelocity * dt))
         guard abs(spot - cats[i].x) < 0.01 else { return }
-        // Out from under the obstacle: keep running a few strides clear of the edge and brake,
-        // instead of stopping right where the edge pushed it.
-        cats[i].x = spot
-        cats[i].velocity = way * min(speed, Self.runSpeed * cats[i].size.scale)
-        start(i, .running, for: 3)
-        cats[i].destination = clamp(spot + way * 36 * cats[i].size.scale, to: lane, for: i)
+        // Set down at the edge of the free space: a quick groom, as after being let go.
+        cats[i].x = spot; cats[i].destination = spot; cats[i].velocity = 0; cats[i].swing = 0
+        if cats[i].homeBound { start(i, .goingHome, for: .infinity) } else { start(i, .grooming, for: 2 + random() * 2) }
     }
     // MARK: Cat tower
     var homeCount: Int { cats.filter(\.home).count }

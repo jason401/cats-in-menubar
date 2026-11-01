@@ -90,6 +90,7 @@ enum SpriteAtlas {
         let idle = cat.elapsed > 1 && cat.turnCooldown <= 0 ? at(.idle, sway[Int(cat.elapsed * 1.5) % sway.count]) : stand
         let walking = stopped ? idle : cycle(.walk, walkStride(for: cat.coat))
         let running = stopped ? stand : cycle(.run, runStride)
+        if cat.escaping { return loop(.held, 4) }
         switch cat.action {
         case .sleeping: return loop(.sleep, 0.65)
         case .loafing: return at(.loaf, 0)
@@ -186,7 +187,7 @@ enum SpriteAtlas {
         let middle = (frame.left + frame.right) / 2 - sheet.headX
         return CGFloat(direction) * (offsetFor(cat, cat.size.scale) + middle / sheet.pixelsPerPoint * cat.size.scale)
     }
-    private static func offsetFor(_ cat: Cat, _ scale: CGFloat) -> CGFloat { cat.action == .held ? 0 : 9 * scale }
+    private static func offsetFor(_ cat: Cat, _ scale: CGFloat) -> CGFloat { cat.dangling ? 0 : 9 * scale }
     /// Pixels per point of the menu bar display (the overlay lives on the primary screen).
     static var screenScale: CGFloat { NSScreen.screens.first?.backingScaleFactor ?? 2 }
 
@@ -219,7 +220,7 @@ enum SpriteAtlas {
         let transform = NSAffineTransform()
         transform.translateX(by: snap(point.x), yBy: snap(point.y + lift * scale))
         transform.scaleX(by: direction ?? cat.direction, yBy: 1)
-        if cat.action == .held {
+        if cat.dangling {
             // Keep the head/grab point fixed; both new dangling drawings sway with the existing spring.
             transform.translateX(by: 0, yBy: 24 * scale)
             transform.rotate(byDegrees: cat.heldLean * cat.direction * 12)

@@ -48,6 +48,7 @@ enum CatDrawing {
     static func pose(_ cat: Cat) -> Pose {
         let t = CGFloat(cat.phase), e = CGFloat(cat.elapsed), seed = CGFloat(cat.coat) * 1.7
         let speed = CGFloat(abs(cat.velocity))
+        if cat.escaping { return held(cat, t) }
         switch cat.action {
         case .sleeping: return sleep(t)
         case .loafing: return loaf(t, seed)
@@ -395,7 +396,7 @@ final class HabitatView: NSView {
         let now = ProcessInfo.processInfo.systemUptime
         var memory = shown[i] ?? Shown(frame: frame, direction: cat.direction)
         let inTransition = now - memory.since < Double(memory.sequence.count) * 0.09
-            && cat.action != .held && cat.action != .hopping
+            && !cat.dangling && cat.action != .hopping
         let turn = SpriteAtlas.cells(.turn, coat: cat.coat)
         if (!inTransition && SpriteAtlas.group(frame, coat: cat.coat) != SpriteAtlas.group(memory.frame, coat: cat.coat)) || cat.direction != memory.direction {
             let old = memory
@@ -405,7 +406,7 @@ final class HabitatView: NSView {
         } else { memory.frame = frame }
         shown[i] = memory
         let step = Int(max(0, now - memory.since) / 0.09)
-        if memory.sequence.indices.contains(step), cat.action != .held && cat.action != .hopping {
+        if memory.sequence.indices.contains(step), !cat.dangling && cat.action != .hopping {
             var at = point
             if memory.sequence == turn {
                 // Turn in place: slide the body's middle from where it was to where the turned pose will be,
