@@ -120,6 +120,7 @@ struct DashboardView: View {
                                 }.frame(width: detailColumn, alignment: .leading)
                                 Traffic(up: s.upload, down: s.download)
                             }
+                            SpeedTestRow(test: SpeedTest.shared)
                         }
                     } else {
                         StatSection(icon: s.networkName == "Offline" ? "wifi.slash" : "cable.connector", title: "Network: \(s.networkName)", open: { openSystemSettings("com.apple.Network-Settings.extension") }, help: "Open Network settings") {
@@ -127,6 +128,7 @@ struct DashboardView: View {
                                 Detail("Local IP", s.localIP).frame(width: detailColumn, alignment: .leading)
                                 Traffic(up: s.upload, down: s.download)
                             }
+                            SpeedTestRow(test: SpeedTest.shared)
                         }
                     }
                 }
@@ -195,7 +197,7 @@ private final class Hover: ObservableObject { @Published var on = false }
 private struct StatSection<Content: View>: View {
     let icon: String
     let title: String
-    /// Clicking the section opens a related app (Activity Monitor for CPU and memory).
+    /// Clicking the badge opens a related app or settings page (Activity Monitor for CPU and memory).
     var open: (() -> Void)? = nil
     var help = "Open Activity Monitor"
     @ViewBuilder var content: Content
@@ -207,6 +209,11 @@ private struct StatSection<Content: View>: View {
             Image(systemName: icon).font(.system(size: 12, weight: .semibold)).foregroundStyle(.primary)
                 .frame(width: 26, height: 26).padding(.top, 5)
                 .background(CatTile().fill(Color.primary.opacity(hovering && open != nil ? 0.22 : 0.12)))
+                // Only the badge takes the click; the rest of the section is just for reading.
+                .contentShape(CatTile())
+                .onHover { hover.on = $0 }
+                .onTapGesture { open?() }
+                .help(open == nil ? "" : help)
             VStack(alignment: .leading, spacing: 2) {
                 HStack(spacing: 4) {
                     Text(title).font(.system(size: 13, weight: .semibold))
@@ -219,10 +226,6 @@ private struct StatSection<Content: View>: View {
             Spacer(minLength: 0)
         }
         .padding(.horizontal, 12).padding(.vertical, 9)
-        .contentShape(Rectangle())
-        .onHover { hover.on = $0 }
-        .onTapGesture { open?() }
-        .help(open == nil ? "" : help)
         .overlay(alignment: .bottom) { Divider().opacity(0.6) }
     }
 }
@@ -252,6 +255,41 @@ private struct Traffic: View {
         }
         .labelStyle(TightLabel()).font(.system(size: 11)).monospacedDigit().lineLimit(1)
         .frame(maxWidth: .infinity, alignment: .leading)
+    }
+}
+
+/// One line under the network details: the last speed test, or a test in progress, and a button to run one.
+private struct SpeedTestRow: View {
+    @ObservedObject var test: SpeedTest
+    var body: some View {
+        HStack(spacing: 6) {
+            Text("Speed:").foregroundStyle(.secondary)
+            if test.running {
+                ProgressView().controlSize(.mini)
+                Text("Testing… about 20 s").foregroundStyle(.secondary)
+            } else if let failure = test.failure {
+                Text(failure).foregroundStyle(.orange).lineLimit(1)
+            } else if let r = test.result {
+                Label { Text(SpeedTest.rate(r.download)) } icon: { Image(systemName: "arrow.down").foregroundStyle(.blue) }
+                Label { Text(SpeedTest.rate(r.upload)) } icon: { Image(systemName: "arrow.up").foregroundStyle(.orange) }
+                if let ms = r.latency { Text("· \(Int(ms.rounded())) ms").foregroundStyle(.secondary) }
+            } else {
+                Text("Not measured yet").foregroundStyle(.tertiary)
+            }
+            Spacer(minLength: 4)
+            Button(test.result == nil ? "Test" : "Test again") { test.run() }
+                .buttonStyle(.bordered).controlSize(.mini).disabled(test.running)
+                .help("Measures with macOS's networkQuality against Apple's test servers. Uses the connection fully for about 20 seconds.")
+        }
+        .labelStyle(TightLabel()).font(.system(size: 11)).monospacedDigit().lineLimit(1)
+        .padding(.top, 3)
+        .help(summary)
+    }
+    private var summary: String {
+        guard let r = test.result else { return "" }
+        let time = DateFormatter.localizedString(from: r.date, dateStyle: .short, timeStyle: .short)
+        let rpm = r.responsiveness.map { "Responsiveness \(Int($0.rounded())) RPM · " } ?? ""
+        return rpm + "Measured \(time)"
     }
 }
 
@@ -555,7 +593,7 @@ struct GeneralTab: View {
                 SettingsRow(title: "Version") {
                     Text(version).foregroundStyle(.secondary)
                 }
-                SettingsNote(text: "No analytics. The only network request is the update check against the public GitHub repository.")
+                SettingsNote(text: "No analytics. Network use: the update check against the public GitHub repository, and the speed test (Apple's servers) only when you click Test.")
                 Divider()
                 SettingsRow(title: "Acknowledgements") {
                     SettingsAction(title: "Show") {

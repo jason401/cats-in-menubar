@@ -105,6 +105,7 @@ For development work, check out `main`. Build outputs and previews stay in ignor
 - Menu layout detection reads Accessibility roles, positions, sizes, visibility and structure, not menu text. It does not request Screen Recording or capture your screen.
 - The dashboard reads local system/process/network statistics. Optional Location permission is requested to display the Wi-Fi network name; the app does not request location coordinates.
 - The optional scroll feature observes scrolling events to identify their source and change their direction. It is not a keystroke logger.
+- The speed test in the panel (Wi-Fi → Test) runs macOS's `networkQuality`, which contacts Apple's test servers and fills the connection for about 20 seconds. It runs only when clicked.
 - The installed app's update checks contact GitHub and download repository data. Clicking **Update Now** runs the repository's build and test scripts locally. The previous README's claim of no network requests was inaccurate.
 - Preferences, diagnostics and update files remain on your Mac. Avoid posting raw dashboard screenshots or logs containing network names, local IPs, process names or local paths.
 

@@ -596,6 +596,12 @@ func runSelfTests() {
         expect(outAt.count == 3 && outAt[0] < outAt[1] && outAt[1] < outAt[2], "launch: cats come out one at a time: \(outAt)")
         expect(launch.cats.allSatisfy { $0.visible && launch.lanes[0].contains($0.x, margin: $0.radius) }, "launch: everyone ends up in the free space")
     }
+    // Speed test: reads networkQuality's JSON (bits per second, RPM, milliseconds).
+    let sample = #"{"dl_throughput": 641066112, "ul_throughput": 255409168, "responsiveness": 767.66, "base_rtt": 22.04, "interface_name": "en0"}"#
+    let measured = SpeedTest.parse(Data(sample.utf8), date: Date(timeIntervalSince1970: 0))
+    expect(measured?.download == 641066112 && measured?.upload == 255409168 && measured?.latency == 22.04 && measured?.responsiveness == 767.66, "speed test output is read")
+    expect(SpeedTest.rate(641066112) == "641 Mbps" && SpeedTest.rate(25_540_000) == "25.5 Mbps", "speeds read in Mbps")
+    expect(SpeedTest.parse(Data("{}".utf8), date: Date()) == nil, "unexpected output is not taken as a result")
     // Calling the cats home: everyone ends up in the tower, then comes back out into free space.
     colony.updateLanes([Lane(lower: 0, upper: 600)])
     for _ in 0..<60 { colony.step(1.0 / 30) }
