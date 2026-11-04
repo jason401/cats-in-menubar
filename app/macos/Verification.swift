@@ -602,6 +602,11 @@ func runSelfTests() {
     expect(measured?.download == 641066112 && measured?.upload == 255409168 && measured?.latency == 22.04 && measured?.responsiveness == 767.66, "speed test output is read")
     expect(SpeedTest.rate(641066112) == "641 Mbps" && SpeedTest.rate(25_540_000) == "25.5 Mbps", "speeds read in Mbps")
     expect(SpeedTest.parse(Data("{}".utf8), date: Date()) == nil, "unexpected output is not taken as a result")
+    // Grades follow the stated scale, and the weakest part sets the overall grade.
+    expect(SpeedTest.grade(download: 9e6) == .slow && SpeedTest.grade(download: 49e6) == .fair && SpeedTest.grade(download: 199e6) == .fast && SpeedTest.grade(download: 641e6) == .veryFast, "download grades")
+    expect(SpeedTest.grade(upload: 2e6) == .slow && SpeedTest.grade(upload: 9e6) == .fair && SpeedTest.grade(upload: 49e6) == .fast && SpeedTest.grade(upload: 255e6) == .veryFast, "upload grades")
+    expect(SpeedTest.grade(loadedLatency: 160) == .slow && SpeedTest.grade(loadedLatency: 78) == .fair && SpeedTest.grade(loadedLatency: 30) == .fast && SpeedTest.grade(loadedLatency: 10) == .veryFast, "busy-delay grades")
+    expect(measured.map(SpeedTest.grade) == .fair && abs((measured?.loadedLatency ?? 0) - 60_000 / 767.66) < 0.01, "767 RPM means about 78 ms while busy, so a fast line grades Fair")
     // Calling the cats home: everyone ends up in the tower, then comes back out into free space.
     colony.updateLanes([Lane(lower: 0, upper: 600)])
     for _ in 0..<60 { colony.step(1.0 / 30) }
