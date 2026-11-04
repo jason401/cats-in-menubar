@@ -19,6 +19,10 @@ final class SpeedTest: ObservableObject {
     @Published private(set) var running = false
     @Published private(set) var history: [Result] = []   // newest first
     @Published private(set) var failure: String?
+    /// The panel shows a fresh result (or failure) for a moment, then goes back to live traffic.
+    @Published private(set) var showing = false
+    static let showFor: TimeInterval = 20
+    private var hideWork: DispatchWorkItem?
     var result: Result? { history.first }
     static let keep = 20
     private static let key = "speedTestHistory", oldKey = "speedTestResult"
@@ -34,7 +38,7 @@ final class SpeedTest: ObservableObject {
 
     func run(network: String?) {
         guard !running else { return }
-        running = true; failure = nil
+        running = true; failure = nil; showing = false; hideWork?.cancel()
         DispatchQueue.global(qos: .utility).async {
             let outcome = Self.measure()
             DispatchQueue.main.async {
@@ -49,8 +53,15 @@ final class SpeedTest: ObservableObject {
                     self.failure = error.description
                     AppModel.log("Speed test failed: \(error.description)")
                 }
+                self.showBriefly()
             }
         }
+    }
+    private func showBriefly() {
+        showing = true
+        let work = DispatchWorkItem { [weak self] in self?.showing = false }
+        hideWork = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + Self.showFor, execute: work)
     }
     func clear() { history = []; failure = nil; save() }
     private func save() {

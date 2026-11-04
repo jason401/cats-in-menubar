@@ -118,17 +118,15 @@ struct DashboardView: View {
                                     Detail("Band", wifi.rate > 0 ? "\(wifi.band) · \(Int(wifi.rate)) Mbps" : wifi.band)
                                     Detail("Local IP", s.localIP)
                                 }.frame(width: detailColumn, alignment: .leading)
-                                Traffic(up: s.upload, down: s.download)
+                                Traffic(up: s.upload, down: s.download, test: SpeedTest.shared, network: s.wifi.flatMap { $0.name } ?? s.networkName)
                             }
-                            SpeedTestRow(test: SpeedTest.shared, network: wifi.name ?? "Wi-Fi")
                         }
                     } else {
                         StatSection(icon: s.networkName == "Offline" ? "wifi.slash" : "cable.connector", title: "Network: \(s.networkName)", open: { openSystemSettings("com.apple.Network-Settings.extension") }, help: "Open Network settings") {
                             HStack(alignment: .top, spacing: 10) {
                                 Detail("Local IP", s.localIP).frame(width: detailColumn, alignment: .leading)
-                                Traffic(up: s.upload, down: s.download)
+                                Traffic(up: s.upload, down: s.download, test: SpeedTest.shared, network: s.wifi.flatMap { $0.name } ?? s.networkName)
                             }
-                            SpeedTestRow(test: SpeedTest.shared, network: s.networkName)
                         }
                     }
                 }
@@ -243,66 +241,52 @@ private struct Detail: View {
 }
 
 /// Upload and download on one line, each with its own arrow and color.
+/// The network's right-hand column: live up and down traffic with a speed test button. While a test runs,
+/// and for a moment after, the same spot shows the test instead, so the panel never grows a row for it.
 private struct Traffic: View {
     let up: Double
     let down: Double
-    var body: some View {
-        // Laid out like the top-app lists: a small title, then up and down on their own lines.
-        VStack(alignment: .leading, spacing: 2) {
-            Text("Traffic").font(.system(size: 10)).foregroundStyle(.tertiary)
-            Label { Text("Up \(rate(up))") } icon: { Image(systemName: "arrow.up").foregroundStyle(.orange) }
-            Label { Text("Down \(rate(down))") } icon: { Image(systemName: "arrow.down").foregroundStyle(.blue) }
-        }
-        .labelStyle(TightLabel()).font(.system(size: 11)).monospacedDigit().lineLimit(1)
-        .frame(maxWidth: .infinity, alignment: .leading)
-    }
-}
-
-/// One line under the network details: the last speed test, or a test in progress, and a button to run one.
-private struct SpeedTestRow: View {
     @ObservedObject var test: SpeedTest
     let network: String?
     var body: some View {
         VStack(alignment: .leading, spacing: 2) {
-            HStack(spacing: 6) {
-                Text("Speed:").foregroundStyle(.secondary)
-                if test.running {
-                    ProgressView().controlSize(.mini)
-                    Text("Testing… about 20 s").foregroundStyle(.secondary)
-                } else if let failure = test.failure {
-                    Text(failure).foregroundStyle(.orange).lineLimit(1)
-                } else if let r = test.result {
-                    Label { Text(SpeedTest.rate(r.download)) } icon: { Image(systemName: "arrow.down").foregroundStyle(.blue) }
-                    Label { Text(SpeedTest.rate(r.upload)) } icon: { Image(systemName: "arrow.up").foregroundStyle(.orange) }
-                    if let ms = r.latency { Text("· \(Int(ms.rounded())) ms").foregroundStyle(.secondary) }
-                } else {
-                    Text("Not measured yet").foregroundStyle(.tertiary)
-                }
-                Spacer(minLength: 4)
-                Button(test.result == nil ? "Test" : "Test again") { test.run(network: network) }
-                    .buttonStyle(.bordered).controlSize(.mini).disabled(test.running)
-                    .help("Measures with macOS's networkQuality against Apple's test servers. Uses the connection fully for about 20 seconds.")
-            }
-            // What the numbers mean: a grade, and how it compares with this network's usual.
-            if !test.running, test.failure == nil, let r = test.result {
+            if test.running {
+                Text("Speed test").font(.system(size: 10)).foregroundStyle(.tertiary)
+                HStack(spacing: 4) { ProgressView().controlSize(.mini); Text("Testing…") }
+                Text("about 20 s").foregroundStyle(.secondary)
+            } else if test.showing, let failure = test.failure {
+                Text("Speed test").font(.system(size: 10)).foregroundStyle(.tertiary)
+                Text(failure).foregroundStyle(.orange).lineLimit(2).fixedSize(horizontal: false, vertical: true)
+            } else if test.showing, let r = test.result {
                 let grade = SpeedTest.grade(r)
                 HStack(spacing: 4) {
+                    Text("Speed").font(.system(size: 10)).foregroundStyle(.tertiary)
                     Circle().fill(grade.color).frame(width: 6, height: 6)
-                    Text(grade.label).foregroundStyle(grade.color)
-                    Text("· " + (test.comparison(for: r) ?? grade.meaning)).foregroundStyle(.secondary)
-                }.font(.system(size: 10))
+                    Text(grade.label).font(.system(size: 10)).foregroundStyle(grade.color)
+                }
+                Label { Text(SpeedTest.rate(r.download)) } icon: { Image(systemName: "arrow.down").foregroundStyle(.blue) }
+                Label { Text(SpeedTest.rate(r.upload)) } icon: { Image(systemName: "arrow.up").foregroundStyle(.orange) }
+                if let ms = r.latency { Text("Ping \(Int(ms.rounded())) ms").foregroundStyle(.secondary) }
+            } else {
+                Text("Traffic").font(.system(size: 10)).foregroundStyle(.tertiary)
+                Label { Text("Up \(rate(up))") } icon: { Image(systemName: "arrow.up").foregroundStyle(.orange) }
+                Label { Text("Down \(rate(down))") } icon: { Image(systemName: "arrow.down").foregroundStyle(.blue) }
+                // The line beside Local IP is free, so the button costs no height.
+                Button("Test speed") { test.run(network: network) }
+                    .buttonStyle(.bordered).controlSize(.mini).padding(.top, 1)
+                    .help("Measures with macOS's networkQuality against Apple's test servers (about 20 s, uses the connection fully). Results and history: Settings → Monitor.")
             }
         }
         .labelStyle(TightLabel()).font(.system(size: 11)).monospacedDigit().lineLimit(1)
-        .padding(.top, 3)
+        .frame(maxWidth: .infinity, alignment: .leading)
         .help(summary)
     }
     private var summary: String {
-        guard let r = test.result else { return "" }
-        let time = DateFormatter.localizedString(from: r.date, dateStyle: .short, timeStyle: .short)
+        guard test.showing, test.failure == nil, let r = test.result else { return "" }
         var lines = [SpeedTest.grade(r).meaning]
+        if let comparison = test.comparison(for: r) { lines.append(comparison) }
         if let busy = r.loadedLatency { lines.append("Delay while busy \(Int(busy.rounded())) ms (\(Int(r.responsiveness!.rounded())) RPM)") }
-        lines.append("Measured \(time)" + (r.network.map { " on \($0)" } ?? "") + ". History: Settings → Monitor.")
+        lines.append("History: Settings → Monitor")
         return lines.joined(separator: "\n")
     }
 }
