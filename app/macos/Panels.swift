@@ -596,25 +596,6 @@ struct GeneralTab: View {
                 }
                 if let error = state.loginError { SettingsNote(text: error) }
             }
-            SettingsCard(title: "Access") {
-                SettingsRow(title: "Accessibility") {
-                    SettingsStatus(text: model.access ? "Allowed" : "Not allowed", ok: model.access)
-                    if !model.access {
-                        SettingsAction(title: "Allow…") {
-                            MenuBarMonitor.requestAccess()
-                            if let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility") { NSWorkspace.shared.open(url) }
-                        }
-                    }
-                }
-                SettingsNote(text: "Only reads where menus and icons are. No screen capture, no menu text.")
-                Divider()
-                SettingsRow(title: "Safe space") {
-                    SettingsSwitch(title: "Show safe space", isOn: $model.debug).help("Tints the empty menu bar space the cats may use.")
-                }
-                Divider()
-                SettingsRow(title: "Log") { SettingsAction(title: "Open log") { NSWorkspace.shared.open(AppModel.logURL) } }
-                SettingsNote(text: model.status)
-            }
             UpdatesCard(updater: Updater.shared)
             SettingsCard(title: "Folders") {
                 SettingsRow(title: "Open") {
@@ -637,6 +618,22 @@ struct GeneralTab: View {
                     SettingsAction(title: "Show") {
                         if let url = Bundle.main.url(forResource: "THIRD_PARTY_NOTICES", withExtension: "md") { NSWorkspace.shared.open(url) }
                     }
+                }
+            }
+        }
+    }
+}
+
+/// Shared Accessibility permission controls for the cats and scroll features.
+private struct AccessibilityPermissionRow: View {
+    @ObservedObject var model: AppModel
+    var body: some View {
+        SettingsRow(title: "Accessibility") {
+            SettingsStatus(text: model.access ? "Allowed" : "Not allowed", ok: model.access)
+            if !model.access {
+                SettingsAction(title: "Allow…") {
+                    MenuBarMonitor.requestAccess()
+                    if let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility") { NSWorkspace.shared.open(url) }
                 }
             }
         }
@@ -730,6 +727,10 @@ struct CatsTab: View {
     @AppStorage(Pref.toyColor) private var toyColor = -1
     var body: some View {
         SettingsPage {
+            SettingsCard(title: "Menu bar access") {
+                AccessibilityPermissionRow(model: model)
+                SettingsNote(text: "Required for cats to find available menu bar space. Only reads where menus and icons are. No screen capture, no menu text.")
+            }
             SettingsCard(title: "Cats") {
                 SettingsRow(title: "Display") { SettingsMenu(options: displayOptions, selection: displayChoice) }
                 SettingsNote(text: model.moveStatus ?? "Changing the display: the cats run home, then come out on the new menu bar.")
@@ -812,6 +813,17 @@ struct CatsTab: View {
                     SettingsRow(title: "Until") { SettingsMenu(options: hours, selection: $nightTo) }
                 }
             }
+            SettingsCard(title: "Troubleshooting") {
+                SettingsRow(title: "Show available space") {
+                    SettingsSwitch(title: "Show available space", isOn: $model.debug)
+                        .help("Tints the empty menu bar space the cats may use.")
+                }
+                Divider()
+                SettingsRow(title: "Log") {
+                    SettingsAction(title: "Open log") { NSWorkspace.shared.open(AppModel.logURL) }
+                }
+                SettingsNote(text: model.status)
+            }
         }
     }
 }
@@ -852,10 +864,15 @@ struct MonitorTab: View {
 
 /// Scroll Reverser's settings: one switch, then each scrolling source that has been used, with its direction.
 struct ScrollTab: View {
+    @ObservedObject var model: AppModel
     @ObservedObject var reverser: ScrollDirection
     @AppStorage(Pref.scrollReverse) private var enabled = false
     var body: some View {
         SettingsPage {
+            SettingsCard(title: "Accessibility") {
+                AccessibilityPermissionRow(model: model)
+                SettingsNote(text: "Required to change scrolling direction. This is the same permission used by the cats.")
+            }
             SettingsCard(title: "Scroll direction") {
                 SettingsRow(title: "Reverse") {
                     SettingsSwitch(title: "Reverse scrolling", isOn: $enabled).help("Sets the scrolling direction of each trackpad, mouse and app separately.")
@@ -877,7 +894,7 @@ struct ScrollTab: View {
     private var note: String {
         if !enabled { return "Off: macOS's own scrolling direction applies everywhere." }
         if reverser.otherAppRunning { return "Paused while Scroll Reverser is running, so scrolling is never reversed twice. Quit it to use this." }
-        if !reverser.running { return "Needs Accessibility access (General tab)." }
+        if !reverser.running { return "Needs Accessibility access. Check the permission above." }
         return "On. Each source below follows its own setting."
     }
 }
@@ -933,7 +950,7 @@ final class SettingsWindowController: NSObject {
         switch index {
         case 0: AnyView(GeneralTab(model: model, state: state))
         case 1: AnyView(CatsTab(model: model))
-        case 2: AnyView(ScrollTab(reverser: ScrollDirection.shared))
+        case 2: AnyView(ScrollTab(model: model, reverser: ScrollDirection.shared))
         default: AnyView(MonitorTab())
         }
     }
