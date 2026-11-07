@@ -993,8 +993,16 @@ func testUpdateProgress(_ expect: (@autoclosure () -> Bool, String) -> Void) {
     progress.failed = true
     expect(progress.summary(at: start).contains("Stopped at Build") && progress.fraction(at: start) == 1
            && progress.quiet(at: start.addingTimeInterval(100)) == nil, "failure stays on its step and stops the quiet warning")
-    progress.failed = false; progress.waiting = true
-    expect(progress.summary(at: start).contains("put the cat down"), "waiting explains what resumes installation")
+    progress.failed = false
+    progress.waitForWork(at: start.addingTimeInterval(60), retry: 10)
+    expect(progress.summary(at: start.addingTimeInterval(63)).contains("checking again in 7s")
+           && progress.line.isEmpty && progress.waiting, "prepared update waits with a live retry countdown")
+    expect(progress.summary(at: start.addingTimeInterval(90)).contains("checking again in 0s"),
+           "waiting countdown never becomes negative")
+    progress.resumeAfterWaiting(at: start.addingTimeInterval(65))
+    expect(!progress.waiting && progress.waitNextAt == nil && progress.waitCheckedAt == nil
+           && progress.stageStarted == start.addingTimeInterval(65), "resuming clears waiting without repeating completed stages")
+    progress.waitForWork(at: start.addingTimeInterval(66), retry: 10)
     progress.move(to: 3, at: start.addingTimeInterval(70))
     expect(progress.skipped == [2] && !progress.waiting && progress.line.isEmpty,
            "reused steps are skipped and the next stage clears old output and waiting")

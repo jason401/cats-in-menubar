@@ -19,7 +19,7 @@ final class Updater: ObservableObject {
     /// True while the user is dragging a cat; installation waits until it ends.
     var isBusy: () -> Bool = { false }
 
-    static let every: TimeInterval = 3 * 3600, retry: TimeInterval = 600, first: TimeInterval = 60
+    static let every: TimeInterval = 3 * 3600, retry: TimeInterval = 10, first: TimeInterval = 60
     static let repository = "https://github.com/jason401/cats-in-menubar.git"
     static let bundleID = "local.catsinmenubar"
     static let support = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Library/Application Support/Cats in Menubar")
@@ -37,6 +37,14 @@ final class Updater: ObservableObject {
     private var stateFile: URL { Self.support.appendingPathComponent("update.json") }
     private let work = DispatchQueue(label: "updater")
     private var timer: Timer?
+    private struct PreparedUpdate {
+        let staged: URL
+        let revision: String
+        let channel: String?
+    }
+    private var pendingUpdate: PreparedUpdate?
+    private var waitTask: DispatchWorkItem?
+    private var stoppingInstaller: Process?
 
     private init() {
         enabled = UserDefaults.standard.object(forKey: "autoUpdate") as? Bool ?? true
@@ -67,6 +75,7 @@ final class Updater: ObservableObject {
     /// Switches between Stable and Beta, then looks right away. What the other channel found no longer applies.
     func setChannel(_ name: String) {
         guard UpdateChannel.all.contains(name), name != channel else { return }
+        cancelWaiting()
         progress = nil
         channel = name
         UserDefaults.standard.set(name, forKey: UpdateChannel.key)
@@ -80,7 +89,7 @@ final class Updater: ObservableObject {
 
     /// Looks for a new version on the chosen channel. Changes nothing on this Mac's app.
     func check() {
-        guard installed, !checking, !installing else { return }
+        guard installed, !checking, !installing, pendingUpdate == nil else { return }
         progress = nil
         checking = true
         let branch = channel
@@ -103,19 +112,16 @@ final class Updater: ObservableObject {
     /// Ends a check or install; if the channel changed meanwhile, looks again (without installing).
     private func finished(_ branch: String) {
         checking = false
-        if channel != branch { check() }
+        if channel != branch { check() } else { resumeWhenIdle() }
     }
 
     /// Runs only after the user asks: tests, builds and installs the chosen channel's version.
     func install() {
-        guard installed, !checking, !installing else { return }
+        guard installed, !checking, !installing, stoppingInstaller?.isRunning != true else { return }
+        if pendingUpdate != nil { resumeWhenIdle(); return }
         let branch = channel
         progress = UpdateProgress(estimates: UpdateProgress.saved)
-        if isBusy() {
-            progress?.waiting = true
-            report(["status": "waiting", "current": revision])
-            return schedule(after: Self.retry) { if $0.channel == branch { $0.install() } }
-        }
+        // Fetch, build and test during interaction; only replacing the app waits for idle.
         checking = true
         report(["status": "checking"], save: false)
         work.async {
@@ -235,13 +241,17 @@ final class Updater: ObservableObject {
     /// `channel` is the update channel this install came from; nil for moving a development build.
     private func handoff(staged: URL, next: String, channel: String? = nil) {
         DispatchQueue.main.async {
+            guard UpdateChannel.proceeds(started: channel, now: self.channel) else {
+                self.report(["status": "channel-changed", "current": self.revision])
+                return
+            }
+            guard !self.installing else { return }
+            self.update { $0.move(to: 3) }
             guard !self.isBusy() else {
-                self.report(["status": "waiting", "current": self.revision, "next": next])
-                self.schedule(after: Self.retry) { $0.retryInstall(channel) }
+                self.waitForIdle(PreparedUpdate(staged: staged, revision: next, channel: channel))
                 return
             }
             do {
-                self.update { $0.move(to: 3) }
                 try FileManager.default.createDirectory(at: self.updates, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
                 let token = UUID().uuidString
                 let process = Process()
@@ -284,9 +294,10 @@ final class Updater: ObservableObject {
                 }
                 guard !self.isBusy() else {
                     process.terminate()
+                    self.stoppingInstaller = process
                     self.installing = false
-                    self.report(["status": "waiting", "current": self.revision, "next": next])
-                    self.schedule(after: Self.retry) { $0.retryInstall(channel) }
+                    self.waitForIdle(PreparedUpdate(staged: self.installed ? self.staged : Bundle.main.bundleURL,
+                                                    revision: next, channel: channel))
                     return
                 }
                 if SMAppService.mainApp.status == .enabled {
@@ -309,9 +320,48 @@ final class Updater: ObservableObject {
         }
     }
 
-    /// Tries a postponed install again, unless the user picked another channel meanwhile.
-    private func retryInstall(_ channel: String?) {
-        if !installed { installSelf() } else if UpdateChannel.proceeds(started: channel, now: self.channel) { install() }
+    /// Called after dragging/laser use ends, and by a short fallback timer.
+    func resumeWhenIdle() {
+        guard let prepared = pendingUpdate else { return }
+        guard UpdateChannel.proceeds(started: prepared.channel, now: channel) else { cancelWaiting(); return }
+        guard !checking, !installing else { return }
+        // The previous helper must release its install lock and finish cleanup before another starts.
+        if stoppingInstaller?.isRunning == true { scheduleWait(after: 0.1); return }
+        stoppingInstaller = nil
+        if isBusy() { waitForIdle(prepared); return }
+        if prepared.channel != nil {
+            let built = NSDictionary(contentsOf: prepared.staged.appendingPathComponent("Contents/Info.plist"))?["CatsSourceRevision"] as? String
+            let tested = try? String(contentsOf: testedRevision, encoding: .utf8)
+            guard built == prepared.revision, tested == prepared.revision else {
+                cancelWaiting()
+                install()
+                return
+            }
+        }
+        cancelWaiting()
+        update { $0.resumeAfterWaiting() }
+        report(["status": "resuming", "current": revision, "next": prepared.revision], save: false)
+        handoff(staged: prepared.staged, next: prepared.revision, channel: prepared.channel)
+    }
+
+    private func cancelWaiting() {
+        waitTask?.cancel()
+        waitTask = nil
+        pendingUpdate = nil
+    }
+
+    private func scheduleWait(after delay: TimeInterval) {
+        waitTask?.cancel()
+        let task = DispatchWorkItem { [weak self] in self?.resumeWhenIdle() }
+        waitTask = task
+        DispatchQueue.main.asyncAfter(deadline: .now() + delay, execute: task)
+    }
+
+    private func waitForIdle(_ prepared: PreparedUpdate) {
+        pendingUpdate = prepared
+        update { $0.waitForWork(retry: Self.retry) }
+        report(["status": "waiting", "current": revision, "next": prepared.revision])
+        scheduleWait(after: Self.retry)
     }
 
     /// The new app confirms it started, so the installer can finish (or roll back if it never does).
@@ -442,7 +492,8 @@ final class Updater: ObservableObject {
         case "building": return "Building \(short(s["next"]))…"
         case "installing": return "Installing \(short(s["next"]))…"
         case "available": return "New version \(short(s["next"])) is available. Click Update Now to install." + when
-        case "waiting": return "Updating after you put the cat down."
+        case "waiting": return "Update prepared. Waiting for you to finish dragging or using the laser pointer."
+        case "resuming": return "Interaction finished. Applying the prepared update…"
         case "current": return "Up to date (\(short(s["current"])))" + when
         case "updated":
             if s["previous"] == nil || s["previous"] == s["current"] { return "Installed: \(short(s["current"]))" + when }
@@ -535,6 +586,7 @@ struct UpdateProgress: Equatable {
     var started: Date, stageStarted: Date, lineAt: Date
     var line = ""
     var waiting = false, failed = false
+    var waitCheckedAt: Date?, waitNextAt: Date?
     var skipped: Set<Int> = []
     var seconds: [Int: TimeInterval] = [:]
     var estimates: [Int: TimeInterval]
@@ -547,6 +599,19 @@ struct UpdateProgress: Equatable {
         seconds[stage] = max(0, now.timeIntervalSince(stageStarted))
         for step in stage + 1..<next { skipped.insert(step) }
         stage = next; stageStarted = now; lineAt = now; line = ""; waiting = false
+    }
+    mutating func waitForWork(at now: Date = Date(), retry: TimeInterval) {
+        waiting = true
+        waitCheckedAt = now
+        waitNextAt = now.addingTimeInterval(retry)
+        line = ""
+    }
+    mutating func resumeAfterWaiting(at now: Date = Date()) {
+        waiting = false
+        waitCheckedAt = nil
+        waitNextAt = nil
+        stageStarted = now
+        lineAt = now
     }
     mutating func show(_ text: String, at now: Date = Date()) { line = text; lineAt = now }
     func remaining(at now: Date) -> TimeInterval? {
@@ -570,7 +635,10 @@ struct UpdateProgress: Equatable {
     func summary(at now: Date) -> String {
         let prefix = "\(stage + 1)/\(Self.count) "
         if failed { return prefix + "Stopped at \(Self.names[stage])" }
-        if waiting { return prefix + "Waiting until you put the cat down" }
+        if waiting {
+            let seconds = max(0, Int(ceil((waitNextAt ?? now).timeIntervalSince(now))))
+            return "Ready · waiting for interaction to finish · checking again in \(seconds)s"
+        }
         let doing = ["Fetching", "Building", "Testing", "Preparing", "Restarting"][stage]
         var text = prefix + doing + " · \(Self.duration(now.timeIntervalSince(started))) elapsed"
         if let left = remaining(at: now), stage < Self.count - 1 {

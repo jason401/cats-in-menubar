@@ -358,6 +358,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             panel.collectionBehavior = [.canJoinAllSpaces, .stationary, .ignoresCycle]
             panel.hidesOnDeactivate = false
             let view = HabitatView(colony: colony, frame: NSRect(x: 0, y: 0, width: frame.width, height: height))
+            view.interactionEnded = { Updater.shared.resumeWhenIdle() }
             view.showLanes = model.debug
             panel.contentView = view
             overlay = panel; habitatView = view; lastScreen = frame; lastHeight = height

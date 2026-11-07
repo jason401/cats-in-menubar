@@ -366,6 +366,7 @@ final class HabitatView: NSView {
     var showLanes = false
     private(set) var dragging: Int?
     private(set) var lasering = false
+    var interactionEnded: (() -> Void)?
     private var grabOffset = 0.0
     private var lastDrag = 0.0
     init(colony: Colony, frame: NSRect) { self.colony = colony; super.init(frame: frame) }
@@ -456,9 +457,11 @@ final class HabitatView: NSView {
     }
     override func mouseUp(with event: NSEvent) { endDrag(); NSCursor.openHand.set() }
     func endDrag() {
+        let wasInteracting = dragging != nil || lasering
         if let i = dragging { colony.release(i); needsDisplay = true }
         if lasering { colony.laserOff(); lasering = false }
         dragging = nil
+        if wasInteracting { interactionEnded?() }
     }
     override func draw(_ dirtyRect: NSRect) {
         super.draw(dirtyRect)
