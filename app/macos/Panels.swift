@@ -158,7 +158,7 @@ private struct UpdateBanner: View {
             HStack {
                 Label("New version available", systemImage: "arrow.down.circle.fill").font(.caption)
                 Spacer()
-                Button("Update Now") { updater.install() }.controlSize(.small).disabled(updater.checking)
+                Button("Update Now") { updater.install() }.controlSize(.small).disabled(updater.checking || updater.installing)
             }
         }
     }
@@ -676,15 +676,15 @@ struct UpdatesCard: View {
                 SettingsRow(title: "Channel") {
                     SettingsMenu(options: [("Stable", "stable"), ("Beta (main, for testing)", "main")],
                                  selection: Binding(get: { updater.channel }, set: { updater.setChannel($0) }))
-                        .disabled(updater.checking)
+                        .disabled(updater.checking || updater.installing)
                         .help("Stable gets versions that were published after testing. Beta follows main, where new changes arrive first; it may be broken. Going back to Stable updates once stable catches up with the version you run.")
                 }
                 Divider()
                 SettingsRow(title: "New version") {
                     if updater.available != nil {
-                        SettingsAction(title: "Update Now") { updater.install() }.disabled(updater.checking)
+                        SettingsAction(title: "Update Now") { updater.install() }.disabled(updater.checking || updater.installing)
                     } else {
-                        SettingsAction(title: "Check Now") { updater.check() }.disabled(updater.checking)
+                        SettingsAction(title: "Check Now") { updater.check() }.disabled(updater.checking || updater.installing)
                     }
                 }
             }

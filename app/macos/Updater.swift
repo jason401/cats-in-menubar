@@ -28,7 +28,8 @@ final class Updater: ObservableObject {
     var revision: String { Bundle.main.object(forInfoDictionaryKey: "CatsSourceRevision") as? String ?? "" }
     /// Only the copy in /Applications updates itself. A development build runs as it is.
     var installed: Bool { Bundle.main.bundleURL.standardizedFileURL == Self.target.standardizedFileURL }
-    private var installing = false
+    /// True while the installer helper prepares the swap; channel and Update Now wait for it.
+    @Published private(set) var installing = false
     private var updates: URL { Self.support.appendingPathComponent("updates") }
     private var staged: URL { root.appendingPathComponent("build/Cats in Menubar.app") }
     private var stateFile: URL { Self.support.appendingPathComponent("update.json") }
@@ -199,6 +200,9 @@ final class Updater: ObservableObject {
             report(["status": "current", "current": revision])
         case .localCommits: report(["status": "local-commits"])
         case .otherBranch: report(["status": "other-branch", "detail": step.head])
+        case .localBuild:
+            setAvailable(nil)
+            report(["status": "local-build", "current": revision])
         case .ahead:
             setAvailable(nil)
             report(["status": "ahead", "current": revision, "channel": branch])
@@ -246,6 +250,14 @@ final class Updater: ObservableObject {
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) {
             let ready = self.updates.appendingPathComponent(token + ".ready")
             if FileManager.default.fileExists(atPath: ready.path) {
+                // The last moment before the swap: a channel picked meanwhile cancels this install.
+                guard UpdateChannel.proceeds(started: channel, now: self.channel) else {
+                    process.terminate()
+                    self.installing = false
+                    self.report(["status": "channel-changed", "current": self.revision])
+                    self.check()
+                    return
+                }
                 guard !self.isBusy() else {
                     process.terminate()
                     self.installing = false
@@ -273,7 +285,7 @@ final class Updater: ObservableObject {
 
     /// Tries a postponed install again, unless the user picked another channel meanwhile.
     private func retryInstall(_ channel: String?) {
-        if !installed { installSelf() } else if channel == nil || channel == self.channel { install() }
+        if !installed { installSelf() } else if UpdateChannel.proceeds(started: channel, now: self.channel) { install() }
     }
 
     /// The new app confirms it started, so the installer can finish (or roll back if it never does).
@@ -395,6 +407,8 @@ final class Updater: ObservableObject {
         case "local-changes": return "Skipped: the update copy has local changes" + when
         case "local-commits": return "Skipped: the update copy has commits not on GitHub" + when
         case "other-branch": return "Skipped: the update copy is on \(s["detail"] ?? "another branch"), not stable or main" + when
+        case "local-build": return "Waiting: this Mac runs a local build that is not on GitHub yet, so it cannot be compared. It checks again once pushed (for an old install, reinstall with the installer)" + when
+        case "channel-changed": return "Installation cancelled: the channel changed" + when
         case "ahead":
             let label = UpdateChannel.label(s["channel"] ?? "stable")
             return "This Mac already runs a newer version than \(label); it updates once \(label) catches up." + when
@@ -410,6 +424,8 @@ enum UpdateChannel {
     static let key = "updateChannel"
     static var current: String { valid(UserDefaults.standard.string(forKey: key)) }
     static func valid(_ name: String?) -> String { name.flatMap { all.contains($0) ? $0 : nil } ?? "stable" }
+    /// An install started on `started` goes on only while that is still the chosen channel (nil: no channel, e.g. moving a development build).
+    static func proceeds(started: String?, now: String) -> Bool { started == nil || started == now }
     static func label(_ name: String) -> String { name == "main" ? "Beta (main)" : "Stable" }
     /// The branch this app was built from (written by build_app.sh); "main" shows as Beta.
     static var built: String { Bundle.main.object(forInfoDictionaryKey: "CatsSourceChannel") as? String ?? "" }
@@ -417,7 +433,7 @@ enum UpdateChannel {
 
 /// One look at an update channel from the app's private checkout: what it found, and how to move there.
 struct ChannelStep {
-    enum Outcome: Equatable { case current, newer, ahead, localCommits, otherBranch }
+    enum Outcome: Equatable { case current, newer, ahead, localBuild, localCommits, otherBranch }
     typealias Git = (_ arguments: [String], _ timeout: TimeInterval) throws -> String
     let branch: String, head: String, old: String, new: String, outcome: Outcome
     /// The user picked the other channel: the checkout follows it.
@@ -446,7 +462,9 @@ struct ChannelStep {
             for other in UpdateChannel.all where other != branch && !known(revision) {
                 _ = try? git(["fetch", "-q", "origin", other], 90)
             }
-            if known(revision) && !ancestor(revision, new) { return step(new, .ahead) }
+            // A commit GitHub does not have (a local build not pushed yet) cannot be compared: wait.
+            if !known(revision) { return step(new, .localBuild) }
+            if !ancestor(revision, new) { return step(new, .ahead) }
         }
         return step(new, .newer)
     }
