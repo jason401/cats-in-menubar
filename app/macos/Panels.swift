@@ -154,7 +154,9 @@ struct DashboardView: View {
 private struct UpdateBanner: View {
     @ObservedObject var updater: Updater
     var body: some View {
-        if updater.available != nil {
+        if let progress = updater.progress {
+            UpdateProgressBar(progress: progress)
+        } else if updater.available != nil {
             HStack {
                 Label("New version available", systemImage: "arrow.down.circle.fill").font(.caption)
                 Spacer()
@@ -456,10 +458,11 @@ struct SettingsCard<Content: View>: View {
 
 struct SettingsRow<Content: View>: View {
     let title: String
+    var titleWidth: CGFloat = 96
     @ViewBuilder var content: Content
     var body: some View {
         HStack(spacing: 10) {
-            Text(title).frame(width: 96, alignment: .leading)
+            Text(title).frame(width: titleWidth, alignment: .leading)
             HStack(spacing: 6) { content }.frame(maxWidth: .infinity, alignment: .leading)
         }
         .padding(.horizontal, 10).padding(.vertical, 6)
@@ -480,11 +483,14 @@ struct SettingsNote: View {
 
 struct SettingsAction: View {
     let title: String
+    var prominent = false
     let action: () -> Void
     var body: some View {
         Button(action: action) {
             Text(title).lineLimit(1).frame(maxWidth: .infinity, minHeight: 24)
-                .background(RoundedRectangle(cornerRadius: 5).fill(Color.primary.opacity(0.07)))
+                .foregroundStyle(prominent ? Color.white : Color.primary)
+                .background(RoundedRectangle(cornerRadius: 5).fill(prominent ? Color.accentColor : Color.primary.opacity(0.07)))
+                .contentShape(RoundedRectangle(cornerRadius: 5))
         }.buttonStyle(.plain)
     }
 }
@@ -585,7 +591,7 @@ struct GeneralTab: View {
     var body: some View {
         SettingsPage {
             SettingsCard(title: "App") {
-                SettingsRow(title: "Open at login") {
+                SettingsRow(title: "Open at login", titleWidth: 118) {
                     SettingsSwitch(title: "Open at login", isOn: Binding(get: { state.launchAtLogin }, set: { enabled in
                         do {
                             if enabled { try SMAppService.mainApp.register() } else { try SMAppService.mainApp.unregister() }
@@ -598,23 +604,23 @@ struct GeneralTab: View {
             }
             UpdatesCard(updater: Updater.shared)
             SettingsCard(title: "Folders") {
-                SettingsRow(title: "Open") {
+                SettingsRow(title: "Open", titleWidth: 118) {
                     SettingsAction(title: "App data") { DataFolders.open(Updater.support) }
+                        .frame(minWidth: 58)
                         .help("Update copy of the source and update state")
                     SettingsAction(title: "Logs") { DataFolders.reveal(AppModel.logURL) }
                         .help("CatsInMenubar.log")
                     SettingsAction(title: "App") { DataFolders.reveal(Bundle.main.bundleURL) }
                         .help(Bundle.main.bundlePath)
                 }
-                SettingsNote(text: "Settings themselves live in macOS preferences (local.catsinmenubar).")
             }
             SettingsCard(title: "About") {
-                SettingsRow(title: "Version") {
-                    Text(version).foregroundStyle(.secondary)
+                SettingsRow(title: "Version", titleWidth: 118) {
+                    Text(version).foregroundStyle(.secondary).help(versionDetails)
                 }
-                SettingsNote(text: "No analytics. Network use: the update check against the public GitHub repository, and the speed test (Apple's servers) only when you click Test.")
+                SettingsNote(text: "No analytics. GitHub updates; Apple tests on request.")
                 Divider()
-                SettingsRow(title: "Acknowledgements") {
+                SettingsRow(title: "Licenses", titleWidth: 118) {
                     SettingsAction(title: "Show") {
                         if let url = Bundle.main.url(forResource: "THIRD_PARTY_NOTICES", withExtension: "md") { NSWorkspace.shared.open(url) }
                     }
@@ -647,6 +653,12 @@ private var version: String {
     return revision.isEmpty ? name : "\(name) (\(revision))"
 }
 
+private var versionDetails: String {
+    let build = Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "–"
+    let revision = Bundle.main.object(forInfoDictionaryKey: "CatsSourceRevision") as? String ?? "–"
+    return "Build \(build) · \(revision)"
+}
+
 // App storage locations, opened in Finder from Settings.
 enum DataFolders {
     static func open(_ folder: URL) {
@@ -666,23 +678,30 @@ struct UpdatesCard: View {
     var body: some View {
         SettingsCard(title: "Updates") {
             if updater.installed {
-                SettingsRow(title: "Check automatically") {
+                SettingsRow(title: "Check automatically", titleWidth: 118) {
                     SettingsSwitch(title: "Check automatically", isOn: $updater.enabled).help("Checks the chosen channel 60 seconds after launch and every 3 hours. Never installs on its own.")
                 }
                 Divider()
-                SettingsRow(title: "Channel") {
+                SettingsRow(title: "Channel", titleWidth: 118) {
                     SettingsMenu(options: [("Stable", "stable"), ("Beta (main, for testing)", "main")],
                                  selection: Binding(get: { updater.channel }, set: { updater.setChannel($0) }))
                         .disabled(updater.checking || updater.installing)
                         .help("Stable gets versions that were published after testing. Beta follows main, where new changes arrive first; it may be broken. Going back to Stable updates once stable catches up with the version you run.")
                 }
                 Divider()
-                SettingsRow(title: "New version") {
-                    if updater.available != nil {
-                        SettingsAction(title: "Update Now") { updater.install() }.disabled(updater.checking || updater.installing)
-                    } else {
-                        SettingsAction(title: "Check Now") { updater.check() }.disabled(updater.checking || updater.installing)
+                if let progress = updater.progress, !progress.failed {
+                    UpdateProgressBar(progress: progress).padding(10)
+                } else {
+                    SettingsRow(title: "New version", titleWidth: 118) {
+                        if updater.available != nil {
+                            SettingsAction(title: "Update Now", prominent: true) { updater.install() }.disabled(updater.checking || updater.installing)
+                        } else {
+                            SettingsAction(title: "Check Now") { updater.check() }.disabled(updater.checking || updater.installing)
+                        }
                     }
+                }
+                if let progress = updater.progress, progress.failed {
+                    UpdateProgressBar(progress: progress).padding(10)
                 }
             }
             if !updater.installed {
@@ -693,6 +712,47 @@ struct UpdatesCard: View {
                 if !note.isEmpty { SettingsNote(text: note) }
             }
         }
+    }
+}
+
+/// The same live update state appears in Settings and the menu bar dashboard.
+struct UpdateProgressBar: View {
+    let progress: UpdateProgress
+    private var tint: Color { progress.failed ? .red : progress.waiting ? .yellow : .accentColor }
+    var body: some View {
+        TimelineView(.periodic(from: .now, by: 1)) { context in
+            let now = context.date
+            VStack(alignment: .leading, spacing: 5) {
+                HStack(spacing: 3) {
+                    ForEach(0..<UpdateProgress.count, id: \.self) { step in
+                        VStack(alignment: .leading, spacing: 3) {
+                            GeometryReader { box in
+                                ZStack(alignment: .leading) {
+                                    Capsule().fill(Color.primary.opacity(0.1))
+                                    Capsule().fill(step == progress.stage ? tint : Color.accentColor)
+                                        .opacity(step == progress.stage && !progress.failed && !progress.waiting && progress.fraction(at: now) == nil && Int(now.timeIntervalSince1970) % 2 == 1 ? 0.45 : 1)
+                                        .animation(.easeInOut(duration: 0.9), value: Int(now.timeIntervalSince1970) % 2)
+                                        .frame(width: box.size.width * (step < progress.stage ? 1 : step == progress.stage ? progress.fraction(at: now) ?? 0.5 : 0))
+                                }
+                            }.frame(height: 4)
+                            Text(UpdateProgress.names[step])
+                                .font(.system(size: 10, weight: step == progress.stage ? .semibold : .regular))
+                                .foregroundStyle(step == progress.stage ? Color.primary : Color.secondary)
+                                .lineLimit(1)
+                        }.frame(maxWidth: .infinity)
+                    }
+                }
+                Text(progress.summary(at: now)).font(.system(size: 11))
+                    .foregroundStyle(progress.failed || progress.waiting ? tint : Color.primary)
+                    .fixedSize(horizontal: false, vertical: true)
+                let quiet = progress.quiet(at: now).map { "no output for \(UpdateProgress.duration($0))" }
+                if !progress.line.isEmpty || quiet != nil {
+                    Text("› " + [progress.line, quiet].compactMap { $0 }.filter { !$0.isEmpty }.joined(separator: " · "))
+                        .font(.system(size: 10, design: .monospaced)).foregroundStyle(.secondary)
+                        .lineLimit(1).frame(maxWidth: .infinity, alignment: .leading).help(progress.line)
+                }
+            }
+        }.accessibilityElement(children: .combine)
     }
 }
 
@@ -878,7 +938,7 @@ struct ScrollTab: View {
                     SettingsSwitch(title: "Reverse scrolling", isOn: $enabled).help("Sets the scrolling direction of each trackpad, mouse and app separately.")
                 }
                 SettingsNote(text: note)
-                SettingsNote(text: "Based on Scroll Reverser by Nicholas Moore (Apache License 2.0). Details: General → About → Acknowledgements.")
+                SettingsNote(text: "Based on Scroll Reverser by Nicholas Moore (Apache License 2.0). Details: General → About → Licenses.")
             }
             SettingsCard(title: "Sources") {
                 if reverser.rows.isEmpty {

@@ -1,7 +1,11 @@
 #!/bin/zsh
 set -eu
 cd "${0:A:h}/.."
-zsh tools/build_app.sh
+case "${1:-}" in
+  "") zsh tools/build_app.sh ;;
+  --skip-build) ;; # The updater has just built this candidate.
+  *) echo "Usage: tools/test.sh [--skip-build]" >&2; exit 2 ;;
+esac
 "build/Cats in Menubar.app/Contents/MacOS/CatsInMenubar" --self-test
 mkdir -p build/previews
 "build/Cats in Menubar.app/Contents/MacOS/CatsInMenubar" --render-preview "$PWD/build/previews/cats.png"

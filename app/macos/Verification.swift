@@ -661,6 +661,7 @@ func runSelfTests() {
     expect(zip(usage.memory, usage.memory.dropFirst()).allSatisfy { $0.value >= $1.value }, "memory list is ranked")
     expect(cost < 0.25, "one app sample is cheap: \(cost) s")
     print("App sample: \(Int(cost * 1000)) ms; CPU \(usage.cpu.map { "\($0.name) \(Int($0.value * 1000) / 10)%" }); memory \(usage.memory.map { "\($0.name) \(Int($0.value / 1e6)) MB" })")
+    testUpdateProgress(expect)
     testUpdateChannels(expect)
     print("PASS: \(checks) assertions; 30,000 simulation steps with changing obstacles")
 }
@@ -747,6 +748,18 @@ func renderPanels(to directory: String) {
         let view = NSHostingView(rootView: controller.view(for: index))
         view.frame = NSRect(origin: .zero, size: SettingsWindowController.size)
         save(view, "settings-\(tab.0)")
+    }
+    let now = Date()
+    var progress = UpdateProgress(at: now.addingTimeInterval(-25))
+    progress.move(to: 1, at: now.addingTimeInterval(-20))
+    progress.show("Compiling app…", at: now)
+    for state in ["building", "waiting", "failed"] {
+        progress.waiting = state == "waiting"; progress.failed = state == "failed"
+        let preview = NSHostingView(rootView: SettingsPage {
+            SettingsCard(title: "Updates") { UpdateProgressBar(progress: progress).padding(10) }
+        })
+        preview.frame = NSRect(x: 0, y: 0, width: SettingsWindowController.size.width, height: 150)
+        save(preview, "settings-update-\(state)")
     }
     print("Panels: \(directory)")
 }
@@ -959,4 +972,35 @@ func testUpdateChannels(_ expect: (@autoclosure () -> Bool, String) -> Void) {
     expect(look("main", c).outcome == .ahead, "Beta behind the running app waits too")
     _ = try! git(["checkout", "-q", "-b", "local"], 60)
     expect(look("stable", c).outcome == .otherBranch, "a checkout on another branch is left alone")
+}
+
+
+/// Deterministic times exercise the progress shown in Settings and the dashboard.
+func testUpdateProgress(_ expect: (@autoclosure () -> Bool, String) -> Void) {
+    let start = Date(timeIntervalSince1970: 1_000)
+    var progress = UpdateProgress(at: start)
+    expect(progress.remaining(at: start) == nil && progress.fraction(at: start) == nil,
+           "the first update does not invent an estimate")
+    progress.move(to: 1, at: start.addingTimeInterval(10))
+    expect(progress.seconds[0] == 10 && progress.stage == 1, "fetch timing ends at the build")
+    expect(progress.quiet(at: start.addingTimeInterval(39)) == nil
+           && progress.quiet(at: start.addingTimeInterval(40)) == 30, "quiet output appears after thirty seconds")
+    progress.show("Compiling", at: start.addingTimeInterval(41))
+    expect(progress.quiet(at: start.addingTimeInterval(42)) == nil, "new output resets the quiet timer")
+    progress.estimates = [1: 100, 2: 30, 3: 10]
+    expect(progress.remaining(at: start.addingTimeInterval(60)) == 90
+           && progress.fraction(at: start.addingTimeInterval(60)) == 0.5, "time left uses previous step durations")
+    progress.failed = true
+    expect(progress.summary(at: start).contains("Stopped at Build") && progress.fraction(at: start) == 1
+           && progress.quiet(at: start.addingTimeInterval(100)) == nil, "failure stays on its step and stops the quiet warning")
+    progress.failed = false; progress.waiting = true
+    expect(progress.summary(at: start).contains("put the cat down"), "waiting explains what resumes installation")
+    progress.move(to: 3, at: start.addingTimeInterval(70))
+    expect(progress.skipped == [2] && !progress.waiting && progress.line.isEmpty,
+           "reused steps are skipped and the next stage clears old output and waiting")
+    progress.move(to: 2, at: start.addingTimeInterval(80))
+    expect(progress.stage == 3, "stages never move backward")
+    expect(UpdateProgress.lastLine(Data("\u{1B}[31mfirst\nlast\u{1B}[0m\n".utf8)) == "last",
+           "the latest output strips terminal colors")
+    expect(UpdateProgress.lastLine(Data("\n \n".utf8)) == nil, "blank output has no line")
 }

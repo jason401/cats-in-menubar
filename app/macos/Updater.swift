@@ -30,8 +30,10 @@ final class Updater: ObservableObject {
     var installed: Bool { Bundle.main.bundleURL.standardizedFileURL == Self.target.standardizedFileURL }
     /// True while the installer helper prepares the swap; channel and Update Now wait for it.
     @Published private(set) var installing = false
+    @Published private(set) var progress: UpdateProgress?
     private var updates: URL { Self.support.appendingPathComponent("updates") }
     private var staged: URL { root.appendingPathComponent("build/Cats in Menubar.app") }
+    private var testedRevision: URL { root.appendingPathComponent("build/tested-revision") }
     private var stateFile: URL { Self.support.appendingPathComponent("update.json") }
     private let work = DispatchQueue(label: "updater")
     private var timer: Timer?
@@ -65,6 +67,7 @@ final class Updater: ObservableObject {
     /// Switches between Stable and Beta, then looks right away. What the other channel found no longer applies.
     func setChannel(_ name: String) {
         guard UpdateChannel.all.contains(name), name != channel else { return }
+        progress = nil
         channel = name
         UserDefaults.standard.set(name, forKey: UpdateChannel.key)
         setAvailable(nil)
@@ -78,6 +81,7 @@ final class Updater: ObservableObject {
     /// Looks for a new version on the chosen channel. Changes nothing on this Mac's app.
     func check() {
         guard installed, !checking, !installing else { return }
+        progress = nil
         checking = true
         let branch = channel
         report(["status": "checking"], save: false)
@@ -106,26 +110,34 @@ final class Updater: ObservableObject {
     func install() {
         guard installed, !checking, !installing else { return }
         let branch = channel
+        progress = UpdateProgress(estimates: UpdateProgress.saved)
         if isBusy() {
+            progress?.waiting = true
             report(["status": "waiting", "current": revision])
             return schedule(after: Self.retry) { if $0.channel == branch { $0.install() } }
         }
         checking = true
         report(["status": "checking"], save: false)
         work.async {
-            defer { DispatchQueue.main.async { self.finished(branch) } }
+            defer { DispatchQueue.main.async { self.settle(); self.finished(branch) } }
             do {
                 try self.withSource(branch) { step in
                     // A build made earlier for this version is reused.
                     let ready = (try? self.git("rev-parse", "HEAD")) == step.new && !step.switching
+                        && (try? String(contentsOf: self.testedRevision, encoding: .utf8)) == step.new
                         && (NSDictionary(contentsOf: self.staged.appendingPathComponent("Contents/Info.plist"))?["CatsSourceRevision"] as? String) == step.new
                     if !ready {
                         do {
+                            try? FileManager.default.removeItem(at: self.testedRevision)
                             try step.advance(self.gitStep)
                             self.report(["status": "building", "current": self.revision, "next": step.new], save: false)
-                            // test.sh builds the app into build/ and runs the full self-test.
+                            self.update { $0.move(to: 1) }
                             defer { self.dropCompilerCache() }
-                            try self.shell(["zsh", "tools/test.sh"], timeout: 30 * 60, step: "build and test")
+                            try self.shell(["zsh", "tools/build_app.sh"], timeout: 30 * 60, step: "build")
+                            self.report(["status": "testing", "current": self.revision, "next": step.new], save: false)
+                            self.update { $0.move(to: 2) }
+                            try self.shell(["zsh", "tools/test.sh", "--skip-build"], timeout: 30 * 60, step: "tests")
+                            try step.new.write(to: self.testedRevision, atomically: true, encoding: .utf8)
                         } catch {
                             // Only this private, clean checkout can be reset; never a developer folder.
                             step.restore(self.gitStep)
@@ -140,6 +152,17 @@ final class Updater: ObservableObject {
                 if self.still(branch) { self.report(["status": "failed", "current": self.revision, "detail": String(describing: error)]) }
             }
         }
+    }
+
+    /// All UI progress mutations stay on the main thread.
+    private func update(_ change: @escaping (inout UpdateProgress) -> Void) {
+        if Thread.isMainThread {
+            if progress != nil { change(&progress!) }
+        } else { DispatchQueue.main.async { self.update(change) } }
+    }
+
+    private func settle() {
+        if let current = progress, !current.failed, !current.waiting, !installing { progress = nil }
     }
 
     /// One-time move of a development build into /Applications, asked for explicitly (`--install-self`).
@@ -218,6 +241,7 @@ final class Updater: ObservableObject {
                 return
             }
             do {
+                self.update { $0.move(to: 3) }
                 try FileManager.default.createDirectory(at: self.updates, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
                 let token = UUID().uuidString
                 let process = Process()
@@ -274,6 +298,8 @@ final class Updater: ObservableObject {
                         return
                     }
                 }
+                self.update { $0.move(to: 4) }
+                if let progress = self.progress { UpdateProgress.remember(progress) }
                 NSApp.terminate(nil)
             } else if !process.isRunning || Date() > deadline {
                 if process.isRunning { process.terminate() }
@@ -325,7 +351,7 @@ final class Updater: ObservableObject {
     }
 
     private func shell(_ arguments: [String], timeout: TimeInterval, step: String) throws {
-        _ = try execute(["/usr/bin/env"] + arguments, timeout: timeout, step: step)
+        _ = try execute(["/usr/bin/env"] + arguments, timeout: timeout, step: step, live: true)
     }
 
     private static func cleanEnvironment() -> [String: String] {
@@ -337,7 +363,7 @@ final class Updater: ObservableObject {
         return env
     }
 
-    private func execute(_ command: [String], timeout: TimeInterval, step: String, directory: URL? = nil) throws -> String {
+    private func execute(_ command: [String], timeout: TimeInterval, step: String, directory: URL? = nil, live: Bool = false) throws -> String {
         let process = Process(), out = Pipe()
         process.executableURL = URL(fileURLWithPath: command[0])
         process.arguments = Array(command.dropFirst())
@@ -349,7 +375,18 @@ final class Updater: ObservableObject {
         try process.run()
         var data = Data()
         let reader = DispatchQueue(label: "updater-read"), done = DispatchSemaphore(value: 0)
-        reader.async { data = out.fileHandleForReading.readDataToEndOfFile(); done.signal() }
+        reader.async {
+            while true {
+                let chunk = out.fileHandleForReading.availableData
+                if chunk.isEmpty { break }
+                data.append(chunk)
+                if live {
+                    if data.count > 65_536 { data = Data(data.suffix(65_536)) }
+                    if let line = UpdateProgress.lastLine(data) { self.update { $0.show(line) } }
+                }
+            }
+            done.signal()
+        }
         if done.wait(timeout: .now() + timeout) == .timedOut {
             process.terminate()
             process.waitUntilExit()
@@ -382,7 +419,13 @@ final class Updater: ObservableObject {
         }
         let text = Self.describe(state)
         AppModel.log("Update: \(text)")
-        DispatchQueue.main.async { self.status = text }
+        let publish = {
+            self.status = text
+            if state["status"] == "failed" { self.progress?.failed = true }
+            if state["status"] == "waiting" { self.progress?.waiting = true }
+            if state["status"] == "channel-changed" { self.progress = nil }
+        }
+        if Thread.isMainThread { publish() } else { DispatchQueue.main.async(execute: publish) }
     }
 
     static func describe(_ s: [String: String]) -> String {
@@ -395,7 +438,8 @@ final class Updater: ObservableObject {
         }()
         switch s["status"] ?? "" {
         case "checking": return "Checking for a new version…"
-        case "building": return "Testing and building \(short(s["next"]))…"
+        case "testing": return "Testing \(short(s["next"]))…"
+        case "building": return "Building \(short(s["next"]))…"
         case "installing": return "Installing \(short(s["next"]))…"
         case "available": return "New version \(short(s["next"])) is available. Click Update Now to install." + when
         case "waiting": return "Updating after you put the cat down."
@@ -479,5 +523,81 @@ struct ChannelStep {
     func restore(_ git: Git) {
         if switching { _ = try? git(["checkout", "-q", "--force", "-B", head, old], 60) }
         else { _ = try? git(["reset", "-q", "--hard", old], 60) }
+    }
+}
+
+/// Actual update order: fetch, build, test, prepare, restart.
+struct UpdateProgress: Equatable {
+    static let names = ["Fetch", "Build", "Test", "Prepare", "Restart"]
+    static let count = names.count
+    static let key = "updateStepSeconds"
+    var stage = 0
+    var started: Date, stageStarted: Date, lineAt: Date
+    var line = ""
+    var waiting = false, failed = false
+    var skipped: Set<Int> = []
+    var seconds: [Int: TimeInterval] = [:]
+    var estimates: [Int: TimeInterval]
+    init(estimates: [Int: TimeInterval] = [:], at now: Date = Date()) {
+        self.estimates = estimates
+        started = now; stageStarted = now; lineAt = now
+    }
+    mutating func move(to next: Int, at now: Date = Date()) {
+        guard next > stage, next < Self.count else { return }
+        seconds[stage] = max(0, now.timeIntervalSince(stageStarted))
+        for step in stage + 1..<next { skipped.insert(step) }
+        stage = next; stageStarted = now; lineAt = now; line = ""; waiting = false
+    }
+    mutating func show(_ text: String, at now: Date = Date()) { line = text; lineAt = now }
+    func remaining(at now: Date) -> TimeInterval? {
+        var left: TimeInterval = 0
+        for step in stage..<Self.count - 1 where !skipped.contains(step) {
+            guard let last = estimates[step] else { return nil }
+            left += step == stage ? max(0, last - now.timeIntervalSince(stageStarted)) : last
+        }
+        return left
+    }
+    func fraction(at now: Date) -> Double? {
+        if failed || waiting { return 1 }
+        guard let last = estimates[stage], last > 0 else { return nil }
+        return min(0.95, max(0.05, now.timeIntervalSince(stageStarted) / last))
+    }
+    func quiet(at now: Date) -> TimeInterval? {
+        guard (1...2).contains(stage), !waiting, !failed else { return nil }
+        let silent = now.timeIntervalSince(lineAt)
+        return silent >= 30 ? silent : nil
+    }
+    func summary(at now: Date) -> String {
+        let prefix = "\(stage + 1)/\(Self.count) "
+        if failed { return prefix + "Stopped at \(Self.names[stage])" }
+        if waiting { return prefix + "Waiting until you put the cat down" }
+        let doing = ["Fetching", "Building", "Testing", "Preparing", "Restarting"][stage]
+        var text = prefix + doing + " · \(Self.duration(now.timeIntervalSince(started))) elapsed"
+        if let left = remaining(at: now), stage < Self.count - 1 {
+            text += left < 60 ? " · under a minute left" : " · about \(Int(ceil(left / 60))) min left"
+        }
+        return text
+    }
+    static func duration(_ seconds: TimeInterval) -> String {
+        let total = max(0, Int(seconds))
+        return total < 60 ? "\(total)s" : "\(total / 60)m \(total % 60)s"
+    }
+    static func lastLine(_ data: Data) -> String? {
+        let text = String(decoding: data, as: UTF8.self)
+            .replacingOccurrences(of: "\u{1B}\\[[0-9;]*[A-Za-z]", with: "", options: .regularExpression)
+        return text.split(whereSeparator: \.isNewline).map { $0.trimmingCharacters(in: .whitespaces) }
+            .last(where: { !$0.isEmpty }).map { String($0.prefix(160)) }
+    }
+    static var saved: [Int: TimeInterval] {
+        let stored = UserDefaults.standard.dictionary(forKey: key) as? [String: Double] ?? [:]
+        return Dictionary(uniqueKeysWithValues: stored.compactMap { name, value in
+            guard let step = Int(name), (0..<count).contains(step), value.isFinite, value > 0 else { return nil }
+            return (step, value)
+        })
+    }
+    static func remember(_ progress: UpdateProgress) {
+        var times = progress.estimates
+        for (step, value) in progress.seconds where !progress.skipped.contains(step) { times[step] = value }
+        UserDefaults.standard.set(Dictionary(uniqueKeysWithValues: times.map { (String($0.key), $0.value) }), forKey: key)
     }
 }
