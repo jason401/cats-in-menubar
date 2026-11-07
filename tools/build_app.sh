@@ -24,8 +24,9 @@ iconutil -c icns "$STAGING/AppIcon.iconset" -o "$APP/Contents/Resources/AppIcon.
 cp tools/install_app.py "$APP/Contents/Resources/"
 # Third-party notices travel with the app (Apache-2.0 requires the NOTICE and license with the work).
 cp THIRD_PARTY_NOTICES.md LICENSES/Apache-2.0.txt "$APP/Contents/Resources/"
-# The built commit is how the updater compares this app with the stable branch.
+# The built commit is how the updater compares this app with its update channel (stable, or main for beta).
 REVISION=$(git rev-parse HEAD)
+CHANNEL=$(git rev-parse --abbrev-ref HEAD)
 BUILD=$(git rev-list --count HEAD)
 cat > "$APP/Contents/Info.plist" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>
@@ -37,9 +38,10 @@ cat > "$APP/Contents/Info.plist" <<PLIST
 <key>CFBundleName</key><string>Cats in Menubar</string>
 <key>CFBundleDisplayName</key><string>Cats in Menubar</string>
 <key>CFBundlePackageType</key><string>APPL</string>
-<key>CFBundleShortVersionString</key><string>0.1.0</string>
+<key>CFBundleShortVersionString</key><string>0.2.0</string>
 <key>CFBundleVersion</key><string>$BUILD</string>
 <key>CatsSourceRevision</key><string>$REVISION</string>
+<key>CatsSourceChannel</key><string>$CHANNEL</string>
 <key>LSMinimumSystemVersion</key><string>14.0</string>
 <key>LSUIElement</key><true/>
 <key>NSHighResolutionCapable</key><true/>

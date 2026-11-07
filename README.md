@@ -58,7 +58,7 @@ See [Apple's instructions for opening apps safely](https://support.apple.com/en-
 
 **Prebuilt ZIP:** use manual updates from Releases. Turn off automatic update checks in Settings → General → Updates. Quit the app and replace it with the next downloaded app. macOS may ask you to grant Accessibility again.
 
-**Source build:** the installed app can check this repository's `stable` branch and build updates locally after you click **Update Now**. Apple's Command Line Tools and the same persistent local signing identity must remain available. Checks are enabled by default and can be disabled in Settings.
+**Source build:** the installed app can check this repository's `stable` branch (or `main`, with **Settings → General → Updates → Channel → Beta**) and build updates locally after you click **Update Now**. Beta gets new changes first and may be broken; going back to Stable updates once `stable` catches up with the version you run. Apple's Command Line Tools and the same persistent local signing identity must remain available. Checks are enabled by default and can be disabled in Settings.
 
 These are different paths: the existing updater pins the running app's signing identity. A prebuilt app signed on the publisher's Mac cannot be replaced through that updater by a build signed with a different key on your Mac. This release preparation does not change the updater or weaken that check. A GitHub Release does not automatically change `stable`.
 

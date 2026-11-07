@@ -646,7 +646,8 @@ struct GeneralTab: View {
 private var version: String {
     let short = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "–"
     let revision = (Bundle.main.object(forInfoDictionaryKey: "CatsSourceRevision") as? String ?? "").prefix(7)
-    return revision.isEmpty ? short : "\(short) (\(revision))"
+    let name = UpdateChannel.built == "main" ? short + " Beta" : short   // built from main, not stable
+    return revision.isEmpty ? name : "\(name) (\(revision))"
 }
 
 // App storage locations, opened in Finder from Settings.
@@ -669,7 +670,14 @@ struct UpdatesCard: View {
         SettingsCard(title: "Updates") {
             if updater.installed {
                 SettingsRow(title: "Check automatically") {
-                    SettingsSwitch(title: "Check automatically", isOn: $updater.enabled).help("Checks the stable branch 60 seconds after launch and every 3 hours. Never installs on its own.")
+                    SettingsSwitch(title: "Check automatically", isOn: $updater.enabled).help("Checks the chosen channel 60 seconds after launch and every 3 hours. Never installs on its own.")
+                }
+                Divider()
+                SettingsRow(title: "Channel") {
+                    SettingsMenu(options: [("Stable", "stable"), ("Beta (main, for testing)", "main")],
+                                 selection: Binding(get: { updater.channel }, set: { updater.setChannel($0) }))
+                        .disabled(updater.checking)
+                        .help("Stable gets versions that were published after testing. Beta follows main, where new changes arrive first; it may be broken. Going back to Stable updates once stable catches up with the version you run.")
                 }
                 Divider()
                 SettingsRow(title: "New version") {
@@ -681,8 +689,12 @@ struct UpdatesCard: View {
                 }
             }
             if !updater.installed {
-                SettingsNote(text: "This development copy does not update. The copy in /Applications checks the stable branch.")
-            } else if !updater.status.isEmpty { SettingsNote(text: updater.status) }
+                SettingsNote(text: "This development copy does not update. The copy in /Applications checks the chosen channel (Stable or Beta).")
+            } else {
+                let beta = updater.channel == "main" ? "Beta: changes may not be tested yet." : ""
+                let note = [beta, updater.status].filter { !$0.isEmpty }.joined(separator: "\n")
+                if !note.isEmpty { SettingsNote(text: note) }
+            }
         }
     }
 }
