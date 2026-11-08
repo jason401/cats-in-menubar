@@ -165,6 +165,8 @@ final class Colony {
     static let swapSpacing = 120.0
     private var recentCoats: [Int] = []
     var swapped: (() -> Void)?  // a cat came back out as another one
+    var shuffling = false   // everyone is going into the tower to come back out as new cats
+    var shuffled: (() -> Void)? // everyone is in and wears a new look
     static let hopTime = 0.55
     static let turnTime = 0.36  // four turn-around frames at 0.09 s
     var random: () -> Double
@@ -180,6 +182,8 @@ final class Colony {
             let coat = unused[min(unused.count - 1, Int(random() * Double(unused.count)))]
             let size = CatSize.allCases[min(2, Int(random() * 3))]
             cats.append(Cat(x: -100, destination: -100, stay: nextStay(), remaining: 2 + random() * 8, coat: coat, size: size))
+            // Added mid-shuffle: it waits inside with the others.
+            if shuffling { cats[cats.count - 1].home = true; cats[cats.count - 1].homeBound = true }
         }
         reconcile()
     }
@@ -232,11 +236,22 @@ final class Colony {
         for i in cats.indices where appearances.indices.contains(i) { cats[i].appearance = appearances[i] }
         reconcile()
     }
-    func shuffle() {
-        var unused = Array(0..<8)
+    /// New, distinct coats and sizes for everyone, avoiding the coats worn now where there are enough.
+    func reroll() {
+        let worn = Set(cats.map(\.coat))
+        let fresh = (0..<8).filter { !worn.contains($0) }
+        var unused = fresh.count >= cats.count ? fresh : Array(0..<8)
         for i in cats.indices {
             cats[i].coat = unused.remove(at: min(unused.count - 1, Int(random() * Double(unused.count))))
             cats[i].size = CatSize.allCases[min(2, Int(random() * 3))]
+        }
+        recentCoats = Array(worn.prefix(3))
+    }
+    /// New cats at once, anywhere in the free space (paused, or the tower cannot be reached).
+    func shuffle() {
+        shuffling = false
+        reroll()
+        for i in cats.indices {
             cats[i].home = false; cats[i].homeBound = false; cats[i].swapping = false; cats[i].visible = false
             cats[i].x = -100; cats[i].velocity = 0; cats[i].escaping = false; cats[i].inTunnel = false
             start(i, .sitting, for: 2)
@@ -384,6 +399,14 @@ final class Colony {
     }
     private func advance(_ dt: Double) {
         if quiet { ball = nil }
+        if shuffling {
+            // A cat out of sight (no free space) goes straight in.
+            for i in cats.indices where !cats[i].home && !cats[i].visible {
+                cats[i].home = true; cats[i].inTunnel = false; cats[i].escaping = false; cats[i].velocity = 0
+                start(i, .sitting, for: 2)
+            }
+            if cats.allSatisfy(\.home) { shuffling = false; reroll(); shuffled?() }
+        }
         if rotation != nil && onStage && !quiet { swapGap = max(0, swapGap - dt) }
         if var toy = ball, toy.kind == .laser {
             // The pointer moves the dot; it stays lit while pressed and fades just after release.
@@ -579,6 +602,11 @@ final class Colony {
         cats[i].x = spot; cats[i].destination = spot; cats[i].velocity = 0; cats[i].swing = 0
         if cats[i].homeBound { start(i, .goingHome, for: .infinity) } else { start(i, .grooming, for: 2 + random() * 2) }
     }
+    /// Everyone goes into the tower; once all are in they change there and `shuffled` is called.
+    func beginShuffle(at x: Double) {
+        callHome(at: x)
+        shuffling = true
+    }
     // MARK: Cat tower
     var homeCount: Int { cats.filter(\.home).count }
     var anyHomeBound: Bool { cats.contains { $0.homeBound || $0.home } }
@@ -618,9 +646,11 @@ final class Colony {
         }
     }
     /// Cats hop back out of the tower, a moment apart.
-    func letOut(at x: Double) {
+    func letOut(at x: Double, after delay: Double = 0) {
+        // Mid-shuffle nobody comes out until everyone is in and changed.
+        guard !shuffling else { return }
         homeX = x
-        var order = 0.0
+        var order = delay
         for i in cats.indices {
             cats[i].homeBound = false
             if cats[i].home { cats[i].outDelay = order; order += 0.7 }

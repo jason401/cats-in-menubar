@@ -844,7 +844,7 @@ struct CatsTab: View {
                                     var appearance = model.lineup[i]; appearance.size = value; model.configureCat?(i, appearance)
                                 }))
                                 .frame(width: 91).accessibilityLabel("Cat \(i + 1) size")
-                        }
+                        }.disabled(model.shuffling)
                     }.padding(.horizontal, 10).padding(.vertical, 5)
                 }
                 Divider()
@@ -852,7 +852,10 @@ struct CatsTab: View {
                     SettingsSwitch(title: "Keep my cats at launch", isOn: Binding(get: { model.keepLineup }, set: { model.rememberCats?($0) }))
                 }
                 SettingsNote(text: "Off: new colors and sizes each launch. On: keep this lineup. Positions are always random.")
-                SettingsRow(title: "New lineup") { SettingsAction(title: "Shuffle cats") { model.shuffleCats?() } }
+                SettingsRow(title: "New lineup") {
+                    SettingsAction(title: model.shuffling ? "Shuffling…" : "Shuffle cats") { model.shuffleCats?() }.disabled(model.shuffling)
+                        .help("Everyone goes into the tower and comes back out as new cats.")
+                }
                 Divider()
                 SettingsRow(title: "Take turns") {
                     SettingsSwitch(title: "Take turns", isOn: $rotate)

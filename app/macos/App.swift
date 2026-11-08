@@ -6,6 +6,7 @@ final class AppModel: ObservableObject {
     @Published var status = "Checking menu layout…" { didSet { if status != oldValue { AppModel.log(status) } } }
     @Published var catSummary = "Looking for empty space…"
     @Published var catsAway = false     // called into the cat tower
+    @Published var shuffling = false    // all going in to come back out as new cats
     @Published var displays: [DisplayInfo] = []
     @Published var moveStatus: String?  // "Moving to …" while the cats walk home to change screens
     @Published var shownDisplay = ""    // the display the cats are on now
@@ -87,6 +88,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         model.rememberCats = { [weak self] enabled in self?.rememberCats(enabled) }
         model.keepCurrent = { [weak self] in self?.keepCurrent() }
         colony.swapped = { [weak self] in self?.syncLineup() }
+        colony.shuffled = { [weak self] in self?.shuffleDone() }
         system.updated = { [weak self] stats in self?.systemUpdated(stats) }
         NotificationCenter.default.addObserver(self, selector: #selector(preferencesChanged), name: UserDefaults.didChangeNotification, object: nil)
         applyOptions()
@@ -196,14 +198,29 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         defaults.set(false, forKey: Pref.rotate); colony.rotation = nil
         rememberCats(true)
     }
+    /// Everyone goes into the tower and comes back out, one by one, as new cats.
     func shuffleCats() {
+        guard !model.shuffling else { return }
         habitatView?.endDrag()
-        colony.shuffle()
         model.catsAway = false
         defaults.set(false, forKey: "catsHome")
         defaults.set(false, forKey: Pref.fixedLineup)
+        // Paused or asleep nobody can walk: new cats at once.
+        if paused || suspended || (colony.homeX ?? towerX) == nil {
+            colony.shuffle()
+        } else {
+            model.shuffling = true
+            colony.beginShuffle(at: colony.homeX ?? towerX!)
+        }
         syncLineup()
         habitatView?.needsDisplay = true
+    }
+    private func shuffleDone() {
+        model.shuffling = false
+        syncLineup()
+        // Changing screens, or the menu bar is hidden: they come out wherever they show up next.
+        guard moveTarget == nil, !barHidden, !pendingLetOut, let x = colony.homeX ?? towerX else { return }
+        colony.letOut(at: x, after: 1.5)
     }
     func systemUpdated(_ stats: SystemStats) {
         // Plenty of CPU headroom: lively, smooth cats. Busy, hot or Low Power Mode: they rest and the app slows down.
@@ -290,6 +307,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
     func toggleHome() {
         guard let x = towerX else { return }
+        // Called home mid-shuffle: everyone stays in as they are.
+        if model.shuffling { colony.shuffling = false; model.shuffling = false }
         if model.catsAway { colony.letOut(at: x) } else { habitatView?.endDrag(); colony.callHome(at: x) }
         model.catsAway.toggle()
         defaults.set(model.catsAway, forKey: "catsHome")

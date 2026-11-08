@@ -670,6 +670,51 @@ func runSelfTests() {
         for _ in 0..<(30 * 20) { inside.step(1.0 / 30) }
         expect(!inside.cats[0].home && inside.cats[0].appearance == look, "turned off while inside: the same cat comes back out")
     }
+    // Shuffling: everyone goes in first, changes inside, then comes back out one by one.
+    do {
+        var seed: UInt64 = 11
+        let mix = Colony(count: 3, random: { seed = seed &* 6364136223846793005 &+ 1442695040888963407; return Double(seed >> 11) / Double(1 << 53) })
+        mix.updateLanes([Lane(lower: 0, upper: 900)])
+        mix.homeX = 1000
+        for i in mix.cats.indices { mix.cats[i].x = 100 + Double(i) * 250; mix.cats[i].destination = mix.cats[i].x; mix.cats[i].visible = true; mix.cats[i].hiddenFor = 0 }
+        let before = mix.cats.map(\.coat)
+        var done = 0
+        mix.shuffled = { done += 1; mix.letOut(at: 1000, after: 1.5) }
+        mix.beginShuffle(at: 1000)
+        var changedOutside = false, steps = 0
+        while done == 0 && steps < 30 * 60 {
+            mix.step(1.0 / 30); steps += 1
+            if mix.cats.indices.contains(where: { !mix.cats[$0].home && mix.cats[$0].coat != before[$0] }) { changedOutside = true }
+            if done == 0 { mix.letOut(at: 1000) }   // a letting-out mid-shuffle (menu bar back, screen moved) waits for it
+        }
+        expect(done == 1 && mix.cats.allSatisfy(\.home) && !changedOutside, "shuffle: nobody changes until everyone is in: \(steps) steps")
+        let after = mix.cats.map(\.coat)
+        expect(Set(after).count == 3 && Set(after).isDisjoint(with: before), "shuffle: new coats, all different: \(before) -> \(after)")
+        var outAt: [Int] = []
+        for step in 0..<300 {
+            mix.step(1.0 / 30)
+            let out = mix.cats.filter { !$0.home }.count
+            if out > outAt.count { outAt.append(step) }
+        }
+        expect(outAt.count == 3 && outAt[0] >= 40 && outAt[0] < outAt[1] && outAt[1] < outAt[2], "shuffle: a short wait, then out one at a time: \(outAt)")
+        expect(mix.cats.allSatisfy { $0.visible && mix.lanes[0].contains($0.x, margin: $0.radius) }, "shuffle: everyone ends up in the free space")
+        // Called home mid-shuffle: everyone stays in, as they were.
+        mix.beginShuffle(at: 1000)
+        for _ in 0..<15 { mix.step(1.0 / 30) }
+        mix.shuffling = false; mix.callHome(at: 1000)
+        for _ in 0..<(30 * 40) { mix.step(1.0 / 30) }
+        expect(done == 1 && mix.cats.allSatisfy(\.home) && mix.cats.map(\.coat) == after, "shuffle cancelled by calling home: nobody comes out or changes")
+        // A cat added mid-shuffle, or one with no free space, still lets it finish.
+        let small = Colony(count: 2, random: { 0.5 })
+        small.updateLanes([Lane(lower: 0, upper: 900)]); small.homeX = 1000
+        var finished = false
+        small.shuffled = { finished = true }
+        small.beginShuffle(at: 1000)
+        small.setCount(3)
+        small.updateLanes([])
+        for _ in 0..<30 { small.step(1.0 / 30) }
+        expect(finished && small.cats.count == 3 && Set(small.cats.map(\.coat)).count == 3, "shuffle finishes with a cat added and no free space")
+    }
     // Speed test: reads networkQuality's JSON (bits per second, RPM, milliseconds).
     let sample = #"{"dl_throughput": 641066112, "ul_throughput": 255409168, "responsiveness": 767.66, "base_rtt": 22.04, "interface_name": "en0"}"#
     let measured = SpeedTest.parse(Data(sample.utf8), date: Date(timeIntervalSince1970: 0))
