@@ -217,6 +217,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
     private func shuffleDone() {
         model.shuffling = false
+        // "Keep my cats" turned on mid-shuffle keeps the new cats, not the ones that went in.
+        if defaults.bool(forKey: Pref.fixedLineup) { saveLineup() }
         syncLineup()
         // Changing screens, or the menu bar is hidden: they come out wherever they show up next.
         guard moveTarget == nil, !barHidden, !pendingLetOut, let x = colony.homeX ?? towerX else { return }
