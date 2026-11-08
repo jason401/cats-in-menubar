@@ -6,6 +6,7 @@ import SwiftUI
 enum Pref {
     static let count = "catCount", paused = "paused", quiet = "quiet"
     static let fixedLineup = "useCustomLineup", lineup = "catLineup"
+    static let rotate = "rotateCats", rotatePace = "rotatePace"   // pace: 0 often, 1 normal, 2 now and then
     static let activity = "activity", adaptivePower = "adaptivePower", allowDrag = "allowDrag"
     static let nightQuiet = "nightQuiet", nightFrom = "nightFrom", nightTo = "nightTo"
     static let interval = "monitorInterval", topApps = "topApps"
@@ -15,7 +16,7 @@ enum Pref {
     static let display = "catDisplay", displayName = "catDisplayName"   // "" = the main display
     static let showCPU = "showCPU", showMemory = "showMemory", showDisk = "showDisk", showBattery = "showBattery", showNetwork = "showNetwork"
     static let defaults: [String: Any] = [
-        count: 3, fixedLineup: false, paused: false, quiet: false, activity: 1, adaptivePower: true, allowDrag: true,
+        count: 3, fixedLineup: false, rotate: false, rotatePace: 1, paused: false, quiet: false, activity: 1, adaptivePower: true, allowDrag: true,
         nightQuiet: false, nightFrom: 23, nightTo: 7, interval: 2.0, topApps: 2, toyColor: -1, laser: true, scrollReverse: false, display: "",
         showCPU: true, showMemory: true, showDisk: true, showBattery: true, showNetwork: true,
     ]
@@ -775,6 +776,8 @@ struct CatsTab: View {
     }
     @ObservedObject var model: AppModel
     @AppStorage(Pref.count) private var count = 3
+    @AppStorage(Pref.rotate) private var rotate = false
+    @AppStorage(Pref.rotatePace) private var rotatePace = 1
     @AppStorage(Pref.paused) private var paused = false
     @AppStorage(Pref.allowDrag) private var allowDrag = true
     @AppStorage(Pref.laser) private var laser = true
@@ -850,6 +853,22 @@ struct CatsTab: View {
                 }
                 SettingsNote(text: "Off: new colors and sizes each launch. On: keep this lineup. Positions are always random.")
                 SettingsRow(title: "New lineup") { SettingsAction(title: "Shuffle cats") { model.shuffleCats?() } }
+                Divider()
+                SettingsRow(title: "Take turns") {
+                    SettingsSwitch(title: "Take turns", isOn: $rotate)
+                        .help("Now and then one cat goes into the tower and a different cat comes out.")
+                }
+                if rotate {
+                    Divider()
+                    SettingsRow(title: "How often") {
+                        SettingsSegments(options: [("Often", 0), ("Normal", 1), ("Rarely", 2)], selection: $rotatePace)
+                    }
+                    Divider()
+                    SettingsRow(title: "This lineup") { SettingsAction(title: "Keep these cats") { model.keepCurrent?() } }
+                }
+                SettingsNote(text: rotate
+                    ? "One cat at a time swaps, never while you play with it. Changing a cat above stops taking turns."
+                    : "Off: the same cats stay out.")
             }
             SettingsCard(title: "Behavior") {
                 SettingsRow(title: "Activity") { SettingsSegments(options: [("Calm", 0), ("Normal", 1), ("Playful", 2)], selection: $activity) }

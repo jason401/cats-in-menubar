@@ -596,6 +596,58 @@ func runSelfTests() {
         expect(outAt.count == 3 && outAt[0] < outAt[1] && outAt[1] < outAt[2], "launch: cats come out one at a time: \(outAt)")
         expect(launch.cats.allSatisfy { $0.visible && launch.lanes[0].contains($0.x, margin: $0.radius) }, "launch: everyone ends up in the free space")
     }
+    // Taking turns: one cat at a time goes into the tower and a different-looking cat comes out.
+    do {
+        var seed: UInt64 = 7
+        let turns = Colony(count: 3, random: { seed = seed &* 6364136223846793005 &+ 1442695040888963407; return Double(seed >> 11) / Double(1 << 53) })
+        turns.updateLanes([Lane(lower: 0, upper: 900)])
+        turns.homeX = 1000
+        for i in turns.cats.indices { turns.cats[i].x = 100 + Double(i) * 250; turns.cats[i].destination = turns.cats[i].x; turns.cats[i].visible = true; turns.cats[i].hiddenFor = 0 }
+        turns.rotation = 5...6
+        var swaps = 0
+        turns.swapped = { swaps += 1 }
+        let before = turns.cats.map(\.coat)
+        var mostSwapping = 0, othersPlayable = false, overlap = false
+        for _ in 0..<(30 * 60) {
+            turns.step(1.0 / 30)
+            mostSwapping = max(mostSwapping, turns.cats.filter(\.swapping).count)
+            if turns.cats.contains(where: { $0.swapping && !$0.home }) && !turns.walkingHome { othersPlayable = true }
+            let worn = turns.cats.map(\.coat)
+            if Set(worn).count != worn.count { overlap = true }
+        }
+        expect(swaps == 1 && mostSwapping == 1, "one cat swaps at a time, then a gap: \(swaps) swaps")
+        expect(othersPlayable, "the other cats still play while one walks in to swap")
+        expect(!overlap && turns.cats.map(\.coat) != before, "the new cat wears a coat nobody else has: \(before) -> \(turns.cats.map(\.coat))")
+        expect(turns.cats.allSatisfy { !$0.home && $0.visible }, "everyone is back out after the swap")
+        // Held or out of sight: no time passes toward a turn.
+        turns.swapGap = 0
+        for i in turns.cats.indices { turns.cats[i].stay = 1 }
+        turns.grab(0); turns.onStage = false
+        for _ in 0..<120 { turns.step(1.0 / 30) }
+        expect(turns.cats.allSatisfy { !$0.swapping && $0.stay == 1 }, "no turns while the cats are out of sight")
+        turns.onStage = true
+        for _ in 0..<(30 * 30) { turns.step(1.0 / 30) }
+        expect(turns.cats[0].action == .held && !turns.cats[0].swapping, "a held cat is never taken away")
+        turns.release(0)
+        // Called home while one waits inside to swap: nobody comes back out.
+        var guard_ = 0
+        while !turns.cats.contains(where: { $0.swapping && $0.home }) && guard_ < 30 * 120 { turns.step(1.0 / 30); guard_ += 1 }
+        expect(turns.cats.contains { $0.swapping && $0.home }, "a cat goes in to swap")
+        turns.callHome(at: 1000)
+        for _ in 0..<(30 * 40) { turns.step(1.0 / 30) }
+        expect(turns.cats.allSatisfy(\.home), "calling everyone home keeps the swapping cat inside too")
+        // Turned off on the way in: it carries on as itself.
+        turns.letOut(at: 1000)
+        for _ in 0..<(30 * 10) { turns.step(1.0 / 30) }
+        turns.swapGap = 0; turns.ball = nil
+        for i in turns.cats.indices { turns.cats[i].stay = 0; turns.cats[i].remaining = 0 }
+        turns.step(1.0 / 30)
+        let walker = turns.cats.firstIndex(where: \.swapping)
+        let look = walker.map { turns.cats[$0].appearance }
+        turns.rotation = nil
+        for _ in 0..<(30 * 30) { turns.step(1.0 / 30) }
+        expect(walker != nil && turns.cats[walker!].action != .hopping && turns.cats[walker!].appearance == look && !turns.cats[walker!].swapping, "turning it off keeps the cat on its way in as it is: \(walker.map { "\(turns.cats[$0].action) \(turns.cats[$0].appearance)" } ?? "nobody") vs \(String(describing: look))")
+    }
     // Speed test: reads networkQuality's JSON (bits per second, RPM, milliseconds).
     let sample = #"{"dl_throughput": 641066112, "ul_throughput": 255409168, "responsiveness": 767.66, "base_rtt": 22.04, "interface_name": "en0"}"#
     let measured = SpeedTest.parse(Data(sample.utf8), date: Date(timeIntervalSince1970: 0))

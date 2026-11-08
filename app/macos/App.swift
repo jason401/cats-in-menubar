@@ -15,6 +15,7 @@ final class AppModel: ObservableObject {
     var configureCat: ((Int, CatAppearance) -> Void)?
     var shuffleCats: (() -> Void)?
     var rememberCats: ((Bool) -> Void)?
+    var keepCurrent: (() -> Void)?
     var home: (() -> Void)?
     @Published var access = MenuBarMonitor.trusted { didSet { if access != oldValue { AppModel.log("Accessibility: \(access)") } } }
     static let logURL = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Library/Logs/CatsInMenubar.log")
@@ -54,6 +55,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     var monitorInterval = 0.0
     var governor = PowerGovernor()
     var appliedLineup: Data?
+    var lineupLoaded = false    // with turns on, the saved lineup only sets who comes out at launch
     let defaults = UserDefaults.standard
 
     func applicationDidFinishLaunching(_ notification: Notification) {
@@ -83,6 +85,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         model.configureCat = { [weak self] i, appearance in self?.configureCat(i, appearance) }
         model.shuffleCats = { [weak self] in self?.shuffleCats() }
         model.rememberCats = { [weak self] enabled in self?.rememberCats(enabled) }
+        model.keepCurrent = { [weak self] in self?.keepCurrent() }
+        colony.swapped = { [weak self] in self?.syncLineup() }
         system.updated = { [weak self] stats in self?.systemUpdated(stats) }
         NotificationCenter.default.addObserver(self, selector: #selector(preferencesChanged), name: UserDefaults.didChangeNotification, object: nil)
         applyOptions()
@@ -129,12 +133,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let previousCount = colony.cats.count
         colony.setCount(defaults.integer(forKey: Pref.count)); colony.quiet = quietNow
         if previousCount != colony.cats.count { appliedLineup = nil }
-        if defaults.bool(forKey: Pref.fixedLineup), let data = defaults.data(forKey: Pref.lineup), data != appliedLineup,
+        let rotating = defaults.bool(forKey: Pref.rotate)
+        if defaults.bool(forKey: Pref.fixedLineup), !(rotating && lineupLoaded), let data = defaults.data(forKey: Pref.lineup), data != appliedLineup,
            let appearances = try? JSONDecoder().decode([CatAppearance].self, from: data) {
             habitatView?.endDrag()
             colony.applyAppearances(appearances)
             appliedLineup = data
         }
+        lineupLoaded = true
+        colony.rotation = rotating ? Self.rotationPaces[max(0, min(2, defaults.integer(forKey: Pref.rotatePace)))] : nil
         syncLineup()
         colony.activity = defaults.integer(forKey: Pref.activity)
         let toyColor = defaults.integer(forKey: Pref.toyColor)
@@ -148,6 +155,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         if paused { overlay?.orderOut(nil) } else { scan() }
         ScrollDirection.shared.apply()
     }
+    /// Minutes out before another cat takes a turn: often, normal, now and then.
+    static let rotationPaces: [ClosedRange<Double>] = [300...600, 900...1800, 2700...5400]
     func syncLineup() {
         let appearances = colony.cats.map(\.appearance)
         if model.lineup != appearances { model.lineup = appearances }
@@ -168,6 +177,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     func configureCat(_ index: Int, _ appearance: CatAppearance) {
         guard colony.cats.indices.contains(index) else { return }
         habitatView?.endDrag()
+        // Picking a cat by hand ends taking turns.
+        defaults.set(false, forKey: Pref.rotate); colony.rotation = nil
         colony.cats[index].appearance = appearance
         colony.reconcile()
         saveLineup()
@@ -179,6 +190,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         if enabled { saveLineup() }
         defaults.set(enabled, forKey: Pref.fixedLineup)
         syncLineup()
+    }
+    /// Stops taking turns and keeps the cats out now (and saves them for the next launch).
+    func keepCurrent() {
+        defaults.set(false, forKey: Pref.rotate); colony.rotation = nil
+        rememberCats(true)
     }
     func shuffleCats() {
         habitatView?.endDrag()
@@ -312,6 +328,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         if moveTarget != nil && colony.cats.allSatisfy(\.home) { updateDisplay(); scan() }
         // Out of sight (hidden menu bar, unplugged screen) the cats carry on as usual; only pausing stops them.
         guard !paused, !suspended else { return }
+        colony.onStage = overlay?.isVisible == true
         colony.step(dt)
         habitatView?.invalidateCats()
     }

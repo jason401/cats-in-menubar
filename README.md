@@ -10,7 +10,7 @@ Free and open source. Native Swift, AppKit and SwiftUI. macOS 14 or later.
 
 ## Features
 
-- One to three cats, eight coat choices, and kitten / young / adult sizes. Save a favorite lineup or shuffle it.
+- One to three cats, eight coat choices, and kitten / young / adult sizes. Save a favorite lineup, shuffle it, or let the cats take turns: now and then one goes into the tower and a different cat comes out.
 - Pick cats up, bring out a ball, or let them chase the laser pointer.
 - Cats use the available menu bar space, return to their tower, and can travel behind a MacBook notch.
 - Choose which display the cats live on; pause them, call them home, or set quiet hours.

@@ -83,6 +83,8 @@ struct Cat {
     var escaping = false    // covered by a menu or icon: pulled out to the nearest free space, dangling as if held
     var escapeTop = 0.0     // top speed of the current escape dash
     var homeBound = false   // called back to the cat tower
+    var swapping = false    // auto rotation: on the way in, or waiting inside, to come back out as another cat
+    var stay = 0.0          // auto rotation: seconds left outside before going in to swap
     var tunnelBound = false // walking to the notch to cross to the other side
     var inTunnel = false    // passing behind the notch, unseen in the middle
     var home = false        // inside the cat tower icon, not drawn
@@ -144,6 +146,25 @@ final class Colony {
     var activity = 1        // 0 calm, 1 normal, 2 playful
     var homeX: Double?      // overlay x of the cat tower icon
     var tunnel: Lane?       // the camera notch: nothing can be seen there, but cats may walk through it
+    /// Auto rotation: how long each cat stays out before another one takes its turn; nil = off.
+    var rotation: ClosedRange<Double>? {
+        didSet {
+            guard rotation != oldValue else { return }
+            if rotation == nil {
+                // Off: a cat still walking in to swap carries on as itself. One already hopping in or
+                // inside comes back out unchanged.
+                for i in cats.indices where cats[i].swapping && !cats[i].home && cats[i].action != .hopping {
+                    cats[i].swapping = false; cats[i].homeBound = false
+                    if cats[i].action == .goingHome { start(i, .sitting, for: 2 + random() * 3) }
+                }
+            } else { for i in cats.indices { cats[i].stay = nextStay() } }
+        }
+    }
+    var onStage = true      // the overlay is on screen; rotation time only runs while the cats can be seen
+    var swapGap = 0.0       // auto rotation: at least this long until the next cat swaps
+    static let swapSpacing = 120.0
+    private var recentCoats: [Int] = []
+    var swapped: (() -> Void)?  // a cat came back out as another one
     static let hopTime = 0.55
     static let turnTime = 0.36  // four turn-around frames at 0.09 s
     var random: () -> Double
@@ -158,7 +179,7 @@ final class Colony {
             let unused = (0..<8).filter { coat in !cats.contains { $0.coat == coat } }
             let coat = unused[min(unused.count - 1, Int(random() * Double(unused.count)))]
             let size = CatSize.allCases[min(2, Int(random() * 3))]
-            cats.append(Cat(x: -100, destination: -100, remaining: 2 + random() * 8, coat: coat, size: size))
+            cats.append(Cat(x: -100, destination: -100, stay: nextStay(), remaining: 2 + random() * 8, coat: coat, size: size))
         }
         reconcile()
     }
@@ -216,7 +237,7 @@ final class Colony {
         for i in cats.indices {
             cats[i].coat = unused.remove(at: min(unused.count - 1, Int(random() * Double(unused.count))))
             cats[i].size = CatSize.allCases[min(2, Int(random() * 3))]
-            cats[i].home = false; cats[i].homeBound = false; cats[i].visible = false
+            cats[i].home = false; cats[i].homeBound = false; cats[i].swapping = false; cats[i].visible = false
             cats[i].x = -100; cats[i].velocity = 0; cats[i].escaping = false; cats[i].inTunnel = false
             start(i, .sitting, for: 2)
         }
@@ -236,6 +257,13 @@ final class Colony {
         let r = min(0.999, max(0, random() + Double(activity - 1) * 0.12 + mood))
         if quiet { start(i, .sleeping, for: 18 + random() * 50); return }
         if previous == .pouncing { start(i, .sitting, for: 3 + random() * 4); return }
+        if wantsSwap(i) {
+            // Turn over: in through the tower, and another cat comes out.
+            cats[i].swapping = true; cats[i].homeBound = true
+            swapGap = Self.swapSpacing
+            start(i, .goingHome, for: .infinity)
+            return
+        }
         // Waking up usually comes with a good stretch.
         if (previous == .sleeping || previous == .loafing) && r < 0.65 { start(i, .stretching, for: Colony.stretchTime); return }
         let temperament = cats[i].size.temperament
@@ -282,6 +310,26 @@ final class Colony {
             cats[i].tunnelBound = true
             cats[i].destination = lane == ends.left ? lane.upper - cats[i].radius : lane.lower + cats[i].radius
         }
+    }
+    // MARK: Auto rotation
+    func nextStay() -> Double {
+        guard let rotation else { return 0 }
+        return rotation.lowerBound + random() * (rotation.upperBound - rotation.lowerBound)
+    }
+    /// Only when its time is up, nobody else is swapping, no toy is out and the cats are not all being called in.
+    private func wantsSwap(_ i: Int) -> Bool {
+        rotation != nil && onStage && !quiet && homeX != nil && ball == nil && cats[i].stay <= 0 && swapGap <= 0
+            && !cats.contains { $0.swapping || ($0.homeBound && !$0.home) }
+    }
+    /// A coat no cat is wearing now, preferring ones that have not been out lately.
+    func swapAppearance(_ i: Int) {
+        recentCoats = Array(([cats[i].coat] + recentCoats.filter { $0 != cats[i].coat }).prefix(3))
+        let free = (0..<8).filter { coat in !cats.contains { $0.coat == coat } }
+        let fresh = free.filter { !recentCoats.contains($0) }
+        let pool = fresh.isEmpty ? free : fresh
+        guard !pool.isEmpty else { return }
+        cats[i].coat = pool[min(pool.count - 1, Int(random() * Double(pool.count)))]
+        cats[i].size = CatSize.allCases[min(2, Int(random() * 3))]
     }
     /// The free spaces directly on both sides of the notch, with nothing else in between.
     func tunnelEnds() -> (left: Lane, right: Lane)? {
@@ -336,6 +384,7 @@ final class Colony {
     }
     private func advance(_ dt: Double) {
         if quiet { ball = nil }
+        if rotation != nil && onStage && !quiet { swapGap = max(0, swapGap - dt) }
         if var toy = ball, toy.kind == .laser {
             // The pointer moves the dot; it stays lit while pressed and fades just after release.
             toy.lifetime -= dt
@@ -369,6 +418,7 @@ final class Colony {
                 continue
             }
             cats[i].remaining -= dt
+            if rotation != nil && onStage && !quiet && !cats[i].homeBound { cats[i].stay -= dt }
             if quiet && !cats[i].homeBound && cats[i].action != .sleeping { start(i, .sleeping, for: 30) }
             if cats[i].remaining <= 0 { choose(i, lane: lane) }
             cats[i].turnCooldown = max(0, cats[i].turnCooldown - dt)
@@ -533,13 +583,16 @@ final class Colony {
     var homeCount: Int { cats.filter(\.home).count }
     var anyHomeBound: Bool { cats.contains { $0.homeBound || $0.home } }
     /// Someone is still on the way to the tower: no toys, laser or picking up until everyone is in.
-    var walkingHome: Bool { cats.contains { $0.homeBound && !$0.home } }
+    /// A cat going in to swap keeps only itself out of play; the others carry on.
+    var walkingHome: Bool { cats.contains { $0.homeBound && !$0.home && !$0.swapping } }
     /// Everyone runs toward the tower icon and hops in, one by one.
     func callHome(at x: Double) {
         homeX = x
         ball = nil
-        for i in cats.indices where !cats[i].home {
-            cats[i].homeBound = true
+        for i in cats.indices {
+            // A cat waiting inside to swap stays in too.
+            cats[i].homeBound = true; cats[i].swapping = false
+            if cats[i].home { continue }
             if !cats[i].visible { cats[i].home = true; continue }
             if cats[i].action != .hopping && !cats[i].inTunnel { start(i, .goingHome, for: .infinity) }
         }
@@ -547,7 +600,9 @@ final class Colony {
     /// Everyone still outside goes straight into the tower, unseen: the screen they were on went away,
     /// or nobody outside can still walk (hidden with the menu bar, or paused).
     func sendHomeNow() {
-        for i in cats.indices where !cats[i].home {
+        for i in cats.indices {
+            cats[i].swapping = false
+            if cats[i].home { cats[i].homeBound = true; continue }
             cats[i].home = true; cats[i].visible = false; cats[i].homeBound = true
             cats[i].inTunnel = false; cats[i].escaping = false; cats[i].velocity = 0
             start(i, .sitting, for: 2)
@@ -557,7 +612,7 @@ final class Colony {
     /// At launch everyone waits in the tower and hops out one by one once there is free space.
     func startInTower() {
         for i in cats.indices {
-            cats[i].home = true; cats[i].visible = false; cats[i].homeBound = false
+            cats[i].home = true; cats[i].visible = false; cats[i].homeBound = false; cats[i].swapping = false
             cats[i].outDelay = 0.6 + Double(i) * 0.7
             start(i, .sitting, for: 2)
         }
@@ -588,7 +643,15 @@ final class Colony {
         cats[i].gait += abs(cats[i].x - before)
         cats[i].destination = cats[i].x
         guard q >= 1 else { return }
-        if cats[i].hopIn { cats[i].home = true; cats[i].visible = false; start(i, .sitting, for: 2) }
+        if cats[i].hopIn {
+            cats[i].home = true; cats[i].visible = false; start(i, .sitting, for: 2)
+            if cats[i].swapping {
+                // Changed out of sight, inside the tower, then out again after a short wait.
+                if rotation != nil { swapAppearance(i) }
+                cats[i].homeBound = false
+                cats[i].outDelay = 3 + random() * 5
+            }
+        }
         else {
             // Out of the tower: trot a little way into the free space.
             start(i, .running, for: 6)
@@ -603,6 +666,8 @@ final class Colony {
         guard cats[i].outDelay <= 0 else { return }
         let spot = lanes.map { clamp(homeX, to: $0, for: i) }.min { abs($0 - homeX) < abs($1 - homeX) }!
         cats[i].home = false; cats[i].visible = true; cats[i].hiddenFor = 0; cats[i].x = homeX
+        cats[i].stay = nextStay()
+        if cats[i].swapping { cats[i].swapping = false; swapped?() }
         beginHop(i, from: homeX, to: spot, entering: false)
     }
     // Mouse handling: a held cat stays inside its own free interval and is never carried over menus or icons.
@@ -616,7 +681,7 @@ final class Colony {
     }
     func catIndex(at x: Double) -> Int? {
         guard !walkingHome else { return nil }
-        return cats.indices.filter { cats[$0].visible && cats[$0].hiddenFor <= 0 && cats[$0].action != .hopping && !cats[$0].inTunnel && abs(cats[$0].x - x) < 13 * cats[$0].size.scale }
+        return cats.indices.filter { cats[$0].visible && !cats[$0].homeBound && cats[$0].hiddenFor <= 0 && cats[$0].action != .hopping && !cats[$0].inTunnel && abs(cats[$0].x - x) < 13 * cats[$0].size.scale }
             .min { abs(cats[$0].x - x) < abs(cats[$1].x - x) }
     }
     func grab(_ i: Int) {
