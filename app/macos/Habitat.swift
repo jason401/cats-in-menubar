@@ -646,8 +646,8 @@ final class Colony {
         if cats[i].hopIn {
             cats[i].home = true; cats[i].visible = false; start(i, .sitting, for: 2)
             if cats[i].swapping {
-                // Changed out of sight, inside the tower, then out again after a short wait.
-                if rotation != nil { swapAppearance(i) }
+                // Out again after a short wait, as another cat (picked on the way out, so turning
+                // turns off meanwhile brings the same cat back).
                 cats[i].homeBound = false
                 cats[i].outDelay = 3 + random() * 5
             }
@@ -662,12 +662,16 @@ final class Colony {
     }
     private func comeOut(_ i: Int, _ dt: Double) {
         guard !cats[i].homeBound, let homeX, !lanes.isEmpty else { return }
-        cats[i].outDelay -= dt
+        // The wait inside a swap only runs while the cats can be seen and are awake.
+        if !cats[i].swapping || (onStage && !quiet) { cats[i].outDelay -= dt }
         guard cats[i].outDelay <= 0 else { return }
         let spot = lanes.map { clamp(homeX, to: $0, for: i) }.min { abs($0 - homeX) < abs($1 - homeX) }!
         cats[i].home = false; cats[i].visible = true; cats[i].hiddenFor = 0; cats[i].x = homeX
         cats[i].stay = nextStay()
-        if cats[i].swapping { cats[i].swapping = false; swapped?() }
+        if cats[i].swapping {
+            if rotation != nil { swapAppearance(i) }
+            cats[i].swapping = false; swapped?()
+        }
         beginHop(i, from: homeX, to: spot, entering: false)
     }
     // Mouse handling: a held cat stays inside its own free interval and is never carried over menus or icons.

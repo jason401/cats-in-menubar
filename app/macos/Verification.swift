@@ -648,6 +648,28 @@ func runSelfTests() {
         for _ in 0..<(30 * 30) { turns.step(1.0 / 30) }
         expect(walker != nil && turns.cats[walker!].action != .hopping && turns.cats[walker!].appearance == look && !turns.cats[walker!].swapping, "turning it off keeps the cat on its way in as it is: \(walker.map { "\(turns.cats[$0].action) \(turns.cats[$0].appearance)" } ?? "nobody") vs \(String(describing: look))")
     }
+    // Turned off or put to sleep while one waits inside: it waits, then comes back out unchanged.
+    do {
+        let inside = Colony(count: 2, random: { 0.5 })
+        inside.updateLanes([Lane(lower: 0, upper: 900)])
+        inside.homeX = 1000
+        inside.rotation = 5...6
+        for i in inside.cats.indices { inside.cats[i].x = 100 + Double(i) * 300; inside.cats[i].destination = inside.cats[i].x; inside.cats[i].visible = true; inside.cats[i].hiddenFor = 0 }
+        inside.cats[0].stay = 0; inside.cats[0].remaining = 0; inside.cats[1].stay = 1000
+        var steps = 0
+        while !inside.cats[0].home && steps < 30 * 60 { inside.step(1.0 / 30); steps += 1 }
+        let look = inside.cats[0].appearance
+        expect(inside.cats[0].home && inside.cats[0].swapping, "the cat goes in to swap")
+        inside.quiet = true
+        for _ in 0..<(30 * 20) { inside.step(1.0 / 30) }
+        expect(inside.cats[0].home, "no cat comes out of a swap during quiet time")
+        inside.quiet = false; inside.onStage = false
+        for _ in 0..<(30 * 20) { inside.step(1.0 / 30) }
+        expect(inside.cats[0].home, "no cat comes out of a swap out of sight")
+        inside.onStage = true; inside.rotation = nil
+        for _ in 0..<(30 * 20) { inside.step(1.0 / 30) }
+        expect(!inside.cats[0].home && inside.cats[0].appearance == look, "turned off while inside: the same cat comes back out")
+    }
     // Speed test: reads networkQuality's JSON (bits per second, RPM, milliseconds).
     let sample = #"{"dl_throughput": 641066112, "ul_throughput": 255409168, "responsiveness": 767.66, "base_rtt": 22.04, "interface_name": "en0"}"#
     let measured = SpeedTest.parse(Data(sample.utf8), date: Date(timeIntervalSince1970: 0))
