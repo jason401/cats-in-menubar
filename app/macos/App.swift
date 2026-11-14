@@ -345,7 +345,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         if !lively && frame % model.power.idleEvery != 0 { return }
         let dt = now - lastTick; lastTick = now
-        if colony.homeX == nil, let x = towerX { colony.homeX = x }
+        // The tower slides whenever menu bar items to its right change width or come and go; auto rotation
+        // walks cats in and out without a fresh callHome/letOut, so follow the icon every frame.
+        if let x = towerX, colony.homeX == nil || (0...(overlay?.frame.width ?? 0)).contains(x) { colony.homeX = x }
         if moveTarget != nil && colony.cats.allSatisfy(\.home) { updateDisplay(); scan() }
         // Out of sight (hidden menu bar, unplugged screen) the cats carry on as usual; only pausing stops them.
         guard !paused, !suspended else { return }

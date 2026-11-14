@@ -670,6 +670,21 @@ func runSelfTests() {
         for _ in 0..<(30 * 20) { inside.step(1.0 / 30) }
         expect(!inside.cats[0].home && inside.cats[0].appearance == look, "turned off while inside: the same cat comes back out")
     }
+    // The tower slides left (items to its right changed) during a swap: the cat comes out of the icon where it is now.
+    do {
+        let moved = Colony(count: 1, random: { 0.5 })
+        moved.updateLanes([Lane(lower: 0, upper: 900)])
+        moved.homeX = 1000
+        moved.rotation = 5...6
+        moved.cats[0].x = 400; moved.cats[0].destination = 400; moved.cats[0].visible = true; moved.cats[0].hiddenFor = 0
+        moved.cats[0].stay = 0; moved.cats[0].remaining = 0
+        var steps = 0
+        while !moved.cats[0].home && steps < 30 * 60 { moved.step(1.0 / 30); steps += 1 }
+        moved.updateLanes([Lane(lower: 0, upper: 600)]); moved.homeX = 700
+        var farthest = 0.0
+        for _ in 0..<(30 * 20) { moved.step(1.0 / 30); if !moved.cats[0].home { farthest = max(farthest, moved.cats[0].x) } }
+        expect(!moved.cats[0].home && farthest <= 700 && moved.lanes[0].contains(moved.cats[0].x, margin: moved.cats[0].radius), "swap after the tower moved: out of the new spot, never past it: \(farthest)")
+    }
     // Shuffling: everyone goes in first, changes inside, then comes back out one by one.
     do {
         var seed: UInt64 = 11
