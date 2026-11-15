@@ -294,9 +294,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         wheelAngle = (wheelAngle - dt * motion.degreesPerSecond).truncatingRemainder(dividingBy: 360)
         shownHomeCount = colony.homeCount
         button.image = TowerIcon.menuBar(cats: shownHomeCount, wheel: wheelAngle)
-        // The image is centered in the button; the cat layer covers its right 20 pt.
+        // The image is centered in the button; the cat layer covers its left 20 pt.
         let size = TowerIcon.wheelSize
-        cat.frame = NSRect(x: (button.bounds.width - size.width) / 2 + 20, y: (button.bounds.height - size.height) / 2, width: 20, height: size.height)
+        cat.frame = NSRect(x: (button.bounds.width - size.width) / 2, y: (button.bounds.height - size.height) / 2, width: 20, height: size.height)
         cat.cell = WheelCatView.cell(gait, step: Int(wheelStep), coat: cat.coat)
         let timer = Timer(timeInterval: motion.frameRate > 0 ? 1 / motion.frameRate : 1, repeats: false) { [weak self] _ in self?.stepWheel() }
         RunLoop.main.add(timer, forMode: .common); wheelTimer = timer
@@ -330,11 +330,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
               lastScreen != .zero, from != lastScreen else { return rect }
         return Displays.mapRightAligned(rect, from: from, to: lastScreen)
     }
-    /// Overlay x of the tower icon's center (with the wheel on, the tower is the image's left 18 pt).
+    /// Overlay x of the tower icon's center (with the wheel on, the tower is the image's right 18 pt).
     var towerX: Double? {
         guard let rect = towerRect, let overlay else { return nil }
-        let center = wheelOn ? rect.minX + (rect.width - TowerIcon.wheelSize.width) / 2 + 9 : rect.midX
-        return center - overlay.frame.minX
+        return TowerIcon.towerCenterX(in: rect, wheel: wheelOn) - overlay.frame.minX
     }
     /// The screen the cats are on now (mid-move, still the old one).
     var currentScreen: NSScreen? {

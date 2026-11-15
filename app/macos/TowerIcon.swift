@@ -30,13 +30,13 @@ enum TowerIcon {
         return path
     }
     /// Monochrome template image for the menu bar; cats that came home show up in the tower.
-    /// With `wheel` (the rungs' angle in degrees) the running wheel stands to the right of the tower.
-    static func menuBar(cats: Int = 0, wheel: Double? = nil) -> NSImage {
+    /// With `wheel` (the teeth's angle in degrees) the running wheel stands to the left of the tower.
+    static func menuBar(cats: Int = 0, wheel: Double? = nil, tooth: CGFloat = wheelTooth) -> NSImage {
         let image = NSImage(size: wheel == nil ? NSSize(width: 18, height: 18) : wheelSize, flipped: false) { _ in
             NSColor.black.set()
             if let wheel {
-                drawWheel(angle: wheel)
-                let lift = NSAffineTransform(); lift.translateX(by: 0, yBy: (wheelSize.height - 18) / 2); lift.concat()
+                drawWheel(angle: wheel, tooth: tooth)
+                let lift = NSAffineTransform(); lift.translateX(by: towerOffset, yBy: (wheelSize.height - 18) / 2); lift.concat()
             }
             draw(wood: .black, house: .black, post: .black, door: nil)
             NSColor.black.set()

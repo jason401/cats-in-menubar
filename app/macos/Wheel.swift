@@ -20,9 +20,9 @@ struct WheelPace {
         case .run: if cpu < 0.04 { gait = .rest } else if cpu < 0.18 { gait = .walk }
         }
     }
-    /// Cells per second the cat steps through (0 = holds still) and how fast the tread turns.
-    /// Low Power Mode caps the frame rate at 12 fps and slows the tread with it, so each frame turns
-    /// the same angle and the rungs never seem to spin backwards.
+    /// Cells per second the cat steps through (0 = holds still) and how fast the teeth turn.
+    /// Low Power Mode caps the frame rate at 12 fps and slows the wheel with it, so each frame turns
+    /// the same angle and the teeth never seem to spin backwards.
     struct Motion: Equatable { var frameRate: Double; var degreesPerSecond: Double }
     func motion(lowPower: Bool = false) -> Motion {
         let full: Motion
@@ -32,7 +32,7 @@ struct WheelPace {
             let t = min(1, max(0, (cpu - 0.05) / 0.15))
             full = Motion(frameRate: 6 + 4 * t, degreesPerSecond: 25 + 15 * t)
         case .run:
-            // Gallop 1 → 3 strides a second (8 cells each), tread 60 → 180°/s.
+            // Gallop 1 → 3 strides a second (8 cells each), wheel 60 → 180°/s.
             let t = min(1, max(0, (cpu - 0.2) / 0.8))
             full = Motion(frameRate: 8 * (1 + 2 * t), degreesPerSecond: 60 + 120 * t)
         }
@@ -44,40 +44,59 @@ struct WheelPace {
 }
 
 extension TowerIcon {
-    /// Tower on the left, wheel on the right: 18 + 2 + 20 pt.
+    /// Wheel on the left, tower on the right: 20 + 2 + 18 pt.
     static let wheelSize = NSSize(width: 40, height: 20)
-    /// Center and inner tread radius of the wheel inside the 40 x 20 image.
-    static let wheelCenter = NSPoint(x: 30, y: 10.6)
-    static let wheelInner: CGFloat = 6.9
-    /// Outer rim radius. With the strokes, the band from `wheelInner` out is about 3 pt (6 px on Retina).
+    /// Where the tower's 18 pt box starts in the wheel image.
+    static let towerOffset: CGFloat = 22
+    /// Center of the wheel inside the 40 x 20 image, low enough that the teeth stay inside it.
+    static let wheelCenter = NSPoint(x: 10, y: 10.25)
+    /// Inner and outer radius of the solid band; the cat runs on the inner edge (14 pt across).
+    static let wheelInner: CGFloat = 7.0
     static let wheelOuter: CGFloat = 9.0
-    /// The wheel's frame (rim, rungs and stand). Rungs turn with `angle` degrees.
-    static func drawWheel(angle: Double) {
+    /// Height of the 12 teeth outside the band. Only the teeth turn, so the band can later show a level.
+    static let wheelTooth: CGFloat = 0.75
+    /// The wheel: a fixed solid band, teeth turned by `angle` degrees, and a low stand.
+    static func drawWheel(angle: Double, tooth: CGFloat = wheelTooth) {
         let c = wheelCenter
-        // A ladder band: a bold outer rim and a thin tread ring, joined by rungs across the whole band,
-        // so the rungs and the gaps between them read as turning even at actual size.
-        let rim = NSBezierPath(ovalIn: NSRect(x: c.x - wheelOuter, y: c.y - wheelOuter, width: wheelOuter * 2, height: wheelOuter * 2))
-        rim.lineWidth = 1.3
-        rim.stroke()
-        let tread = NSBezierPath(ovalIn: NSRect(x: c.x - wheelInner, y: c.y - wheelInner, width: wheelInner * 2, height: wheelInner * 2))
-        tread.lineWidth = 0.6
-        tread.stroke()
-        let rungs = NSBezierPath()
-        rungs.lineWidth = 1.1
-        rungs.lineCapStyle = .butt
-        for i in 0..<12 {
-            let a = (angle + Double(i) * 30) * .pi / 180
-            rungs.move(to: NSPoint(x: c.x + wheelInner * cos(a), y: c.y + wheelInner * sin(a)))
-            rungs.line(to: NSPoint(x: c.x + wheelOuter * cos(a), y: c.y + wheelOuter * sin(a)))
+        drawBand(level: 1)
+        // Teeth about 10° wide, 30° apart, a little narrower at the tip. They start just inside the
+        // band so no seam shows where they join it.
+        let teeth = NSBezierPath()
+        let root = wheelOuter - 0.2, tip = wheelOuter + tooth
+        func point(_ r: CGFloat, _ degrees: Double) -> NSPoint {
+            let a = degrees * .pi / 180
+            return NSPoint(x: c.x + r * cos(a), y: c.y + r * sin(a))
         }
-        rungs.stroke()
+        for i in 0..<12 {
+            let a = angle + Double(i) * 30
+            teeth.move(to: point(root, a - 5)); teeth.line(to: point(tip, a - 4)); teeth.line(to: point(tip, a + 4)); teeth.line(to: point(root, a + 5))
+            teeth.close()
+        }
+        teeth.fill()
         NSBezierPath(ovalIn: NSRect(x: c.x - 0.9, y: c.y - 0.9, width: 1.8, height: 1.8)).fill()
-        // A short stand under the rim.
-        let strut = NSBezierPath()
-        strut.move(to: NSPoint(x: c.x - 2.6, y: 0.8)); strut.line(to: NSPoint(x: c.x + 2.6, y: 0.8))
-        strut.line(to: NSPoint(x: c.x + 1.3, y: 2.1)); strut.line(to: NSPoint(x: c.x - 1.3, y: 2.1)); strut.close()
-        strut.fill()
-        NSBezierPath(roundedRect: NSRect(x: c.x - 6.2, y: 0, width: 12.4, height: 1.2), xRadius: 0.6, yRadius: 0.6).fill()
+        // A thin base the lowest teeth brush past.
+        NSBezierPath(roundedRect: NSRect(x: c.x - 5.5, y: 0, width: 11, height: 0.6), xRadius: 0.3, yRadius: 0.3).fill()
+    }
+    /// The band between `wheelInner` and `wheelOuter`, filled even-odd. `level` 0...1 fills that share
+    /// clockwise from the top; 1 is the whole ring.
+    static func drawBand(level: Double) {
+        let c = wheelCenter, share = min(1, max(0, level))
+        let band = NSBezierPath()
+        band.windingRule = .evenOdd
+        if share >= 1 {
+            band.appendOval(in: NSRect(x: c.x - wheelOuter, y: c.y - wheelOuter, width: wheelOuter * 2, height: wheelOuter * 2))
+            band.appendOval(in: NSRect(x: c.x - wheelInner, y: c.y - wheelInner, width: wheelInner * 2, height: wheelInner * 2))
+        } else if share > 0 {
+            let end = 90 - CGFloat(share) * 360
+            band.appendArc(withCenter: c, radius: wheelOuter, startAngle: 90, endAngle: end, clockwise: true)
+            band.appendArc(withCenter: c, radius: wheelInner, startAngle: end, endAngle: 90, clockwise: false)
+            band.close()
+        }
+        band.fill()
+    }
+    /// Center x of the tower inside a status button `rect` that holds the image centered.
+    static func towerCenterX(in rect: NSRect, wheel: Bool) -> Double {
+        wheel ? rect.minX + (rect.width - wheelSize.width) / 2 + towerOffset + 9 : rect.midX
     }
 }
 
@@ -86,7 +105,7 @@ extension TowerIcon {
 final class WheelCatView: NSView {
     var coat = 0
     var cell = 0 { didSet { if cell != oldValue { needsDisplay = true } } }
-    /// Body length about 12 pt, so a galloping cat fits the 13.8 pt tread.
+    /// Body length about 12 pt, so a galloping cat fits the 14 pt inside of the band.
     static let scale: CGFloat = 0.4
     override func hitTest(_ point: NSPoint) -> NSView? { nil }
 
@@ -107,8 +126,8 @@ final class WheelCatView: NSView {
         case .run: return SpriteAtlas.cell(.run, step, coat: coat)
         }
     }
-    /// Draws one cell with its paws on the lowest rung and its body centered on the hub.
-    /// `origin` is where the wheel image's (20, 0) lands, so previews can reuse the same placement.
+    /// Draws one cell with its paws on the band's inner edge and its body centered on the hub.
+    /// `origin` is where the wheel image's (0, 0) lands, so previews can reuse the same placement.
     static func draw(cell index: Int, coat: Int, origin: NSPoint = .zero) {
         guard let name = SpriteAtlas.artworkName(for: coat), let sheet = SpriteAtlas.sheet(name),
               sheet.frames.indices.contains(index), let image = SpriteAtlas.cell(index, coat: coat) else { return }
@@ -118,7 +137,7 @@ final class WheelCatView: NSView {
         let anchor = pose.map { SpriteAtlas.cell($0.pose, 0, coat: coat) } ?? index
         let frame = sheet.frames[sheet.frames.indices.contains(anchor) ? anchor : index]
         let middle = CGFloat(frame.left + frame.right) / 2
-        let ground = NSPoint(x: origin.x + TowerIcon.wheelCenter.x - 20, y: origin.y + TowerIcon.wheelCenter.y - TowerIcon.wheelInner + 0.4)
+        let ground = NSPoint(x: origin.x + TowerIcon.wheelCenter.x, y: origin.y + TowerIcon.wheelCenter.y - TowerIcon.wheelInner + 0.4)
         let rect = NSRect(x: ground.x - middle * factor,
                           y: ground.y + CGFloat(sheet.ground - Double(sheet.cellHeight) + sheet.frames[index].lift) * factor,
                           width: CGFloat(sheet.cellWidth) * factor, height: CGFloat(sheet.cellHeight) * factor)

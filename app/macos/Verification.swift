@@ -1202,9 +1202,9 @@ func testWheel(_ expect: (@autoclosure () -> Bool, String) -> Void) {
         for lowPower in [false, true] {
             let motion = settled(Double(step) / 100).motion(lowPower: lowPower)
             expect(motion.frameRate <= (lowPower ? WheelPace.lowPowerFPS : 24), "wheel: frame rate cap \(motion)")
-            // 12 rungs are 30° apart: under 15° a frame the tread never seems to turn backwards; ≤180°/s overall.
+            // 12 teeth are 30° apart: under 15° a frame the wheel never seems to turn backwards; ≤180°/s overall.
             expect(motion.frameRate == 0 ? motion.degreesPerSecond == 0 : motion.degreesPerSecond / motion.frameRate < 15 && motion.degreesPerSecond <= 180,
-                   "wheel: rungs turn forward \(motion)")
+                   "wheel: teeth turn forward \(motion)")
         }
     }
     expect(TowerIcon.menuBar(wheel: 0).size == TowerIcon.wheelSize && TowerIcon.menuBar().size == NSSize(width: 18, height: 18), "wheel widens the icon only when on")
@@ -1212,6 +1212,27 @@ func testWheel(_ expect: (@autoclosure () -> Bool, String) -> Void) {
         expect((0..<8).allSatisfy { coat in (0..<20).allSatisfy { (0..<SpriteAtlas.frameCount).contains(WheelCatView.cell(gait, step: $0, coat: coat)) } },
                "wheel cat cells exist for \(gait) in every coat")
     }
+    // Layout: wheel 0-20 pt, 2 pt gap, tower 22-40 pt; the teeth stay inside the image and left of the tower.
+    let reach = TowerIcon.wheelOuter + TowerIcon.wheelTooth, c = TowerIcon.wheelCenter
+    expect(TowerIcon.towerOffset + 18 == TowerIcon.wheelSize.width, "wheel layout: tower fills the right 18 pt")
+    expect(c.x - reach >= 0 && c.x + reach <= TowerIcon.towerOffset - 2 && c.y - reach >= 0 && c.y + reach <= TowerIcon.wheelSize.height,
+           "wheel layout: wheel with teeth fits its 20 pt square")
+    expect(TowerIcon.wheelInner * 2 >= 14, "wheel layout: 14 pt inside the band for the cat")
+    expect(TowerIcon.towerCenterX(in: NSRect(x: 100, y: 0, width: 40, height: 24), wheel: true) == 131
+           && TowerIcon.towerCenterX(in: NSRect(x: 100, y: 0, width: 48, height: 24), wheel: true) == 135
+           && TowerIcon.towerCenterX(in: NSRect(x: 100, y: 0, width: 26, height: 24), wheel: false) == 113,
+           "wheel layout: towerX is the tower's center, with and without the wheel")
+    // The cats walk home to a spot that is really ink of the tower (its post), with clear space between wheel and tower.
+    let rep = NSBitmapImageRep(bitmapDataPlanes: nil, pixelsWide: 80, pixelsHigh: 40, bitsPerSample: 8, samplesPerPixel: 4, hasAlpha: true, isPlanar: false, colorSpaceName: .deviceRGB, bytesPerRow: 0, bitsPerPixel: 0)!
+    NSGraphicsContext.saveGraphicsState()
+    NSGraphicsContext.current = NSGraphicsContext(bitmapImageRep: rep)
+    TowerIcon.menuBar(wheel: 7).draw(in: NSRect(x: 0, y: 0, width: 80, height: 40))
+    NSGraphicsContext.restoreGraphicsState()
+    func ink(_ x: CGFloat, _ y: CGFloat) -> Bool { (rep.colorAt(x: Int(x * 2), y: 39 - Int(y * 2))?.alphaComponent ?? 0) > 0.5 }
+    let home = TowerIcon.towerCenterX(in: NSRect(x: 0, y: 0, width: 40, height: 20), wheel: true)
+    expect(ink(home, 6) && ink(home, 2), "wheel layout: home spot is on the tower's post and base")
+    expect((0..<40).allSatisfy { !ink(20.75, CGFloat($0) / 2) && !ink(21.25, CGFloat($0) / 2) }, "wheel layout: gap between wheel and tower")
+    expect(ink(c.x, c.y + 8) && !ink(c.x, c.y + 6) && !ink(c.x + 5, c.y), "wheel layout: solid band with open inside")
     // Taking turns: never the same cat twice in a row, a cat that is out playing only when all are out.
     let rolls = stride(from: 0.0, to: 1.0, by: 0.05)
     expect(rolls.allSatisfy { WheelCatView.nextCoat(after: 3, outside: [], roll: $0) != 3 }, "wheel: the next cat is a different one")
@@ -1220,41 +1241,46 @@ func testWheel(_ expect: (@autoclosure () -> Bool, String) -> Void) {
     expect(Set(rolls.map { WheelCatView.nextCoat(after: 0, outside: [], roll: $0) }) == Set(1..<8), "wheel: every other cat gets a turn")
 }
 
-/// Tower + wheel at each pace on dark and light menu bars, enlarged and at actual Retina size.
+/// Wheel + tower at each pace on dark and light menu bars, enlarged and at actual Retina size, for both
+/// tooth heights. The actual-size strips step the wheel 9° per slot, so the turning direction reads left to right.
 func renderWheel(to path: String) {
     _ = NSApplication.shared
-    let width = 1100, height = 560
+    let width = 1100, height = 900
     let bitmap = NSBitmapImageRep(bitmapDataPlanes: nil, pixelsWide: width, pixelsHigh: height, bitsPerSample: 8, samplesPerPixel: 4, hasAlpha: true, isPlanar: false, colorSpaceName: .deviceRGB, bytesPerRow: 0, bitsPerPixel: 0)!
     NSGraphicsContext.saveGraphicsState()
     NSGraphicsContext.current = NSGraphicsContext(bitmapImageRep: bitmap)
     NSColor.white.setFill(); NSRect(x: 0, y: 0, width: width, height: height).fill()
     let label: [NSAttributedString.Key: Any] = [.font: NSFont.systemFont(ofSize: 13), .foregroundColor: NSColor.darkGray]
-    func icon(cats: Int, angle: Double, gait: WheelPace.Gait, step: Int, coat: Int = 0, at origin: NSPoint, scale: CGFloat, ink: NSColor) {
-        let image = TowerIcon.menuBar(cats: cats, wheel: angle)
+    func icon(cats: Int, angle: Double, gait: WheelPace.Gait, step: Int, coat: Int = 0, tooth: CGFloat, at origin: NSPoint, scale: CGFloat, ink: NSColor) {
+        let image = TowerIcon.menuBar(cats: cats, wheel: angle, tooth: tooth)
         let tinted = NSImage(size: image.size, flipped: false) { rect in image.draw(in: rect); ink.set(); rect.fill(using: .sourceAtop); return true }
         tinted.draw(in: NSRect(x: origin.x, y: origin.y, width: image.size.width * scale, height: image.size.height * scale))
         NSGraphicsContext.saveGraphicsState()
         let transform = NSAffineTransform(); transform.translateX(by: origin.x, yBy: origin.y); transform.scale(by: scale); transform.concat()
-        WheelCatView.draw(cell: WheelCatView.cell(gait, step: step, coat: coat), coat: coat, origin: NSPoint(x: 20, y: 0))
+        WheelCatView.draw(cell: WheelCatView.cell(gait, step: step, coat: coat), coat: coat)
         NSGraphicsContext.restoreGraphicsState()
     }
     let states: [(String, WheelPace.Gait, Int, Double, Int)] = [("CPU 2% · nap", .rest, 0, 0, 0), ("CPU 12% · walk", .walk, 3, -20, 0),
         ("CPU 60% · run", .run, 1, -45, 1), ("CPU 95% · run", .run, 5, -75, 3)]
     for (row, (bar, ink)) in [(NSColor(calibratedWhite: 0.13, alpha: 1), NSColor(calibratedWhite: 0.95, alpha: 1)),
                               (NSColor(calibratedWhite: 0.9, alpha: 1), NSColor(calibratedWhite: 0.1, alpha: 1))].enumerated() {
-        let y = CGFloat(370 - row * 260)
+        let y = CGFloat(710 - row * 420)
         for (i, (name, gait, step, angle, cats)) in states.enumerated() {
             let x = CGFloat(20 + i * 270)
             bar.setFill(); NSBezierPath(roundedRect: NSRect(x: x, y: y, width: 250, height: 150), xRadius: 10, yRadius: 10).fill()
-            icon(cats: cats, angle: angle, gait: gait, step: step, at: NSPoint(x: x + 15, y: y + 25), scale: 5.5, ink: ink)
+            icon(cats: cats, angle: angle, gait: gait, step: step, tooth: TowerIcon.wheelTooth, at: NSPoint(x: x + 15, y: y + 20), scale: 5.5, ink: ink)
             (name as NSString).draw(at: NSPoint(x: x + 6, y: y - 20), withAttributes: label)
         }
-        // Actual size on a 2x screen: 1 pt = 2 px, menu bar 24 pt.
-        bar.setFill(); NSRect(x: 20, y: y - 76, width: 1060, height: 36).fill()
-        for i in 0..<8 {
-            let gait: WheelPace.Gait = i < 2 ? .rest : i < 4 ? .walk : .run
-            // Each slot shows a different coat taking its turn.
-            icon(cats: i % 4, angle: Double(-i * 9), gait: gait, step: i, coat: i, at: NSPoint(x: CGFloat(40 + i * 130), y: y - 74), scale: 1.6, ink: ink)
+        // Actual size on a 2x screen: 1 pt = 2 px, menu bar 24 pt = 48 px.
+        for (k, tooth) in ([0.75, 1.0] as [CGFloat]).enumerated() {
+            let barY = y - 90 - CGFloat(k) * 70
+            bar.setFill(); NSRect(x: 20, y: barY, width: 1060, height: 48).fill()
+            ("teeth \(tooth) pt · actual size 2x · 9° per slot →" as NSString).draw(at: NSPoint(x: 24, y: barY - 18), withAttributes: label)
+            for i in 0..<8 {
+                let gait: WheelPace.Gait = i < 2 ? .rest : i < 4 ? .walk : .run
+                // Each slot shows a different coat taking its turn.
+                icon(cats: i % 4, angle: Double(-i * 9), gait: gait, step: i, coat: i, tooth: tooth, at: NSPoint(x: CGFloat(40 + i * 130), y: barY + 4), scale: 2, ink: ink)
+            }
         }
     }
     NSGraphicsContext.restoreGraphicsState()
