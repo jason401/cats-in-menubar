@@ -43,6 +43,33 @@ struct WheelPace {
     static let lowPowerFPS = 12.0
 }
 
+/// The wheel's band as a battery gauge. It does not turn, so it stays readable: the charge fills the band
+/// clockwise from 12 o'clock and the rest shows only thin rims. Color follows the charge alone, also while
+/// charging: green above 20 %, red at 20 % or less. Mono draws the green share in the menu bar's own color
+/// (template tint) but keeps red as a warning. Off, or a Mac without a battery: the plain solid band.
+struct WheelBattery: Equatable {
+    enum Ink: Equatable { case template, green, red }
+    /// Whole percent shown, so a change under 1 % does not redraw anything.
+    var percent = 100
+    var ink = Ink.template
+    var rims = false
+    var share: Double { Double(percent) / 100 }
+    static let plain = WheelBattery()
+    static let lowPercent = 20
+    static func gauge(hasBattery: Bool, level: Double, enabled: Bool, mono: Bool) -> WheelBattery {
+        guard enabled, hasBattery else { return .plain }
+        let percent = Int((min(1, max(0, level)) * 100).rounded())
+        let ink: Ink = percent <= lowPercent ? .red : mono ? .template : .green
+        return WheelBattery(percent: percent, ink: ink, rims: percent < 100)
+    }
+    /// Arc length of the filled share in degrees.
+    var degrees: Double { share * 360 }
+    /// The color the overlay draws, nil when the template image carries the fill.
+    var color: NSColor? {
+        switch ink { case .template: return nil; case .green: return .systemGreen; case .red: return .systemRed }
+    }
+}
+
 extension TowerIcon {
     /// Wheel on the left, tower on the right: 20 + 2 + 18 pt.
     static let wheelSize = NSSize(width: 40, height: 20)
@@ -55,10 +82,15 @@ extension TowerIcon {
     static let wheelOuter: CGFloat = 9.0
     /// Height of the 12 teeth outside the band. Only the teeth turn, so the band can later show a level.
     static let wheelTooth: CGFloat = 0.75
-    /// The wheel: a fixed solid band, teeth turned by `angle` degrees, and a low stand.
-    static func drawWheel(angle: Double, tooth: CGFloat = wheelTooth) {
+    /// Width of the thin rims that outline the empty part of a battery gauge.
+    static let wheelRim: CGFloat = 0.5
+    /// The wheel: a fixed band, teeth turned by `angle` degrees, and a low stand. With a battery gauge the
+    /// template keeps only the Mono share of the band plus thin rims around the rest; a green or red share is
+    /// drawn in color by `WheelOverlayView`.
+    static func drawWheel(angle: Double, tooth: CGFloat = wheelTooth, battery: WheelBattery = .plain) {
         let c = wheelCenter
-        drawBand(level: 1)
+        if battery.ink == .template { drawBand(level: battery.share) }
+        if battery.rims { drawRims(after: battery.share) }
         // Teeth about 10° wide, 30° apart, a little narrower at the tip. They start just inside the
         // band so no seam shows where they join it.
         let teeth = NSBezierPath()
@@ -77,22 +109,32 @@ extension TowerIcon {
         // A thin base the lowest teeth brush past.
         NSBezierPath(roundedRect: NSRect(x: c.x - 5.5, y: 0, width: 11, height: 0.6), xRadius: 0.3, yRadius: 0.3).fill()
     }
-    /// The band between `wheelInner` and `wheelOuter`, filled even-odd. `level` 0...1 fills that share
-    /// clockwise from the top; 1 is the whole ring.
-    static func drawBand(level: Double) {
-        let c = wheelCenter, share = min(1, max(0, level))
+    /// Degrees (0 = 3 o'clock, counterclockwise) where a share filled clockwise from 12 o'clock ends.
+    static func gaugeEnd(share: Double) -> Double { 90 - min(1, max(0, share)) * 360 }
+    /// The ring between radii `inner` and `outer` from 12 o'clock clockwise over `from`...`to` (shares of a turn).
+    private static func ring(inner: CGFloat, outer: CGFloat, from: Double, to: Double) {
+        let c = wheelCenter, a = min(1, max(0, from)), b = min(1, max(a, to))
+        guard b > a else { return }
         let band = NSBezierPath()
         band.windingRule = .evenOdd
-        if share >= 1 {
-            band.appendOval(in: NSRect(x: c.x - wheelOuter, y: c.y - wheelOuter, width: wheelOuter * 2, height: wheelOuter * 2))
-            band.appendOval(in: NSRect(x: c.x - wheelInner, y: c.y - wheelInner, width: wheelInner * 2, height: wheelInner * 2))
-        } else if share > 0 {
-            let end = 90 - CGFloat(share) * 360
-            band.appendArc(withCenter: c, radius: wheelOuter, startAngle: 90, endAngle: end, clockwise: true)
-            band.appendArc(withCenter: c, radius: wheelInner, startAngle: end, endAngle: 90, clockwise: false)
+        if b - a >= 1 {
+            band.appendOval(in: NSRect(x: c.x - outer, y: c.y - outer, width: outer * 2, height: outer * 2))
+            band.appendOval(in: NSRect(x: c.x - inner, y: c.y - inner, width: inner * 2, height: inner * 2))
+        } else {
+            let start = CGFloat(gaugeEnd(share: a)), end = CGFloat(gaugeEnd(share: b))
+            band.appendArc(withCenter: c, radius: outer, startAngle: start, endAngle: end, clockwise: true)
+            band.appendArc(withCenter: c, radius: inner, startAngle: end, endAngle: start, clockwise: false)
             band.close()
         }
         band.fill()
+    }
+    /// The band between `wheelInner` and `wheelOuter`. `level` 0...1 fills that share clockwise from
+    /// the top; 1 is the whole ring.
+    static func drawBand(level: Double) { ring(inner: wheelInner, outer: wheelOuter, from: 0, to: level) }
+    /// Thin inner and outer rims over the empty part of the band, after the filled `share`.
+    static func drawRims(after share: Double) {
+        ring(inner: wheelOuter - wheelRim, outer: wheelOuter, from: share, to: 1)
+        ring(inner: wheelInner, outer: wheelInner + wheelRim, from: share, to: 1)
     }
     /// Center x of the tower inside a status button `rect` that holds the image centered.
     static func towerCenterX(in rect: NSRect, wheel: Bool) -> Double {
@@ -100,11 +142,15 @@ extension TowerIcon {
     }
 }
 
-/// The colored cat inside the wheel. It sits over the template icon as its own layer, so the tower and
-/// wheel keep the menu bar's automatic tinting and only the cat is drawn in color. Clicks pass through.
-final class WheelCatView: NSView {
+/// The colored layer over the wheel: a green or red battery share, then the cat on top. It sits over the
+/// template icon as its own view, so the tower and wheel keep the menu bar's automatic tinting and only these
+/// are drawn in color. Clicks pass through.
+final class WheelOverlayView: NSView {
     var coat = 0
     var cell = 0 { didSet { if cell != oldValue { needsDisplay = true } } }
+    var battery = WheelBattery.plain { didSet { if battery != oldValue { needsDisplay = true } } }
+    /// systemGreen and systemRed differ between dark and light menu bars.
+    override func viewDidChangeEffectiveAppearance() { super.viewDidChangeEffectiveAppearance(); needsDisplay = true }
     /// Body length about 12 pt, so a galloping cat fits the 14 pt inside of the band.
     static let scale: CGFloat = 0.4
     override func hitTest(_ point: NSPoint) -> NSView? { nil }
@@ -144,5 +190,10 @@ final class WheelCatView: NSView {
         NSGraphicsContext.current?.imageInterpolation = .high
         image.draw(in: rect, from: .zero, operation: .sourceOver, fraction: 1)
     }
-    override func draw(_ dirtyRect: NSRect) { Self.draw(cell: cell, coat: coat) }
+    /// The colored battery share, drawn under the cat.
+    static func draw(battery: WheelBattery) {
+        guard let color = battery.color else { return }
+        color.setFill(); TowerIcon.drawBand(level: battery.share)
+    }
+    override func draw(_ dirtyRect: NSRect) { Self.draw(battery: battery); Self.draw(cell: cell, coat: coat) }
 }

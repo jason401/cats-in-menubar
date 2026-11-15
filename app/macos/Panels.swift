@@ -16,11 +16,13 @@ enum Pref {
     static let display = "catDisplay", displayName = "catDisplayName"   // "" = the main display
     static let cpuWheel = "cpuWheel"   // a cat in a running wheel next to the tower shows CPU use
     static let wheelSwap = "wheelSwap" // minutes between wheel cats taking turns, 0 = always the orange tabby
+    static let wheelBattery = "wheelBattery"         // the wheel's band shows the battery charge
+    static let wheelBatteryMono = "wheelBatteryMono" // that gauge in the menu bar's color instead of green
     static let showCPU = "showCPU", showMemory = "showMemory", showDisk = "showDisk", showBattery = "showBattery", showNetwork = "showNetwork"
     static let defaults: [String: Any] = [
         count: 3, fixedLineup: false, rotate: false, rotatePace: 1, paused: false, quiet: false, activity: 1, adaptivePower: true, allowDrag: true,
         nightQuiet: false, nightFrom: 23, nightTo: 7, interval: 2.0, topApps: 2, toyColor: -1, laser: true, scrollReverse: false, display: "",
-        showCPU: true, showMemory: true, showDisk: true, showBattery: true, showNetwork: true, cpuWheel: false, wheelSwap: 15.0,
+        showCPU: true, showMemory: true, showDisk: true, showBattery: true, showNetwork: true, cpuWheel: false, wheelSwap: 15.0, wheelBattery: true, wheelBatteryMono: false,
     ]
 }
 
@@ -970,12 +972,21 @@ struct MonitorTab: View {
     @AppStorage(Pref.showNetwork) private var showNetwork = true
     @AppStorage(Pref.cpuWheel) private var cpuWheel = false
     @AppStorage(Pref.wheelSwap) private var wheelSwap = 15.0
+    @AppStorage(Pref.wheelBattery) private var wheelBattery = true
+    @AppStorage(Pref.wheelBatteryMono) private var wheelBatteryMono = false
+    /// Read once: a Mac either has an internal battery or it does not.
+    private let hasBattery = SystemMonitor.hasInternalBattery()
     var body: some View {
         SettingsPage {
             SettingsCard(title: "Menu bar") {
                 SettingsRow(title: "CPU wheel") { SettingsSwitch(title: "CPU wheel", isOn: $cpuWheel) }
                 if cpuWheel {
                     SettingsRow(title: "Take turns") { SettingsSegments(options: [("Off", 0.0), ("5 min", 5.0), ("15 min", 15.0), ("30 min", 30.0)], selection: $wheelSwap) }
+                    SettingsRow(title: "Battery ring") { SettingsSwitch(title: "Battery ring", isOn: $wheelBattery) }.disabled(!hasBattery)
+                    SettingsRow(title: "Mono") { SettingsSwitch(title: "Mono", isOn: $wheelBatteryMono) }.disabled(!hasBattery || !wheelBattery)
+                    SettingsNote(text: hasBattery
+                        ? "The band fills clockwise with the charge: green, red at 20 % or less. Mono uses the menu bar's color instead of green and keeps red."
+                        : "No battery: the ring stays plain.")
                 }
                 SettingsNote(text: "A cat runs in a wheel next to the tower: the busier the Mac, the faster it runs. Under 5 % it naps. Cats take turns in the wheel, preferring one that is not out playing.")
             }

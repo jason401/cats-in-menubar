@@ -60,7 +60,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     // The CPU wheel: a template tower + wheel image, and the colored cat as its own layer on top.
     var wheelOn = false
     var wheelPace = WheelPace()
-    var wheelCat: WheelCatView?
+    var wheelCat: WheelOverlayView?
+    var wheelBattery = WheelBattery.plain
     var wheelTimer: Timer?
     var wheelAngle = 0.0, wheelStep = 0.0, wheelLast = 0.0
     var wheelGait = WheelPace.Gait.rest
@@ -251,6 +252,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         wheelPace.update(cpu: stats.cpu)
         // Waking from a nap should not wait for the resting cat's next one-second look.
         if wheelOn && gait == .rest && wheelPace.gait != .rest { stepWheel() }
+        // A new battery percent shows on the next wheel frame; a resting wheel draws it now.
+        let battery = WheelBattery.gauge(hasBattery: stats.hasBattery, level: stats.batteryLevel,
+                                         enabled: defaults.bool(forKey: Pref.wheelBattery), mono: defaults.bool(forKey: Pref.wheelBatteryMono))
+        if battery != wheelBattery {
+            wheelBattery = battery
+            if wheelOn && (paused || wheelPace.gait == .rest) { stepWheel() }
+        }
     }
     /// Shows or hides the wheel. The status item gets wider, so free space is measured again.
     func setWheel(_ on: Bool) {
@@ -259,7 +267,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         guard let button = statusItem.button else { return }
         button.imagePosition = on ? .imageOnly : .imageLeft
         if on {
-            let view = WheelCatView(frame: NSRect(x: 0, y: 0, width: 20, height: TowerIcon.wheelSize.height))
+            let view = WheelOverlayView(frame: NSRect(x: 0, y: 0, width: 20, height: TowerIcon.wheelSize.height))
             button.addSubview(view); wheelCat = view
             wheelLast = ProcessInfo.processInfo.systemUptime; wheelShiftStart = wheelLast
             stepWheel()
@@ -286,18 +294,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         if shift <= 0 { cat.coat = 0; wheelShiftStart = now }
         else if now - wheelShiftStart >= shift {
             let outside = Set(colony.cats.filter { $0.visible && !$0.home }.map(\.coat))
-            cat.coat = WheelCatView.nextCoat(after: cat.coat, outside: outside, roll: Double.random(in: 0..<1))
+            cat.coat = WheelOverlayView.nextCoat(after: cat.coat, outside: outside, roll: Double.random(in: 0..<1))
             wheelShiftStart = now; wheelStep = 0
             AppModel.log("CPU wheel: \(CatAppearance.names[cat.coat]) takes a turn")
         }
         // Turning clockwise: the cat runs right, so the tread under its paws moves left.
         wheelAngle = (wheelAngle - dt * motion.degreesPerSecond).truncatingRemainder(dividingBy: 360)
         shownHomeCount = colony.homeCount
-        button.image = TowerIcon.menuBar(cats: shownHomeCount, wheel: wheelAngle)
+        button.image = TowerIcon.menuBar(cats: shownHomeCount, wheel: wheelAngle, battery: wheelBattery)
         // The image is centered in the button; the cat layer covers its left 20 pt.
         let size = TowerIcon.wheelSize
         cat.frame = NSRect(x: (button.bounds.width - size.width) / 2, y: (button.bounds.height - size.height) / 2, width: 20, height: size.height)
-        cat.cell = WheelCatView.cell(gait, step: Int(wheelStep), coat: cat.coat)
+        cat.cell = WheelOverlayView.cell(gait, step: Int(wheelStep), coat: cat.coat)
+        cat.battery = wheelBattery
         let timer = Timer(timeInterval: motion.frameRate > 0 ? 1 / motion.frameRate : 1, repeats: false) { [weak self] _ in self?.stepWheel() }
         RunLoop.main.add(timer, forMode: .common); wheelTimer = timer
     }

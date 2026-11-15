@@ -1209,7 +1209,7 @@ func testWheel(_ expect: (@autoclosure () -> Bool, String) -> Void) {
     }
     expect(TowerIcon.menuBar(wheel: 0).size == TowerIcon.wheelSize && TowerIcon.menuBar().size == NSSize(width: 18, height: 18), "wheel widens the icon only when on")
     for gait in [WheelPace.Gait.rest, .walk, .run] {
-        expect((0..<8).allSatisfy { coat in (0..<20).allSatisfy { (0..<SpriteAtlas.frameCount).contains(WheelCatView.cell(gait, step: $0, coat: coat)) } },
+        expect((0..<8).allSatisfy { coat in (0..<20).allSatisfy { (0..<SpriteAtlas.frameCount).contains(WheelOverlayView.cell(gait, step: $0, coat: coat)) } },
                "wheel cat cells exist for \(gait) in every coat")
     }
     // Layout: wheel 0-20 pt, 2 pt gap, tower 22-40 pt; the teeth stay inside the image and left of the tower.
@@ -1233,12 +1233,69 @@ func testWheel(_ expect: (@autoclosure () -> Bool, String) -> Void) {
     expect(ink(home, 6) && ink(home, 2), "wheel layout: home spot is on the tower's post and base")
     expect((0..<40).allSatisfy { !ink(20.75, CGFloat($0) / 2) && !ink(21.25, CGFloat($0) / 2) }, "wheel layout: gap between wheel and tower")
     expect(ink(c.x, c.y + 8) && !ink(c.x, c.y + 6) && !ink(c.x + 5, c.y), "wheel layout: solid band with open inside")
+    testWheelBattery(expect)
     // Taking turns: never the same cat twice in a row, a cat that is out playing only when all are out.
     let rolls = stride(from: 0.0, to: 1.0, by: 0.05)
-    expect(rolls.allSatisfy { WheelCatView.nextCoat(after: 3, outside: [], roll: $0) != 3 }, "wheel: the next cat is a different one")
-    expect(rolls.allSatisfy { ![0, 1, 2].contains(WheelCatView.nextCoat(after: 0, outside: [1, 2], roll: $0)) }, "wheel: skips cats that are out playing")
-    expect(rolls.allSatisfy { WheelCatView.nextCoat(after: 0, outside: Set(0..<8), roll: $0) != 0 }, "wheel: everyone out still swaps")
-    expect(Set(rolls.map { WheelCatView.nextCoat(after: 0, outside: [], roll: $0) }) == Set(1..<8), "wheel: every other cat gets a turn")
+    expect(rolls.allSatisfy { WheelOverlayView.nextCoat(after: 3, outside: [], roll: $0) != 3 }, "wheel: the next cat is a different one")
+    expect(rolls.allSatisfy { ![0, 1, 2].contains(WheelOverlayView.nextCoat(after: 0, outside: [1, 2], roll: $0)) }, "wheel: skips cats that are out playing")
+    expect(rolls.allSatisfy { WheelOverlayView.nextCoat(after: 0, outside: Set(0..<8), roll: $0) != 0 }, "wheel: everyone out still swaps")
+    expect(Set(rolls.map { WheelOverlayView.nextCoat(after: 0, outside: [], roll: $0) }) == Set(1..<8), "wheel: every other cat gets a turn")
+}
+
+/// The wheel's battery gauge: share and angle, the 20 % color line, Mono, and the plain band when off or
+/// without a battery. Pixels are checked at 8x on the template image and on the colored overlay separately.
+func testWheelBattery(_ expect: (@autoclosure () -> Bool, String) -> Void) {
+    func gauge(_ level: Double, mono: Bool = false) -> WheelBattery { .gauge(hasBattery: true, level: level, enabled: true, mono: mono) }
+    expect(gauge(0.5).degrees == 180 && gauge(0.25).degrees == 90 && gauge(1).degrees == 360 && gauge(0).degrees == 0, "battery ring: level to arc degrees")
+    expect(gauge(0.734).percent == 73 && gauge(0.736).percent == 74 && gauge(1.2).percent == 100 && gauge(-1).percent == 0, "battery ring: whole percent, clamped")
+    expect(gauge(0.734) == gauge(0.7349), "battery ring: under 1 % is no change (no redraw)")
+    expect(TowerIcon.gaugeEnd(share: 0) == 90 && TowerIcon.gaugeEnd(share: 0.25) == 0 && TowerIcon.gaugeEnd(share: 0.5) == -90, "battery ring: fills clockwise from 12 o'clock")
+    expect(gauge(0.21).ink == .green && gauge(0.20).ink == .red && gauge(0.204).ink == .red && gauge(0.206).ink == .green && gauge(0.05).ink == .red,
+           "battery ring: green above 20 %, red at 20 % or less")
+    expect(gauge(0.8, mono: true).ink == .template && gauge(0.2, mono: true).ink == .red && gauge(0.1, mono: true).ink == .red, "battery ring: Mono replaces green only")
+    expect(gauge(0.8).color == .systemGreen && gauge(0.1).color == .systemRed && gauge(0.8, mono: true).color == nil, "battery ring: overlay colors")
+    expect(gauge(0.5).rims && !gauge(1).rims, "battery ring: rims only where the band is empty")
+    expect(WheelBattery.gauge(hasBattery: false, level: 0.1, enabled: true, mono: false) == .plain
+           && WheelBattery.gauge(hasBattery: true, level: 0.1, enabled: false, mono: true) == .plain, "battery ring: off or no battery is the plain band")
+    expect(WheelBattery.plain.share == 1 && WheelBattery.plain.ink == .template && !WheelBattery.plain.rims, "battery ring: plain is the whole template band")
+    // Pixels: probe the band's middle (r 8) and a rim (r 8.8) at 3 o'clock (25 % along) and 9 o'clock (75 % along).
+    let scale: CGFloat = 8, c = TowerIcon.wheelCenter
+    func render(_ draw: () -> Void) -> NSBitmapImageRep {
+        let size = TowerIcon.wheelSize
+        let rep = NSBitmapImageRep(bitmapDataPlanes: nil, pixelsWide: Int(size.width * scale), pixelsHigh: Int(size.height * scale), bitsPerSample: 8, samplesPerPixel: 4, hasAlpha: true, isPlanar: false, colorSpaceName: .deviceRGB, bytesPerRow: 0, bitsPerPixel: 0)!
+        NSGraphicsContext.saveGraphicsState()
+        NSGraphicsContext.current = NSGraphicsContext(bitmapImageRep: rep)
+        let t = NSAffineTransform(); t.scale(by: scale); t.concat()
+        draw()
+        NSGraphicsContext.restoreGraphicsState()
+        return rep
+    }
+    func color(_ rep: NSBitmapImageRep, _ x: CGFloat, _ y: CGFloat) -> NSColor? {
+        let color = rep.colorAt(x: Int(x * scale), y: rep.pixelsHigh - 1 - Int(y * scale))
+        return (color?.alphaComponent ?? 0) > 0.5 ? color : nil
+    }
+    // Teeth drawn at 15° sit at 15 + 30k ± 5°, clear of the probes at 0° and 180°, and start outside r 8.8.
+    let right = (c.x + 8, c.y), left = (c.x - 8, c.y), leftRim = (c.x - 8.8, c.y), innerRim = (c.x - 7.2, c.y)
+    let template = { (battery: WheelBattery) in render { NSColor.black.set(); TowerIcon.drawWheel(angle: 15, battery: battery) } }
+    let overlay = { (battery: WheelBattery) in render { WheelOverlayView.draw(battery: battery) } }
+    let plain = template(.plain)
+    expect(color(plain, right.0, right.1) != nil && color(plain, left.0, left.1) != nil, "battery ring: plain band is solid all around")
+    let mono = template(gauge(0.5, mono: true))
+    expect(color(mono, right.0, right.1) != nil && color(mono, left.0, left.1) == nil, "battery ring: Mono 50 % fills the right half in the template")
+    expect(color(mono, leftRim.0, leftRim.1) != nil && color(mono, innerRim.0, innerRim.1) != nil, "battery ring: empty half keeps thin rims")
+    let green = template(gauge(0.5))
+    expect(color(green, right.0, right.1) == nil && color(green, left.0, left.1) == nil && color(green, leftRim.0, leftRim.1) != nil,
+           "battery ring: a colored share leaves the template with rims only")
+    let colored = overlay(gauge(0.5))
+    if let ink = color(colored, right.0, right.1)?.usingColorSpace(.deviceRGB) {
+        expect(ink.greenComponent > ink.redComponent + 0.3 && color(colored, left.0, left.1) == nil, "battery ring: overlay paints green on the filled half only")
+    } else { expect(false, "battery ring: overlay paints the filled half") }
+    let low = overlay(gauge(0.15))
+    let lowEdge = (c.x + 8 * cos(.pi / 2 - 0.25), c.y + 8 * sin(.pi / 2 - 0.25))   // ~14° past 12 o'clock, inside 15 %
+    if let ink = color(low, lowEdge.0, lowEdge.1)?.usingColorSpace(.deviceRGB) {
+        expect(ink.redComponent > ink.greenComponent + 0.3 && color(low, right.0, right.1) == nil, "battery ring: 15 % is a short red arc")
+    } else { expect(false, "battery ring: 15 % arc is drawn") }
+    expect(color(overlay(.plain), right.0, right.1) == nil && color(overlay(gauge(0.8, mono: true)), right.0, right.1) == nil, "battery ring: overlay is empty for plain and Mono green")
 }
 
 /// Wheel + tower at each pace on dark and light menu bars, enlarged and at actual Retina size, for both
@@ -1257,7 +1314,7 @@ func renderWheel(to path: String) {
         tinted.draw(in: NSRect(x: origin.x, y: origin.y, width: image.size.width * scale, height: image.size.height * scale))
         NSGraphicsContext.saveGraphicsState()
         let transform = NSAffineTransform(); transform.translateX(by: origin.x, yBy: origin.y); transform.scale(by: scale); transform.concat()
-        WheelCatView.draw(cell: WheelCatView.cell(gait, step: step, coat: coat), coat: coat)
+        WheelOverlayView.draw(cell: WheelOverlayView.cell(gait, step: step, coat: coat), coat: coat)
         NSGraphicsContext.restoreGraphicsState()
     }
     let states: [(String, WheelPace.Gait, Int, Double, Int)] = [("CPU 2% · nap", .rest, 0, 0, 0), ("CPU 12% · walk", .walk, 3, -20, 0),
@@ -1286,4 +1343,64 @@ func renderWheel(to path: String) {
     NSGraphicsContext.restoreGraphicsState()
     try! bitmap.representation(using: .png, properties: [:])!.write(to: URL(fileURLWithPath: path))
     print("Wheel preview: \(path)")
+    renderWheelBattery(to: (path as NSString).deletingPathExtension + "-battery.png")
+}
+
+/// The battery ring at 100/50/20/10/5 % in color and Mono on dark and light menu bars, enlarged, and a
+/// row at actual Retina size. The last column is a Mac without a battery (plain band).
+func renderWheelBattery(to path: String) {
+    let width = 1240, height = 760
+    let bitmap = NSBitmapImageRep(bitmapDataPlanes: nil, pixelsWide: width, pixelsHigh: height, bitsPerSample: 8, samplesPerPixel: 4, hasAlpha: true, isPlanar: false, colorSpaceName: .deviceRGB, bytesPerRow: 0, bitsPerPixel: 0)!
+    NSGraphicsContext.saveGraphicsState()
+    NSGraphicsContext.current = NSGraphicsContext(bitmapImageRep: bitmap)
+    NSColor.white.setFill(); NSRect(x: 0, y: 0, width: width, height: height).fill()
+    let label: [NSAttributedString.Key: Any] = [.font: NSFont.systemFont(ofSize: 13), .foregroundColor: NSColor.darkGray]
+    let levels = [1.0, 0.5, 0.2, 0.1, 0.05]
+    func battery(_ i: Int, mono: Bool) -> WheelBattery {
+        i < levels.count ? .gauge(hasBattery: true, level: levels[i], enabled: true, mono: mono) : .gauge(hasBattery: false, level: 0, enabled: true, mono: mono)
+    }
+    func icon(_ battery: WheelBattery, step: Int, coat: Int, at origin: NSPoint, scale: CGFloat, ink: NSColor, dark: Bool) {
+        let image = TowerIcon.menuBar(cats: 1, wheel: Double(-step * 9), battery: battery)
+        let tinted = NSImage(size: image.size, flipped: false) { rect in image.draw(in: rect); ink.set(); rect.fill(using: .sourceAtop); return true }
+        tinted.draw(in: NSRect(x: origin.x, y: origin.y, width: image.size.width * scale, height: image.size.height * scale))
+        NSGraphicsContext.saveGraphicsState()
+        let transform = NSAffineTransform(); transform.translateX(by: origin.x, yBy: origin.y); transform.scale(by: scale); transform.concat()
+        // The overlay's system colors resolve against the menu bar's appearance, as in the real button.
+        NSAppearance(named: dark ? .darkAqua : .aqua)!.performAsCurrentDrawingAppearance {
+            WheelOverlayView.draw(battery: battery)
+        }
+        WheelOverlayView.draw(cell: WheelOverlayView.cell(.run, step: step, coat: coat), coat: coat)
+        NSGraphicsContext.restoreGraphicsState()
+    }
+    let bars: [(String, NSColor, NSColor, Bool)] = [("dark", NSColor(calibratedWhite: 0.13, alpha: 1), NSColor(calibratedWhite: 0.95, alpha: 1), true),
+                                                   ("light", NSColor(calibratedWhite: 0.9, alpha: 1), NSColor(calibratedWhite: 0.1, alpha: 1), false)]
+    var y = CGFloat(height - 150)
+    for (barName, bar, ink, dark) in bars {
+        for mono in [false, true] {
+            ("\(barName) · \(mono ? "Mono" : "color")" as NSString).draw(at: NSPoint(x: 20, y: y + 112), withAttributes: label)
+            for i in 0...levels.count {
+                let x = CGFloat(20 + i * 200)
+                bar.setFill(); NSBezierPath(roundedRect: NSRect(x: x, y: y, width: 185, height: 108), xRadius: 8, yRadius: 8).fill()
+                icon(battery(i, mono: mono), step: i, coat: i, at: NSPoint(x: x + 12, y: y + 9), scale: 4, ink: ink, dark: dark)
+                let name = i < levels.count ? "\(Int(levels[i] * 100)) %" : "no battery"
+                let small: [NSAttributedString.Key: Any] = [.font: NSFont.systemFont(ofSize: 11), .foregroundColor: ink]
+                (name as NSString).draw(at: NSPoint(x: x + 177 - (name as NSString).size(withAttributes: small).width, y: y + 88), withAttributes: small)
+            }
+            y -= 135
+        }
+    }
+    // Actual size on a 2x screen: 1 pt = 2 px, menu bar 24 pt = 48 px.
+    for (barName, bar, ink, dark) in bars {
+        bar.setFill(); NSRect(x: 20, y: y + 60, width: 1200, height: 48).fill()
+        ("\(barName) · actual size 2x · color 100…5 %, no battery | Mono 100…5 %, no battery" as NSString).draw(at: NSPoint(x: 24, y: y + 40), withAttributes: label)
+        for mono in [false, true] {
+            for i in 0...levels.count {
+                icon(battery(i, mono: mono), step: i, coat: i, at: NSPoint(x: CGFloat(40 + (mono ? 600 : 0) + i * 95), y: y + 64), scale: 2, ink: ink, dark: dark)
+            }
+        }
+        y -= 80
+    }
+    NSGraphicsContext.restoreGraphicsState()
+    try! bitmap.representation(using: .png, properties: [:])!.write(to: URL(fileURLWithPath: path))
+    print("Wheel battery preview: \(path)")
 }

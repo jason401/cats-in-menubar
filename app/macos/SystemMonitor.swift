@@ -116,6 +116,14 @@ final class SystemMonitor: ObservableObject {
         stats.diskFree = Double(values.volumeAvailableCapacityForImportantUsage ?? 0)
     }
 
+    /// Whether this Mac has an internal battery (a Mac mini or Studio does not).
+    static func hasInternalBattery() -> Bool {
+        guard let info = IOPSCopyPowerSourcesInfo()?.takeRetainedValue(),
+              let sources = IOPSCopyPowerSourcesList(info)?.takeRetainedValue() as? [CFTypeRef] else { return false }
+        return sources.contains { source in
+            (IOPSGetPowerSourceDescription(info, source)?.takeUnretainedValue() as? [String: Any])?[kIOPSTypeKey] as? String == kIOPSInternalBatteryType
+        }
+    }
     private func readBattery(into stats: inout SystemStats) {
         guard let info = IOPSCopyPowerSourcesInfo()?.takeRetainedValue(),
               let sources = IOPSCopyPowerSourcesList(info)?.takeRetainedValue() as? [CFTypeRef] else { return }
