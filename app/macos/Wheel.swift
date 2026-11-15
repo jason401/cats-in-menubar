@@ -58,8 +58,9 @@ struct WheelBattery: Equatable {
     static let lowPercent = 20
     static func gauge(hasBattery: Bool, level: Double, enabled: Bool, mono: Bool) -> WheelBattery {
         guard enabled, hasBattery else { return .plain }
-        let percent = Int((min(1, max(0, level)) * 100).rounded())
-        let ink: Ink = percent <= lowPercent ? .red : mono ? .template : .green
+        let level = min(1, max(0, level)), percent = Int((level * 100).rounded())
+        // Color from the real charge, so 20.4 % is still green even though its arc shows 20 %.
+        let ink: Ink = level <= Double(lowPercent) / 100 ? .red : mono ? .template : .green
         return WheelBattery(percent: percent, ink: ink, rims: percent < 100)
     }
     /// Arc length of the filled share in degrees.

@@ -1250,9 +1250,9 @@ func testWheelBattery(_ expect: (@autoclosure () -> Bool, String) -> Void) {
     expect(gauge(0.734).percent == 73 && gauge(0.736).percent == 74 && gauge(1.2).percent == 100 && gauge(-1).percent == 0, "battery ring: whole percent, clamped")
     expect(gauge(0.734) == gauge(0.7349), "battery ring: under 1 % is no change (no redraw)")
     expect(TowerIcon.gaugeEnd(share: 0) == 90 && TowerIcon.gaugeEnd(share: 0.25) == 0 && TowerIcon.gaugeEnd(share: 0.5) == -90, "battery ring: fills clockwise from 12 o'clock")
-    expect(gauge(0.21).ink == .green && gauge(0.20).ink == .red && gauge(0.204).ink == .red && gauge(0.206).ink == .green && gauge(0.05).ink == .red,
+    expect(gauge(0.21).ink == .green && gauge(0.20).ink == .red && gauge(0.204).ink == .green && gauge(0.199).ink == .red && gauge(0.206).ink == .green && gauge(0.05).ink == .red,
            "battery ring: green above 20 %, red at 20 % or less")
-    expect(gauge(0.8, mono: true).ink == .template && gauge(0.2, mono: true).ink == .red && gauge(0.1, mono: true).ink == .red, "battery ring: Mono replaces green only")
+    expect(gauge(0.8, mono: true).ink == .template && gauge(0.2, mono: true).ink == .red && gauge(0.204, mono: true).ink == .template && gauge(0.1, mono: true).ink == .red, "battery ring: Mono replaces green only")
     expect(gauge(0.8).color == .systemGreen && gauge(0.1).color == .systemRed && gauge(0.8, mono: true).color == nil, "battery ring: overlay colors")
     expect(gauge(0.5).rims && !gauge(1).rims, "battery ring: rims only where the band is empty")
     expect(WheelBattery.gauge(hasBattery: false, level: 0.1, enabled: true, mono: false) == .plain
