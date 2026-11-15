@@ -1251,16 +1251,17 @@ func testWheel(_ expect: (@autoclosure () -> Bool, String) -> Void) {
     let suite = "CatsInMenubar.selftest.wheelShift"
     if let test = UserDefaults(suiteName: suite) {
         test.removePersistentDomain(forName: suite)
-        test.set(30.0, forKey: Pref.wheelSwap); WheelShift.migrate(test)
+        test.register(defaults: [Pref.wheelSwapRange: WheelShift.defaultRange])   // as in the app: defaults first
+        test.set(30.0, forKey: Pref.wheelSwap); WheelShift.migrate(test, domain: suite)
         let thirty = test.object(forKey: Pref.wheelSwapRange) as? Int, gone = test.object(forKey: Pref.wheelSwap) == nil
-        test.set(0.0, forKey: Pref.wheelSwap); test.removeObject(forKey: Pref.wheelSwapRange); WheelShift.migrate(test)
+        test.set(0.0, forKey: Pref.wheelSwap); test.removeObject(forKey: Pref.wheelSwapRange); WheelShift.migrate(test, domain: suite)
         let off = test.object(forKey: Pref.wheelSwapRange) as? Int
-        test.set(5.0, forKey: Pref.wheelSwap); test.set(2, forKey: Pref.wheelSwapRange); WheelShift.migrate(test)
+        test.set(5.0, forKey: Pref.wheelSwap); test.set(2, forKey: Pref.wheelSwapRange); WheelShift.migrate(test, domain: suite)
         let kept = test.integer(forKey: Pref.wheelSwapRange)
-        test.removeObject(forKey: Pref.wheelSwapRange); WheelShift.migrate(test)
-        let fresh = test.object(forKey: Pref.wheelSwapRange) == nil
+        test.removeObject(forKey: Pref.wheelSwapRange); WheelShift.migrate(test, domain: suite)
+        let fresh = test.persistentDomain(forName: suite)?[Pref.wheelSwapRange] == nil
         test.removePersistentDomain(forName: suite)
-        expect(thirty == 3 && gone && off == 0 && kept == 2 && fresh, "wheel turns: wheelSwap migrates once, 0 to Off, new choice kept")
+        expect(thirty == 3 && gone && off == 0 && kept == 2 && fresh, "wheel turns: wheelSwap migrates once over registered defaults, 0 to Off, new choice kept")
     } else { expect(false, "wheel turns: test defaults suite") }
 }
 

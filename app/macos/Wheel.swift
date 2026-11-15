@@ -166,10 +166,12 @@ enum WheelShift {
     }
     private static func mid(_ i: Int) -> Double { ranges[i].map { ($0.lowerBound + $0.upperBound) / 2 } ?? 0 }
 
-    /// Once: a fixed wheelSwap value from an older version becomes the nearest range preset.
-    static func migrate(_ defaults: UserDefaults) {
-        guard let old = defaults.object(forKey: Pref.wheelSwap) else { return }
-        if defaults.object(forKey: Pref.wheelSwapRange) == nil {
+    /// Once: a fixed wheelSwap value from an older version becomes the nearest range preset. Only the
+    /// saved values in `domain` count, not registered defaults (which always answer wheelSwapRange = 2).
+    static func migrate(_ defaults: UserDefaults, domain: String) {
+        let saved = defaults.persistentDomain(forName: domain) ?? [:]
+        guard let old = saved[Pref.wheelSwap] else { return }
+        if saved[Pref.wheelSwapRange] == nil {
             defaults.set(preset(forMinutes: (old as? NSNumber)?.doubleValue ?? 15), forKey: Pref.wheelSwapRange)
         }
         defaults.removeObject(forKey: Pref.wheelSwap)

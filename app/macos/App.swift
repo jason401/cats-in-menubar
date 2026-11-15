@@ -72,7 +72,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         defaults.register(defaults: Pref.defaults)
-        WheelShift.migrate(defaults)
+        WheelShift.migrate(defaults, domain: Bundle.main.bundleIdentifier ?? "")
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
         statusItem.button?.image = TowerIcon.menuBar()
         statusItem.button?.imagePosition = .imageLeft
