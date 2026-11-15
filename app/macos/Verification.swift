@@ -1537,13 +1537,15 @@ func testWheelDrop(_ expect: (@autoclosure () -> Bool, String) -> Void) {
     let c = make()
     let before = c.wheel!, entering = c.cats[0].appearance
     var changes = 0
+    var turnResets = 0
+    c.wheelTurnCompleted = { turnResets += 1 }
     c.wheelChanged = { changes += 1 }
     heldAtEdge(c)
     let from = c.cats[0].x
     expect(c.dropped(0) && c.cats[0].action == .hopping && c.cats[0].hopFrom == from
            && c.cats[0].hopTo == 680 && c.wheelWaiting, "wheel drop: jumps straight from the drop and waits")
     finish(c)
-    expect(c.wheel == entering && c.cats[0].appearance == before && changes == 1,
+    expect(c.wheel == entering && c.cats[0].appearance == before && changes == 1 && turnResets == 1,
            "wheel drop: exchanges whole appearance and notifies the timer owner once")
     expect(c.swapGap > 0 && !c.cats[0].home && c.cats[0].visible,
            "wheel drop: resets swap spacing and sends previous wheel cat outside")
@@ -1556,6 +1558,36 @@ func testWheelDrop(_ expect: (@autoclosure () -> Bool, String) -> Void) {
         let sized = make(); sized.cats[0].size = size; heldAtEdge(sized)
         expect(sized.dropped(0), "wheel drop: every size can drop at its clamped edge")
     }
+
+    // Switching off at any point of the entry hop never sends the cat into the tower.
+    for delay in [0.0, 0.4, 1.5] {
+        let cancelled = make(); heldAtEdge(cancelled)
+        let look = cancelled.cats[0].appearance
+        var completed = 0
+        cancelled.wheelTurnCompleted = { completed += 1 }
+        expect(cancelled.dropped(0), "wheel cancel: starts entry")
+        for _ in 0..<Int(delay * 30) { cancelled.step(1.0 / 30) }
+        cancelled.wheel = nil
+        var stayedOutside = true
+        for _ in 0..<240 {
+            cancelled.step(1.0 / 30)
+            stayedOutside = stayedOutside && !cancelled.cats[0].home && cancelled.cats[0].visible
+        }
+        expect(stayedOutside && cancelled.cats[0].appearance == look && completed == 0,
+               "wheel cancel: mid-hop lands outside as itself without completing turn")
+    }
+
+    let unrelated = make()
+    unrelated.beginHop(1, from: 700, to: 400, entering: false)
+    heldAtEdge(unrelated)
+    expect(unrelated.dropped(0), "wheel drop: unrelated tower hop-out does not block")
+
+    let appearanceOnly = make()
+    var resets = 0
+    appearanceOnly.wheelTurnCompleted = { resets += 1 }
+    appearanceOnly.enableWheel(appearanceOnly.cats[0].appearance)
+    appearanceOnly.applyAppearances([CatAppearance(coat: appearanceOnly.wheel!.coat, size: .kitten)])
+    expect(resets == 0, "wheel timer: appearance reconciliation does not reset turn")
 
     let outside = make(); outside.grab(0)
     expect(!outside.dropped(0) && outside.cats[0].action == .grooming, "wheel drop: outside zone grooms")

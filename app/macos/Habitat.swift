@@ -172,6 +172,7 @@ final class Colony {
     var wheel: CatAppearance? { didSet { if wheel == nil { cancelBaton() } } }
     var wheelX: Double?     // overlay x of the wheel's center
     var wheelChanged: (() -> Void)?  // another cat is in the wheel now
+    var wheelTurnCompleted: (() -> Void)?  // a baton pass landed; appearance edits do not end a turn
     private var lastWheelOut: Int?   // the coat that last left the wheel, not sent straight back in
     static let hopTime = 0.55
     static let turnTime = 0.36  // four turn-around frames at 0.09 s
@@ -767,6 +768,7 @@ final class Colony {
         cats[i].appearance = leaving
         cats[i].wheelBound = false; cats[i].homeBound = false
         cats[i].stay = nextStay(); lastWheelOut = leaving.coat
+        wheelTurnCompleted?()
         wheelChanged?(); swapped?()
         let spot = lanes.map { clamp(wheelX, to: $0, for: i) }.min { abs($0 - wheelX) < abs($1 - wheelX) } ?? cats[i].hopFrom
         cats[i].x = wheelX
@@ -799,7 +801,12 @@ final class Colony {
     func cancelBaton() {
         for i in cats.indices where cats[i].wheelBound {
             cats[i].wheelBound = false; cats[i].homeBound = false
-            if cats[i].action == .goingHome { start(i, .sitting, for: 2 + random() * 3) }
+            if cats[i].action == .hopping && cats[i].hopIn {
+                // A cancelled wheel entry must land outside, never fall through to tower entry.
+                let from = cats[i].x
+                let spot = lanes.map { clamp(from, to: $0, for: i) }.min { abs($0 - from) < abs($1 - from) } ?? from
+                beginHop(i, from: from, to: spot, entering: false)
+            } else if cats[i].action == .goingHome { start(i, .sitting, for: 2 + random() * 3) }
         }
     }
     /// The nearest free-space edge, with enough room for an adult cat's center and a small margin.
@@ -821,7 +828,8 @@ final class Colony {
         guard !keepLineup, wheel != nil, let wheelX, onStage, !quiet, !shuffling, !walkingHome,
               cats[i].visible, !cats[i].home, !cats[i].homeBound, !cats[i].inTunnel, !cats[i].escaping,
               cats[i].hiddenFor <= 0,
-              !cats.contains(where: { $0.swapping || $0.wheelBound || $0.action == .hopping }),
+              !cats.contains(where: { $0.swapping || $0.wheelBound
+                  || ($0.action == .hopping && ($0.hopIn || $0.hopFrom == wheelX)) }),
               lanes.contains(where: { $0.contains(cats[i].x, margin: cats[i].radius) }),
               wheelDropZone(wheelX)?.contains(cats[i].x) == true else {
             release(i)

@@ -102,6 +102,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         colony.swapped = { [weak self] in self?.syncLineup() }
         colony.shuffled = { [weak self] in self?.shuffleDone() }
         colony.wheelChanged = { [weak self] in self?.wheelCatChanged() }
+        colony.wheelTurnCompleted = { [weak self] in self?.wheelNextShift = nil }
         system.updated = { [weak self] stats in self?.systemUpdated(stats) }
         NotificationCenter.default.addObserver(self, selector: #selector(preferencesChanged), name: UserDefaults.didChangeNotification, object: nil)
         applyOptions()
@@ -352,7 +353,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         guard let wheel = colony.wheel else { return }
         if let data = try? JSONEncoder().encode(wheel) { defaults.set(data, forKey: Pref.wheelCat) }
         AppModel.log("CPU wheel: \(CatAppearance.names[wheel.coat]) takes a turn")
-        wheelNextShift = nil   // every completed turn, including a manual drop, starts a fresh wait
         wheelStep = 0
         if wheelOn && wheelCat != nil { stepWheel() }
     }
