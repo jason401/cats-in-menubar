@@ -64,6 +64,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     var wheelTimer: Timer?
     var wheelAngle = 0.0, wheelStep = 0.0, wheelLast = 0.0
     var wheelGait = WheelPace.Gait.rest
+    var wheelShiftStart = 0.0
     let defaults = UserDefaults.standard
 
     func applicationDidFinishLaunching(_ notification: Notification) {
@@ -260,7 +261,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         if on {
             let view = WheelCatView(frame: NSRect(x: 0, y: 0, width: 20, height: TowerIcon.wheelSize.height))
             button.addSubview(view); wheelCat = view
-            wheelLast = ProcessInfo.processInfo.systemUptime
+            wheelLast = ProcessInfo.processInfo.systemUptime; wheelShiftStart = wheelLast
             stepWheel()
         } else {
             wheelCat?.removeFromSuperview(); wheelCat = nil
@@ -280,6 +281,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let gait = paused ? .rest : wheelPace.gait
         let motion = paused ? WheelPace.Motion(frameRate: 0, degreesPerSecond: 0) : wheelPace.motion(lowPower: ProcessInfo.processInfo.isLowPowerModeEnabled)
         if gait != wheelGait { wheelGait = gait; wheelStep = 0 } else { wheelStep += dt * motion.frameRate }
+        // Cats take turns in the wheel. Turning it off keeps the orange tabby.
+        let shift = defaults.double(forKey: Pref.wheelSwap) * 60
+        if shift <= 0 { cat.coat = 0; wheelShiftStart = now }
+        else if now - wheelShiftStart >= shift {
+            let outside = Set(colony.cats.filter { $0.visible && !$0.home }.map(\.coat))
+            cat.coat = WheelCatView.nextCoat(after: cat.coat, outside: outside, roll: Double.random(in: 0..<1))
+            wheelShiftStart = now; wheelStep = 0
+            AppModel.log("CPU wheel: \(CatAppearance.names[cat.coat]) takes a turn")
+        }
         // Turning clockwise: the cat runs right, so the tread under its paws moves left.
         wheelAngle = (wheelAngle - dt * motion.degreesPerSecond).truncatingRemainder(dividingBy: 360)
         shownHomeCount = colony.homeCount

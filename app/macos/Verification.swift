@@ -1209,8 +1209,15 @@ func testWheel(_ expect: (@autoclosure () -> Bool, String) -> Void) {
     }
     expect(TowerIcon.menuBar(wheel: 0).size == TowerIcon.wheelSize && TowerIcon.menuBar().size == NSSize(width: 18, height: 18), "wheel widens the icon only when on")
     for gait in [WheelPace.Gait.rest, .walk, .run] {
-        expect((0..<20).allSatisfy { (0..<SpriteAtlas.frameCount).contains(WheelCatView.cell(gait, step: $0, coat: 0)) }, "wheel cat cells exist for \(gait)")
+        expect((0..<8).allSatisfy { coat in (0..<20).allSatisfy { (0..<SpriteAtlas.frameCount).contains(WheelCatView.cell(gait, step: $0, coat: coat)) } },
+               "wheel cat cells exist for \(gait) in every coat")
     }
+    // Taking turns: never the same cat twice in a row, a cat that is out playing only when all are out.
+    let rolls = stride(from: 0.0, to: 1.0, by: 0.05)
+    expect(rolls.allSatisfy { WheelCatView.nextCoat(after: 3, outside: [], roll: $0) != 3 }, "wheel: the next cat is a different one")
+    expect(rolls.allSatisfy { ![0, 1, 2].contains(WheelCatView.nextCoat(after: 0, outside: [1, 2], roll: $0)) }, "wheel: skips cats that are out playing")
+    expect(rolls.allSatisfy { WheelCatView.nextCoat(after: 0, outside: Set(0..<8), roll: $0) != 0 }, "wheel: everyone out still swaps")
+    expect(Set(rolls.map { WheelCatView.nextCoat(after: 0, outside: [], roll: $0) }) == Set(1..<8), "wheel: every other cat gets a turn")
 }
 
 /// Tower + wheel at each pace on dark and light menu bars, enlarged and at actual Retina size.
@@ -1222,13 +1229,13 @@ func renderWheel(to path: String) {
     NSGraphicsContext.current = NSGraphicsContext(bitmapImageRep: bitmap)
     NSColor.white.setFill(); NSRect(x: 0, y: 0, width: width, height: height).fill()
     let label: [NSAttributedString.Key: Any] = [.font: NSFont.systemFont(ofSize: 13), .foregroundColor: NSColor.darkGray]
-    func icon(cats: Int, angle: Double, gait: WheelPace.Gait, step: Int, at origin: NSPoint, scale: CGFloat, ink: NSColor) {
+    func icon(cats: Int, angle: Double, gait: WheelPace.Gait, step: Int, coat: Int = 0, at origin: NSPoint, scale: CGFloat, ink: NSColor) {
         let image = TowerIcon.menuBar(cats: cats, wheel: angle)
         let tinted = NSImage(size: image.size, flipped: false) { rect in image.draw(in: rect); ink.set(); rect.fill(using: .sourceAtop); return true }
         tinted.draw(in: NSRect(x: origin.x, y: origin.y, width: image.size.width * scale, height: image.size.height * scale))
         NSGraphicsContext.saveGraphicsState()
         let transform = NSAffineTransform(); transform.translateX(by: origin.x, yBy: origin.y); transform.scale(by: scale); transform.concat()
-        WheelCatView.draw(cell: WheelCatView.cell(gait, step: step, coat: 0), coat: 0, origin: NSPoint(x: 20, y: 0))
+        WheelCatView.draw(cell: WheelCatView.cell(gait, step: step, coat: coat), coat: coat, origin: NSPoint(x: 20, y: 0))
         NSGraphicsContext.restoreGraphicsState()
     }
     let states: [(String, WheelPace.Gait, Int, Double, Int)] = [("CPU 2% · nap", .rest, 0, 0, 0), ("CPU 12% · walk", .walk, 3, -20, 0),
@@ -1246,7 +1253,8 @@ func renderWheel(to path: String) {
         bar.setFill(); NSRect(x: 20, y: y - 76, width: 1060, height: 36).fill()
         for i in 0..<8 {
             let gait: WheelPace.Gait = i < 2 ? .rest : i < 4 ? .walk : .run
-            icon(cats: i % 4, angle: Double(-i * 9), gait: gait, step: i, at: NSPoint(x: CGFloat(40 + i * 130), y: y - 74), scale: 1.6, ink: ink)
+            // Each slot shows a different coat taking its turn.
+            icon(cats: i % 4, angle: Double(-i * 9), gait: gait, step: i, coat: i, at: NSPoint(x: CGFloat(40 + i * 130), y: y - 74), scale: 1.6, ink: ink)
         }
     }
     NSGraphicsContext.restoreGraphicsState()

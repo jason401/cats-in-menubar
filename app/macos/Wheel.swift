@@ -49,19 +49,26 @@ extension TowerIcon {
     /// Center and inner tread radius of the wheel inside the 40 x 20 image.
     static let wheelCenter = NSPoint(x: 30, y: 10.6)
     static let wheelInner: CGFloat = 6.9
+    /// Outer rim radius; the tread band between it and `wheelInner` is about 2.4 pt (5 px on Retina).
+    static let wheelOuter: CGFloat = 9.0
     /// The wheel's frame (rim, rungs and stand). Rungs turn with `angle` degrees.
     static func drawWheel(angle: Double) {
         let c = wheelCenter
-        let rim = NSBezierPath(ovalIn: NSRect(x: c.x - 9, y: c.y - 9, width: 18, height: 18))
-        rim.lineWidth = 0.9
+        // A ladder band: a bold outer rim and a thin tread ring, joined by rungs across the whole band,
+        // so the rungs and the gaps between them read as turning even at actual size.
+        let rim = NSBezierPath(ovalIn: NSRect(x: c.x - wheelOuter, y: c.y - wheelOuter, width: wheelOuter * 2, height: wheelOuter * 2))
+        rim.lineWidth = 1.3
         rim.stroke()
+        let tread = NSBezierPath(ovalIn: NSRect(x: c.x - wheelInner, y: c.y - wheelInner, width: wheelInner * 2, height: wheelInner * 2))
+        tread.lineWidth = 0.6
+        tread.stroke()
         let rungs = NSBezierPath()
-        rungs.lineWidth = 0.9
-        rungs.lineCapStyle = .round
+        rungs.lineWidth = 1.1
+        rungs.lineCapStyle = .butt
         for i in 0..<12 {
             let a = (angle + Double(i) * 30) * .pi / 180
             rungs.move(to: NSPoint(x: c.x + wheelInner * cos(a), y: c.y + wheelInner * sin(a)))
-            rungs.line(to: NSPoint(x: c.x + 8.2 * cos(a), y: c.y + 8.2 * sin(a)))
+            rungs.line(to: NSPoint(x: c.x + wheelOuter * cos(a), y: c.y + wheelOuter * sin(a)))
         }
         rungs.stroke()
         NSBezierPath(ovalIn: NSRect(x: c.x - 0.9, y: c.y - 0.9, width: 1.8, height: 1.8)).fill()
@@ -82,6 +89,15 @@ final class WheelCatView: NSView {
     /// Body length about 12 pt, so a galloping cat fits the 13.8 pt tread.
     static let scale: CGFloat = 0.4
     override func hitTest(_ point: NSPoint) -> NSView? { nil }
+
+    /// The coat for the next shift in the wheel: never the same cat again, and one that is not out
+    /// playing right now when there is one, so the same cat does not show twice.
+    static func nextCoat(after current: Int, outside: Set<Int>, roll: Double) -> Int {
+        let others = (0..<8).filter { $0 != current }
+        let free = others.filter { !outside.contains($0) }
+        let pool = free.isEmpty ? others : free
+        return pool[min(pool.count - 1, max(0, Int(roll * Double(pool.count))))]
+    }
 
     /// The cell for a gait and step: loaf still, walk and run loop through their cells.
     static func cell(_ gait: WheelPace.Gait, step: Int, coat: Int) -> Int {
