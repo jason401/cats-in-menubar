@@ -97,13 +97,7 @@ struct DashboardView: View {
                     }
                 }
                 if showBattery {
-                    if s.hasBattery {
-                        StatSection(icon: s.charging ? "battery.100.bolt" : "battery.75", title: "Battery: \(Int(s.batteryLevel * 100))%", open: { openSystemSettings("com.apple.Battery-Settings.extension") }, help: "Open Battery settings") {
-                            Detail(nil, s.charging ? "Charging" : (s.onAC ? "On power adapter" : "On battery"))
-                        }
-                    } else {
-                        StatSection(icon: "bolt.fill", title: "Power: Adapter", open: { openSystemSettings("com.apple.Battery-Settings.extension") }, help: "Open Energy settings") { EmptyView() }
-                    }
+                    BatterySection(stats: s)
                 }
                 if showNetwork {
                     if let wifi = s.wifi {
@@ -201,6 +195,7 @@ private struct StatSection<Content: View>: View {
     /// Clicking the badge opens a related app or settings page (Activity Monitor for CPU and memory).
     var open: (() -> Void)? = nil
     var help = "Open Activity Monitor"
+    var titleColor = Color.primary
     @ViewBuilder var content: Content
     @StateObject private var hover = Hover()
     private var hovering: Bool { hover.on }
@@ -217,7 +212,7 @@ private struct StatSection<Content: View>: View {
                 .help(open == nil ? "" : help)
             VStack(alignment: .leading, spacing: 2) {
                 HStack(spacing: 4) {
-                    Text(title).font(.system(size: 13, weight: .semibold))
+                    Text(title).font(.system(size: 13, weight: .semibold)).foregroundStyle(titleColor)
                     if open != nil {
                         Image(systemName: "arrow.up.forward.app").font(.system(size: 10)).foregroundStyle(.secondary).opacity(hovering ? 1 : 0)
                     }
@@ -381,13 +376,66 @@ private struct TopApps: View {
 
 private struct Meter: View {
     let value: Double
+    /// Usage meters leave this nil: accent color, orange past 90%. The battery passes its own state color.
+    var tint: Color? = nil
     var body: some View {
         GeometryReader { geometry in
             ZStack(alignment: .leading) {
                 Capsule().fill(Color.primary.opacity(0.1))
-                Capsule().fill(value > 0.9 ? Color.orange : Color.accentColor).frame(width: geometry.size.width * min(1, max(0, value)))
+                Capsule().fill(tint ?? (value > 0.9 ? Color.orange : Color.accentColor)).frame(width: geometry.size.width * min(1, max(0, value)))
             }
         }.frame(height: 6).padding(.top, 4)
+    }
+}
+
+/// Battery colors run opposite to the usage meters (full is good), so only this meter uses state colors.
+/// The first matching rule wins; the percentage and status text stay so color is never the only signal.
+enum BatteryTone: Equatable {
+    case green, yellow, orange, red
+
+    /// 20% and 10% follow the iPhone's low-battery alerts; they are this app's choice, not an Apple color rule.
+    init(_ s: SystemStats) {
+        if s.charging || s.onAC { self = .green }            // Plugged in: nothing to warn about.
+        else if Self.percent(s) <= 10 { self = .red }
+        else if Self.percent(s) <= 20 { self = .orange }
+        else if s.lowPowerMode { self = .yellow }            // Apple's Low Power Mode color.
+        else { self = .green }
+    }
+
+    var color: Color {
+        switch self {
+        case .green: return .green
+        case .yellow: return .yellow
+        case .orange: return .orange
+        case .red: return .red
+        }
+    }
+
+    /// One rounding for the title and the thresholds, so "Battery: 10%" is always red.
+    static func percent(_ s: SystemStats) -> Int { Int((min(1, max(0, s.batteryLevel)) * 100).rounded()) }
+
+    /// The badge follows the charge in quarters; charging keeps the bolt.
+    static func icon(_ s: SystemStats) -> String {
+        if s.charging { return "battery.100.bolt" }
+        let level = min(1, max(0, s.batteryLevel))
+        return "battery.\([0, 25, 50, 75, 100][Int((level * 4).rounded())])"
+    }
+}
+
+struct BatterySection: View {
+    let stats: SystemStats
+    var body: some View {
+        let s = stats
+        if s.hasBattery {
+            let tone = BatteryTone(s)
+            StatSection(icon: BatteryTone.icon(s), title: "Battery: \(BatteryTone.percent(s))%", open: { openSystemSettings("com.apple.Battery-Settings.extension") }, help: "Open Battery settings",
+                        titleColor: tone == .red ? .red : .primary) {
+                Detail(nil, s.charging ? "Charging" : (s.onAC ? "On power adapter" : (s.lowPowerMode ? "On battery · Low Power Mode" : "On battery")))
+                Meter(value: s.batteryLevel, tint: tone.color)
+            }
+        } else {
+            StatSection(icon: "bolt.fill", title: "Power: Adapter", open: { openSystemSettings("com.apple.Battery-Settings.extension") }, help: "Open Energy settings") { EmptyView() }
+        }
     }
 }
 

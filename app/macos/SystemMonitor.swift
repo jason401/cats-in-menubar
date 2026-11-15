@@ -15,7 +15,7 @@ struct SystemStats {
     var wifi: WiFiInfo?
     var diskTotal = 0.0, diskFree = 0.0
     var diskUsed: Double { max(0, diskTotal - diskFree) }
-    var hasBattery = false, batteryLevel = 0.0, charging = false, onAC = true
+    var hasBattery = false, batteryLevel = 0.0, charging = false, onAC = true, lowPowerMode = false
     var networkName = "—", localIP = "—"
     var upload = 0.0, download = 0.0          // bytes per second
     var thermal = ProcessInfo.ThermalState.nominal
@@ -119,6 +119,7 @@ final class SystemMonitor: ObservableObject {
     private func readBattery(into stats: inout SystemStats) {
         guard let info = IOPSCopyPowerSourcesInfo()?.takeRetainedValue(),
               let sources = IOPSCopyPowerSourcesList(info)?.takeRetainedValue() as? [CFTypeRef] else { return }
+        stats.lowPowerMode = ProcessInfo.processInfo.isLowPowerModeEnabled
         stats.hasBattery = false
         for source in sources {
             guard let description = IOPSGetPowerSourceDescription(info, source)?.takeUnretainedValue() as? [String: Any],

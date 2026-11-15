@@ -797,6 +797,7 @@ func runSelfTests() {
     print("App sample: \(Int(cost * 1000)) ms; CPU \(usage.cpu.map { "\($0.name) \(Int($0.value * 1000) / 10)%" }); memory \(usage.memory.map { "\($0.name) \(Int($0.value / 1e6)) MB" })")
     testUpdateProgress(expect)
     testUpdateChannels(expect)
+    testBatteryTone(expect)
     print("PASS: \(checks) assertions; 30,000 simulation steps with changing obstacles")
 }
 
@@ -853,6 +854,34 @@ func renderPreview(to path: String) {
     print("Preview: \(path)")
 }
 
+/// Fixed battery states for tests and previews; nothing here reads the real power source or preferences.
+func batteryPreviewStates() -> [(String, SystemStats)] {
+    func stats(_ level: Double, charging: Bool = false, onAC: Bool = false, lowPower: Bool = false, battery: Bool = true) -> SystemStats {
+        var s = SystemStats()
+        s.hasBattery = battery; s.batteryLevel = level; s.charging = charging; s.onAC = onAC; s.lowPowerMode = lowPower
+        return s
+    }
+    return [("charging-52", stats(0.52, charging: true, onAC: true)), ("battery-50", stats(0.50)), ("battery-15", stats(0.15)),
+            ("battery-8", stats(0.08)), ("low-power-40", stats(0.40, lowPower: true)), ("adapter-full", stats(1.0, onAC: true)),
+            ("adapter-low-power-8", stats(0.08, onAC: true, lowPower: true)), ("no-battery", stats(0, onAC: true, battery: false))]
+}
+
+func testBatteryTone(_ expect: (@autoclosure () -> Bool, String) -> Void) {
+    let tones = Dictionary(uniqueKeysWithValues: batteryPreviewStates().map { ($0.0, (BatteryTone($0.1), BatteryTone.icon($0.1))) })
+    expect(tones["charging-52"]! == (.green, "battery.100.bolt"), "charging is green with the bolt")
+    expect(tones["battery-50"]! == (.green, "battery.50"), "half charge on battery is green")
+    expect(tones["battery-15"]! == (.orange, "battery.25"), "15% on battery is orange")
+    expect(tones["battery-8"]! == (.red, "battery.0"), "8% on battery is red")
+    expect(tones["low-power-40"]! == (.yellow, "battery.50"), "Low Power Mode is yellow")
+    expect(tones["adapter-full"]! == (.green, "battery.100"), "a full battery is green, never the usage meters' orange")
+    expect(tones["adapter-low-power-8"]!.0 == .green, "the adapter outranks low charge and Low Power Mode")
+    var edge = SystemStats(); edge.hasBattery = true; edge.onAC = false
+    edge.batteryLevel = 0.20; expect(BatteryTone(edge) == .orange, "20% is already orange")
+    edge.batteryLevel = 0.10; expect(BatteryTone(edge) == .red, "10% is already red")
+    edge.batteryLevel = 0.21; edge.lowPowerMode = true; expect(BatteryTone(edge) == .yellow, "Low Power Mode applies above 20%")
+    edge.batteryLevel = 0.15; expect(BatteryTone(edge) == .orange, "low charge outranks Low Power Mode")
+}
+
 /// Renders the dashboard and settings pages to PNG files for visual review.
 func renderPanels(to directory: String) {
     let app = NSApplication.shared
@@ -877,6 +906,16 @@ func renderPanels(to directory: String) {
     let dashboard = NSHostingView(rootView: DashboardView(model: model, system: system, openSettings: {}, play: {}).background(Color(nsColor: .windowBackgroundColor)))
     dashboard.frame = NSRect(origin: .zero, size: dashboard.fittingSize)
     save(dashboard, "dashboard")
+    let batteries = NSHostingView(rootView: VStack(alignment: .leading, spacing: 0) {
+        ForEach(batteryPreviewStates(), id: \.0) { name, stats in
+            VStack(alignment: .leading, spacing: 0) {
+                Text(name).font(.caption2).foregroundStyle(.secondary)
+                BatterySection(stats: stats)
+            }.padding(.vertical, 4)
+        }
+    }.padding(12).frame(width: 300).background(Color(nsColor: .windowBackgroundColor)))
+    batteries.frame = NSRect(origin: .zero, size: batteries.fittingSize)
+    save(batteries, "dashboard-battery-states")
     let controller = SettingsWindowController(model: model)
     for (index, tab) in SettingsWindowController.tabs.enumerated() {
         let view = NSHostingView(rootView: controller.view(for: index))
