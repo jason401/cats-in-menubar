@@ -65,11 +65,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     var wheelTimer: Timer?
     var wheelAngle = 0.0, wheelStep = 0.0, wheelLast = 0.0
     var wheelGait = WheelPace.Gait.rest
-    var wheelShiftStart = 0.0
+    /// Wheel seconds left until the next cat's turn; counts down only while the wheel runs unpaused.
+    var wheelNextShift: Double?
+    var wheelShiftRange = -1
     let defaults = UserDefaults.standard
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         defaults.register(defaults: Pref.defaults)
+        WheelShift.migrate(defaults)
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
         statusItem.button?.image = TowerIcon.menuBar()
         statusItem.button?.imagePosition = .imageLeft
@@ -269,7 +272,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         if on {
             let view = WheelOverlayView(frame: NSRect(x: 0, y: 0, width: 20, height: TowerIcon.wheelSize.height))
             button.addSubview(view); wheelCat = view
-            wheelLast = ProcessInfo.processInfo.systemUptime; wheelShiftStart = wheelLast
+            wheelLast = ProcessInfo.processInfo.systemUptime; wheelNextShift = nil
             stepWheel()
         } else {
             wheelCat?.removeFromSuperview(); wheelCat = nil
@@ -284,20 +287,26 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         wheelTimer?.invalidate(); wheelTimer = nil
         guard wheelOn, !suspended, let button = statusItem.button, let cat = wheelCat else { return }
         let now = ProcessInfo.processInfo.systemUptime
-        let dt = min(0.5, max(0, now - wheelLast)); wheelLast = now
+        // Frames are at most 1 s apart, so a longer gap is sleep and does not count toward a turn.
+        let elapsed = min(2, max(0, now - wheelLast)), dt = min(0.5, elapsed); wheelLast = now
         // Paused cats rest in the wheel too.
         let gait = paused ? .rest : wheelPace.gait
         let motion = paused ? WheelPace.Motion(frameRate: 0, degreesPerSecond: 0) : wheelPace.motion(lowPower: ProcessInfo.processInfo.isLowPowerModeEnabled)
         if gait != wheelGait { wheelGait = gait; wheelStep = 0 } else { wheelStep += dt * motion.frameRate }
-        // Cats take turns in the wheel. Turning it off keeps the orange tabby.
-        let shift = defaults.double(forKey: Pref.wheelSwap) * 60
-        if shift <= 0 { cat.coat = 0; wheelShiftStart = now }
-        else if now - wheelShiftStart >= shift {
-            let outside = Set(colony.cats.filter { $0.visible && !$0.home }.map(\.coat))
-            cat.coat = WheelOverlayView.nextCoat(after: cat.coat, outside: outside, roll: Double.random(in: 0..<1))
-            wheelShiftStart = now; wheelStep = 0
-            AppModel.log("CPU wheel: \(CatAppearance.names[cat.coat]) takes a turn")
-        }
+        // Cats take turns in the wheel after a random wait, drawn again at every swap and whenever the
+        // range changes. Off keeps the orange tabby. Pause stops the countdown.
+        let range = defaults.integer(forKey: Pref.wheelSwapRange)
+        if range != wheelShiftRange { wheelShiftRange = range; wheelNextShift = nil }
+        if WheelShift.interval(range: range, roll: 0) == nil { cat.coat = 0; wheelNextShift = nil }
+        else if let left = wheelNextShift {
+            if !paused { wheelNextShift = left - elapsed }
+            if let left = wheelNextShift, left <= 0 {
+                let outside = Set(colony.cats.filter { $0.visible && !$0.home }.map(\.coat))
+                cat.coat = WheelOverlayView.nextCoat(after: cat.coat, outside: outside, roll: Double.random(in: 0..<1))
+                wheelNextShift = WheelShift.interval(range: range, roll: Double.random(in: 0...1)); wheelStep = 0
+                AppModel.log("CPU wheel: \(CatAppearance.names[cat.coat]) takes a turn")
+            }
+        } else { wheelNextShift = WheelShift.interval(range: range, roll: Double.random(in: 0...1)) }
         // Turning clockwise: the cat runs right, so the tread under its paws moves left.
         wheelAngle = (wheelAngle - dt * motion.degreesPerSecond).truncatingRemainder(dividingBy: 360)
         shownHomeCount = colony.homeCount

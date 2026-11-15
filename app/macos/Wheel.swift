@@ -146,6 +146,36 @@ extension TowerIcon {
 /// The colored layer over the wheel: a green or red battery share, then the cat on top. It sits over the
 /// template icon as its own view, so the tower and wheel keep the menu bar's automatic tinting and only these
 /// are drawn in color. Clicks pass through.
+/// When the next cat takes its turn: a fresh uniform random wait inside the chosen range at every swap.
+/// Presets (the wheelSwapRange pref): 0 Off, 1 2–6 min, 2 5–15 min (default), 3 15–30 min.
+enum WheelShift {
+    static let ranges: [ClosedRange<Double>?] = [nil, 2...6, 5...15, 15...30]   // minutes
+    static let defaultRange = 2
+
+    /// Seconds until the next swap for a roll in 0...1, or nil when taking turns is off.
+    static func interval(range: Int, roll: Double) -> Double? {
+        guard ranges.indices.contains(range), let minutes = ranges[range] else { return nil }
+        let t = min(1, max(0, roll))
+        return (minutes.lowerBound + t * (minutes.upperBound - minutes.lowerBound)) * 60
+    }
+
+    /// The preset nearest an old fixed interval in minutes (by range midpoint); 0 or less is Off.
+    static func preset(forMinutes old: Double) -> Int {
+        guard old > 0 else { return 0 }
+        return ranges.indices.dropFirst().min { abs(mid($0) - old) < abs(mid($1) - old) } ?? defaultRange
+    }
+    private static func mid(_ i: Int) -> Double { ranges[i].map { ($0.lowerBound + $0.upperBound) / 2 } ?? 0 }
+
+    /// Once: a fixed wheelSwap value from an older version becomes the nearest range preset.
+    static func migrate(_ defaults: UserDefaults) {
+        guard let old = defaults.object(forKey: Pref.wheelSwap) else { return }
+        if defaults.object(forKey: Pref.wheelSwapRange) == nil {
+            defaults.set(preset(forMinutes: (old as? NSNumber)?.doubleValue ?? 15), forKey: Pref.wheelSwapRange)
+        }
+        defaults.removeObject(forKey: Pref.wheelSwap)
+    }
+}
+
 final class WheelOverlayView: NSView {
     var coat = 0
     var cell = 0 { didSet { if cell != oldValue { needsDisplay = true } } }

@@ -1240,6 +1240,28 @@ func testWheel(_ expect: (@autoclosure () -> Bool, String) -> Void) {
     expect(rolls.allSatisfy { ![0, 1, 2].contains(WheelOverlayView.nextCoat(after: 0, outside: [1, 2], roll: $0)) }, "wheel: skips cats that are out playing")
     expect(rolls.allSatisfy { WheelOverlayView.nextCoat(after: 0, outside: Set(0..<8), roll: $0) != 0 }, "wheel: everyone out still swaps")
     expect(Set(rolls.map { WheelOverlayView.nextCoat(after: 0, outside: [], roll: $0) }) == Set(1..<8), "wheel: every other cat gets a turn")
+    // When: a random wait inside the preset range, the ends at roll 0 and 1, Off never swaps.
+    let bounds: [Int: ClosedRange<Double>] = [1: 120...360, 2: 300...900, 3: 900...1800]
+    expect(bounds.allSatisfy { range, b in rolls.allSatisfy { WheelShift.interval(range: range, roll: $0).map(b.contains) == true } }, "wheel turns: wait inside the range")
+    expect(bounds.allSatisfy { WheelShift.interval(range: $0, roll: 0) == $1.lowerBound && WheelShift.interval(range: $0, roll: 1) == $1.upperBound }, "wheel turns: roll 0 and 1 hit the ends")
+    expect(WheelShift.interval(range: 2, roll: -1) == 300 && WheelShift.interval(range: 2, roll: 2) == 900, "wheel turns: roll is clamped")
+    expect(WheelShift.interval(range: 0, roll: 0.5) == nil && WheelShift.interval(range: 9, roll: 0.5) == nil, "wheel turns: Off (and unknown) never swaps")
+    expect([0.0: 0, -1: 0, 5: 1, 15: 2, 30: 3, 3: 1, 10: 2, 60: 3].allSatisfy { WheelShift.preset(forMinutes: $0) == $1 }, "wheel turns: old interval to nearest preset")
+    // Migration on a throwaway defaults suite, never the app's own.
+    let suite = "CatsInMenubar.selftest.wheelShift"
+    if let test = UserDefaults(suiteName: suite) {
+        test.removePersistentDomain(forName: suite)
+        test.set(30.0, forKey: Pref.wheelSwap); WheelShift.migrate(test)
+        let thirty = test.object(forKey: Pref.wheelSwapRange) as? Int, gone = test.object(forKey: Pref.wheelSwap) == nil
+        test.set(0.0, forKey: Pref.wheelSwap); test.removeObject(forKey: Pref.wheelSwapRange); WheelShift.migrate(test)
+        let off = test.object(forKey: Pref.wheelSwapRange) as? Int
+        test.set(5.0, forKey: Pref.wheelSwap); test.set(2, forKey: Pref.wheelSwapRange); WheelShift.migrate(test)
+        let kept = test.integer(forKey: Pref.wheelSwapRange)
+        test.removeObject(forKey: Pref.wheelSwapRange); WheelShift.migrate(test)
+        let fresh = test.object(forKey: Pref.wheelSwapRange) == nil
+        test.removePersistentDomain(forName: suite)
+        expect(thirty == 3 && gone && off == 0 && kept == 2 && fresh, "wheel turns: wheelSwap migrates once, 0 to Off, new choice kept")
+    } else { expect(false, "wheel turns: test defaults suite") }
 }
 
 /// The wheel's battery gauge: share and angle, the 20 % color line, Mono, and the plain band when off or
