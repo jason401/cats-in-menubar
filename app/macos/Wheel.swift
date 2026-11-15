@@ -49,7 +49,7 @@ extension TowerIcon {
     /// Center and inner tread radius of the wheel inside the 40 x 20 image.
     static let wheelCenter = NSPoint(x: 30, y: 10.6)
     static let wheelInner: CGFloat = 6.9
-    /// Outer rim radius; the tread band between it and `wheelInner` is about 2.4 pt (5 px on Retina).
+    /// Outer rim radius. With the strokes, the band from `wheelInner` out is about 3 pt (6 px on Retina).
     static let wheelOuter: CGFloat = 9.0
     /// The wheel's frame (rim, rungs and stand). Rungs turn with `angle` degrees.
     static func drawWheel(angle: Double) {
