@@ -141,6 +141,8 @@ extension TowerIcon {
     static func towerCenterX(in rect: NSRect, wheel: Bool) -> Double {
         wheel ? rect.minX + (rect.width - wheelSize.width) / 2 + towerOffset + 9 : rect.midX
     }
+    /// Center x of the wheel inside a status button `rect` that holds the wheel image centered.
+    static func wheelCenterX(in rect: NSRect) -> Double { rect.minX + (rect.width - wheelSize.width) / 2 + wheelCenter.x }
 }
 
 /// The colored layer over the wheel: a green or red battery share, then the cat on top. It sits over the
@@ -188,8 +190,8 @@ final class WheelOverlayView: NSView {
     static let scale: CGFloat = 0.4
     override func hitTest(_ point: NSPoint) -> NSView? { nil }
 
-    /// The coat for the next shift in the wheel: never the same cat again, and one that is not out
-    /// playing right now when there is one, so the same cat does not show twice.
+    /// The coat for the next shift in the wheel: never the same cat again, and one no cat of the colony
+    /// wears now when there is one, so the same cat does not show twice.
     static func nextCoat(after current: Int, outside: Set<Int>, roll: Double) -> Int {
         let others = (0..<8).filter { $0 != current }
         let free = others.filter { !outside.contains($0) }

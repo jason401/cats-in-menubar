@@ -101,6 +101,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         model.keepCurrent = { [weak self] in self?.keepCurrent() }
         colony.swapped = { [weak self] in self?.syncLineup() }
         colony.shuffled = { [weak self] in self?.shuffleDone() }
+        colony.wheelChanged = { [weak self] in self?.wheelCatChanged() }
         system.updated = { [weak self] stats in self?.systemUpdated(stats) }
         NotificationCenter.default.addObserver(self, selector: #selector(preferencesChanged), name: UserDefaults.didChangeNotification, object: nil)
         applyOptions()
@@ -195,6 +196,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // Picking a cat by hand ends taking turns.
         defaults.set(false, forKey: Pref.rotate); colony.rotation = nil
         colony.cats[index].appearance = appearance
+        colony.settleWheel()
         colony.reconcile()
         saveLineup()
         defaults.set(true, forKey: Pref.fixedLineup)
@@ -270,11 +272,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         guard let button = statusItem.button else { return }
         button.imagePosition = on ? .imageOnly : .imageLeft
         if on {
+            colony.enableWheel(defaults.data(forKey: Pref.wheelCat).flatMap { try? JSONDecoder().decode(CatAppearance.self, from: $0) })
             let view = WheelOverlayView(frame: NSRect(x: 0, y: 0, width: 20, height: TowerIcon.wheelSize.height))
             button.addSubview(view); wheelCat = view
             wheelLast = ProcessInfo.processInfo.systemUptime; wheelNextShift = nil
             stepWheel()
         } else {
+            colony.wheel = nil; colony.wheelX = nil   // a cat on its way to the wheel carries on as itself
             wheelCat?.removeFromSuperview(); wheelCat = nil
             shownHomeCount = -1; updateTowerIcon()
         }
@@ -289,24 +293,23 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let now = ProcessInfo.processInfo.systemUptime
         // Frames are at most 1 s apart, so a longer gap is sleep and does not count toward a turn.
         let elapsed = min(2, max(0, now - wheelLast)), dt = min(0.5, elapsed); wheelLast = now
-        // Paused cats rest in the wheel too.
-        let gait = paused ? .rest : wheelPace.gait
-        let motion = paused ? WheelPace.Motion(frameRate: 0, degreesPerSecond: 0) : wheelPace.motion(lowPower: ProcessInfo.processInfo.isLowPowerModeEnabled)
+        // Paused cats rest in the wheel too, and so does a wheel cat waiting for the cat taking over.
+        let waiting = paused || colony.wheelWaiting
+        let gait = waiting ? .rest : wheelPace.gait
+        let motion = waiting ? WheelPace.Motion(frameRate: 0, degreesPerSecond: 0) : wheelPace.motion(lowPower: ProcessInfo.processInfo.isLowPowerModeEnabled)
         if gait != wheelGait { wheelGait = gait; wheelStep = 0 } else { wheelStep += dt * motion.frameRate }
         // Cats take turns in the wheel after a random wait, drawn again at every swap and whenever the
-        // range changes. Off keeps the orange tabby. Pause stops the countdown.
+        // range changes. Off keeps the cat in it. Pause stops the countdown.
         let range = defaults.integer(forKey: Pref.wheelSwapRange)
         if range != wheelShiftRange { wheelShiftRange = range; wheelNextShift = nil }
-        if WheelShift.interval(range: range, roll: 0) == nil { cat.coat = 0; wheelNextShift = nil }
+        if WheelShift.interval(range: range, roll: 0) == nil { wheelNextShift = nil }
         else if let left = wheelNextShift {
             if !paused { wheelNextShift = left - elapsed }
             if let left = wheelNextShift, left <= 0 {
-                let outside = Set(colony.cats.filter { $0.visible && !$0.home }.map(\.coat))
-                cat.coat = WheelOverlayView.nextCoat(after: cat.coat, outside: outside, roll: Double.random(in: 0..<1))
-                wheelNextShift = WheelShift.interval(range: range, roll: Double.random(in: 0...1)); wheelStep = 0
-                AppModel.log("CPU wheel: \(CatAppearance.names[cat.coat]) takes a turn")
+                // A busy moment (a swap, a toy, everyone on the move) tries again shortly.
+                wheelNextShift = takeWheelTurn() ? nextWheelShift(range) : 10
             }
-        } else { wheelNextShift = WheelShift.interval(range: range, roll: Double.random(in: 0...1)) }
+        } else { wheelNextShift = nextWheelShift(range) }
         // Turning clockwise: the cat runs right, so the tread under its paws moves left.
         wheelAngle = (wheelAngle - dt * motion.degreesPerSecond).truncatingRemainder(dividingBy: 360)
         shownHomeCount = colony.homeCount
@@ -314,10 +317,42 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // The image is centered in the button; the cat layer covers its left 20 pt.
         let size = TowerIcon.wheelSize
         cat.frame = NSRect(x: (button.bounds.width - size.width) / 2, y: (button.bounds.height - size.height) / 2, width: 20, height: size.height)
+        cat.coat = colony.wheel?.coat ?? 0
         cat.cell = WheelOverlayView.cell(gait, step: Int(wheelStep), coat: cat.coat)
         cat.battery = wheelBattery
         let timer = Timer(timeInterval: motion.frameRate > 0 ? 1 / motion.frameRate : 1, repeats: false) { [weak self] _ in self?.stepWheel() }
         RunLoop.main.add(timer, forMode: .common); wheelTimer = timer
+    }
+    /// Seconds until the next turn; a `wheelSwapSeconds` default (unregistered, for checking by hand) overrides the range.
+    func nextWheelShift(_ range: Int) -> Double? {
+        let debug = defaults.double(forKey: Pref.wheelSwapSeconds)
+        return debug > 0 ? debug : WheelShift.interval(range: range, roll: Double.random(in: 0...1))
+    }
+    /// The wheel cat's turn is up. A cat out playing walks over and they trade places in front of the wheel;
+    /// out of sight (everyone in, paused, quiet, a hidden menu bar, changing screens) they trade in the tower.
+    /// Keep my cats keeps the lineup: a cat from outside it takes the wheel. False: try again in a moment.
+    func takeWheelTurn() -> Bool {
+        let keep = defaults.bool(forKey: Pref.fixedLineup)
+        let seen = !paused && !suspended && !barHidden && !model.catsAway && !model.shuffling && moveTarget == nil && overlay?.isVisible == true
+        if !keep && seen {
+            switch colony.beginBaton() {
+            case .started:
+                if let i = colony.cats.firstIndex(where: \.wheelBound) { AppModel.log("CPU wheel: \(CatAppearance.names[colony.cats[i].coat]) walks over to take a turn") }
+                return true
+            case .busy: return false
+            case .nobodyOut: break
+            }
+        }
+        colony.swapWheelOffstage(keepLineup: keep)
+        return true
+    }
+    /// Another cat is in the wheel: saved for the next launch and shown from this frame on.
+    func wheelCatChanged() {
+        guard let wheel = colony.wheel else { return }
+        if let data = try? JSONEncoder().encode(wheel) { defaults.set(data, forKey: Pref.wheelCat) }
+        AppModel.log("CPU wheel: \(CatAppearance.names[wheel.coat]) takes a turn")
+        wheelStep = 0
+        if wheelOn && wheelCat != nil { stepWheel() }
     }
     @objc func togglePanel() {
         if popover.isShown { popover.performClose(nil); return }
@@ -352,6 +387,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     var towerX: Double? {
         guard let rect = towerRect, let overlay else { return nil }
         return TowerIcon.towerCenterX(in: rect, wheel: wheelOn) - overlay.frame.minX
+    }
+    /// Overlay x of the wheel's center, while the wheel is on.
+    var wheelX: Double? {
+        guard wheelOn, let rect = towerRect, let overlay else { return nil }
+        return TowerIcon.wheelCenterX(in: rect) - overlay.frame.minX
     }
     /// The screen the cats are on now (mid-move, still the old one).
     var currentScreen: NSScreen? {
@@ -433,6 +473,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // The tower slides whenever menu bar items to its right change width or come and go; auto rotation
         // walks cats in and out without a fresh callHome/letOut, so follow the icon every frame.
         if let x = towerX, colony.homeX == nil || (0...(overlay?.frame.width ?? 0)).contains(x) { colony.homeX = x }
+        if !wheelOn { colony.wheelX = nil } else if let x = wheelX, colony.wheelX == nil || (0...(overlay?.frame.width ?? 0)).contains(x) { colony.wheelX = x }
         if moveTarget != nil && colony.cats.allSatisfy(\.home) { updateDisplay(); scan() }
         // Out of sight (hidden menu bar, unplugged screen) the cats carry on as usual; only pausing stops them.
         guard !paused, !suspended else { return }

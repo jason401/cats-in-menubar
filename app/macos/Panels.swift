@@ -15,7 +15,9 @@ enum Pref {
     static let scrollReverse = "scrollReverse", scrollSources = "scrollSources"
     static let display = "catDisplay", displayName = "catDisplayName"   // "" = the main display
     static let cpuWheel = "cpuWheel"   // a cat in a running wheel next to the tower shows CPU use
-    static let wheelSwapRange = "wheelSwapRange" // WheelShift preset for wheel cats taking turns, 0 = always the orange tabby
+    static let wheelSwapRange = "wheelSwapRange" // WheelShift preset for wheel cats taking turns, 0 = the wheel cat stays
+    static let wheelCat = "wheelCat"             // the cat in the wheel (CatAppearance JSON), one of the colony
+    static let wheelSwapSeconds = "wheelSwapSeconds" // unregistered: a fixed wait in seconds, for checking turns by hand
     static let wheelSwap = "wheelSwap"           // old fixed minutes, migrated once to wheelSwapRange
     static let wheelBattery = "wheelBattery"         // the wheel's band shows the battery charge
     static let wheelBatteryMono = "wheelBatteryMono" // that gauge in the menu bar's color instead of green

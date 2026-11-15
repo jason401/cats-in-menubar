@@ -799,6 +799,7 @@ func runSelfTests() {
     testUpdateChannels(expect)
     testBatteryTone(expect)
     testWheel(expect)
+    testWheelBaton(expect)
     print("PASS: \(checks) assertions; 30,000 simulation steps with changing obstacles")
 }
 
@@ -1426,4 +1427,75 @@ func renderWheelBattery(to path: String) {
     NSGraphicsContext.restoreGraphicsState()
     try! bitmap.representation(using: .png, properties: [:])!.write(to: URL(fileURLWithPath: path))
     print("Wheel battery preview: \(path)")
+}
+
+/// The wheel cat as one of the colony, and the baton pass in front of the wheel. Colony only, with a seeded
+/// random source: nothing reads or writes the app's preferences.
+func testWheelBaton(_ expect: (@autoclosure () -> Bool, String) -> Void) {
+    var seed: UInt64 = 42
+    func make(_ count: Int = 3) -> Colony {
+        let c = Colony(count: count, random: { seed = seed &* 6364136223846793005 &+ 1442695040888963407; return Double(seed >> 11) / Double(UInt64(1) << 53) })
+        c.updateLanes([Lane(lower: 0, upper: 600)]); c.homeX = 700; c.wheelX = 680
+        c.enableWheel(nil)
+        for _ in 0..<60 { c.step(1.0 / 30) }
+        return c
+    }
+    func run(_ c: Colony, seconds: Double, until done: () -> Bool = { false }) {
+        for _ in 0..<Int(seconds * 30) { c.step(1.0 / 30); if done() { return } }
+    }
+    let c = make()
+    expect(c.population == 4 && c.takenCoats.count == 4, "wheel: 3 cats out + 1 in the wheel, four different coats: \(c.takenCoats)")
+    let two = make(2); two.setCount(3)
+    expect(two.population == 4 && two.takenCoats.count == 4, "wheel: a third cat added never wears the wheel coat")
+    let worn = make(); worn.enableWheel(worn.cats[1].appearance)
+    expect(worn.takenCoats.count == 4, "wheel: a saved wheel cat whose coat is out now becomes another cat")
+    let pick = make(); var clean = true
+    for _ in 0..<200 { pick.swapAppearance(Int(seed % 3)); if pick.takenCoats.count != 4 { clean = false } }
+    for _ in 0..<50 { pick.reroll(); if pick.takenCoats.count != 4 { clean = false } }
+    expect(clean, "wheel: swap and reroll never pick the wheel cat's coat")
+    pick.applyAppearances([CatAppearance(coat: pick.wheel!.coat, size: .kitten)])
+    expect(pick.takenCoats.count == 4 && pick.cats[0].size == .kitten, "wheel: a cat picked by hand keeps its coat; the wheel cat changes")
+
+    // The baton: one cat walks over, jumps in, and the wheel cat comes out wearing its own coat.
+    let before = c.wheel!
+    expect(c.beginBaton() == .started, "baton: starts with cats out")
+    let a = c.cats.firstIndex(where: \.wheelBound)!, look = c.cats[a].appearance
+    expect(c.beginBaton() == .busy, "baton: only one at a time")
+    var waited = false
+    run(c, seconds: 120) { if c.wheelWaiting { waited = true }; return !c.cats[a].wheelBound }
+    expect(c.wheel == look && c.cats[a].appearance == before, "baton: the two trade coats: wheel \(String(describing: c.wheel)) cat \(c.cats[a].appearance)")
+    expect(waited, "baton: the wheel cat waits as the other one comes close")
+    run(c, seconds: 3)
+    expect(c.cats[a].visible && !c.cats[a].home && c.lanes[0].contains(c.cats[a].x, margin: c.cats[a].radius) && c.takenCoats.count == 4,
+           "baton: the cat from the wheel jumps out into free space")
+    expect(c.swapGap > 0 && c.beginBaton() == .busy, "baton: spaced like auto rotation")
+    c.swapGap = 0
+    if c.beginBaton() == .started { expect(!c.cats.contains { $0.wheelBound && $0.coat == before.coat }, "baton: the cat that just left the wheel is not sent straight back") }
+    c.callHome(at: 700)
+    expect(!c.cats.contains(where: \.wheelBound), "baton: calling home cancels it")
+    let held = c.wheel
+    run(c, seconds: 60) { c.homeCount == c.cats.count }
+    expect(c.homeCount == c.cats.count && c.wheel == held && c.takenCoats.count == 4, "baton: cancelled, the cat goes home as itself")
+
+    // Nobody out: they trade in the tower, or (Keep my cats) a cat from outside the colony takes the wheel.
+    expect(c.beginBaton() == .nobodyOut, "baton: nobody out to walk over")
+    let inside = Set(c.cats.map(\.coat)), all = c.takenCoats, wheelBefore = c.wheel!.coat
+    c.swapWheelOffstage(keepLineup: false)
+    expect(inside.contains(c.wheel!.coat) && c.takenCoats == all && c.cats.contains { $0.coat == wheelBefore }, "fallback: trades with a cat in the tower")
+    let lineup = c.cats.map(\.appearance)
+    c.swapWheelOffstage(keepLineup: true)
+    expect(c.cats.map(\.appearance) == lineup && c.takenCoats.count == 4, "fallback: Keep my cats keeps the lineup, a new wheel cat")
+    let empty = make(); empty.updateLanes([])
+    expect(empty.beginBaton() == .nobodyOut, "fallback: no free space means nobody out")
+    let off = make(); off.wheelX = nil
+    expect(off.beginBaton() == .nobodyOut, "fallback: no wheel position")
+
+    // The wheel switched off mid-walk: the cat carries on as itself.
+    let stop = make()
+    _ = stop.beginBaton(); let w = stop.cats.firstIndex(where: \.wheelBound)!, mine = stop.cats[w].appearance
+    run(stop, seconds: 1)
+    stop.wheel = nil
+    expect(!stop.cats[w].wheelBound && !stop.cats[w].homeBound && stop.cats[w].appearance == mine && stop.population == 3, "baton: wheel off cancels it")
+    run(stop, seconds: 5)
+    expect(stop.cats.allSatisfy { !$0.home }, "baton: after the wheel goes off nobody walks into the tower")
 }

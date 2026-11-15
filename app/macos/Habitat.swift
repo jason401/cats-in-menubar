@@ -84,6 +84,7 @@ struct Cat {
     var escapeTop = 0.0     // top speed of the current escape dash
     var homeBound = false   // called back to the cat tower
     var swapping = false    // auto rotation: on the way in, or waiting inside, to come back out as another cat
+    var wheelBound = false  // walking to the CPU wheel to take over from the cat in it (homeBound too)
     var stay = 0.0          // auto rotation: seconds left outside before going in to swap
     var tunnelBound = false // walking to the notch to cross to the other side
     var inTunnel = false    // passing behind the notch, unseen in the middle
@@ -167,6 +168,11 @@ final class Colony {
     var swapped: (() -> Void)?  // a cat came back out as another one
     var shuffling = false   // everyone is going into the tower to come back out as new cats
     var shuffled: (() -> Void)? // everyone is in and wears a new look
+    /// The cat in the CPU wheel while it is on, one of the colony: no cat outside wears its coat.
+    var wheel: CatAppearance? { didSet { if wheel == nil { cancelBaton() } } }
+    var wheelX: Double?     // overlay x of the wheel's center
+    var wheelChanged: (() -> Void)?  // another cat is in the wheel now
+    private var lastWheelOut: Int?   // the coat that last left the wheel, not sent straight back in
     static let hopTime = 0.55
     static let turnTime = 0.36  // four turn-around frames at 0.09 s
     var random: () -> Double
@@ -178,7 +184,7 @@ final class Colony {
         let count = max(1, min(3, count))
         while cats.count > count { cats.removeLast() }
         while cats.count < count {
-            let unused = (0..<8).filter { coat in !cats.contains { $0.coat == coat } }
+            let unused = (0..<8).filter { coat in coat != wheel?.coat && !cats.contains { $0.coat == coat } }
             let coat = unused[min(unused.count - 1, Int(random() * Double(unused.count)))]
             let size = CatSize.allCases[min(2, Int(random() * 3))]
             cats.append(Cat(x: -100, destination: -100, stay: nextStay(), remaining: 2 + random() * 8, coat: coat, size: size))
@@ -234,13 +240,15 @@ final class Colony {
     }
     func applyAppearances(_ appearances: [CatAppearance]) {
         for i in cats.indices where appearances.indices.contains(i) { cats[i].appearance = appearances[i] }
+        settleWheel()
         reconcile()
     }
     /// New, distinct coats and sizes for everyone, avoiding the coats worn now where there are enough.
     func reroll() {
         let worn = Set(cats.map(\.coat))
-        let fresh = (0..<8).filter { !worn.contains($0) }
-        var unused = fresh.count >= cats.count ? fresh : Array(0..<8)
+        let open = (0..<8).filter { $0 != wheel?.coat }
+        let fresh = open.filter { !worn.contains($0) }
+        var unused = fresh.count >= cats.count ? fresh : open
         for i in cats.indices {
             cats[i].coat = unused.remove(at: min(unused.count - 1, Int(random() * Double(unused.count))))
             cats[i].size = CatSize.allCases[min(2, Int(random() * 3))]
@@ -252,7 +260,7 @@ final class Colony {
         shuffling = false
         reroll()
         for i in cats.indices {
-            cats[i].home = false; cats[i].homeBound = false; cats[i].swapping = false; cats[i].visible = false
+            cats[i].home = false; cats[i].homeBound = false; cats[i].swapping = false; cats[i].wheelBound = false; cats[i].visible = false
             cats[i].x = -100; cats[i].velocity = 0; cats[i].escaping = false; cats[i].inTunnel = false
             start(i, .sitting, for: 2)
         }
@@ -339,7 +347,7 @@ final class Colony {
     /// A coat no cat is wearing now, preferring ones that have not been out lately.
     func swapAppearance(_ i: Int) {
         recentCoats = Array(([cats[i].coat] + recentCoats.filter { $0 != cats[i].coat }).prefix(3))
-        let free = (0..<8).filter { coat in !cats.contains { $0.coat == coat } }
+        let free = (0..<8).filter { coat in coat != wheel?.coat && !cats.contains { $0.coat == coat } }
         let fresh = free.filter { !recentCoats.contains($0) }
         let pool = fresh.isEmpty ? free : fresh
         guard !pool.isEmpty else { return }
@@ -407,7 +415,7 @@ final class Colony {
             }
             if cats.allSatisfy(\.home) { shuffling = false; reroll(); shuffled?() }
         }
-        if rotation != nil && onStage && !quiet { swapGap = max(0, swapGap - dt) }
+        if (rotation != nil || wheel != nil) && onStage && !quiet { swapGap = max(0, swapGap - dt) }
         if var toy = ball, toy.kind == .laser {
             // The pointer moves the dot; it stays lit while pressed and fades just after release.
             toy.lifetime -= dt
@@ -485,7 +493,9 @@ final class Colony {
                     if cats[i].stuck > 2.5 { start(i, .sitting, for: 3 + random() * 3); cats[i].stuck = 0 }
                 } else { cats[i].action = .sitting; cats[i].remaining = 3 }
             }
-            if cats[i].action == .goingHome, let homeX, let ends = tunnelEnds(),
+            // Home is the tower, or the wheel for a cat taking over from the wheel cat.
+            let goal = cats[i].wheelBound ? wheelX : homeX
+            if cats[i].action == .goingHome, let homeX = goal, let ends = tunnelEnds(),
                let homeLane = lanes.min(by: { $0.distance(to: homeX) < $1.distance(to: homeX) }),
                (lane == ends.left && homeLane == ends.right) || (lane == ends.right && homeLane == ends.left) {
                 // Home is past the notch: run through it instead of leaping across.
@@ -496,9 +506,9 @@ final class Colony {
                     cats[i].inTunnel = true
                     continue
                 }
-            } else if cats[i].action == .goingHome, let homeX {
+            } else if cats[i].action == .goingHome, let homeX = goal {
                 cats[i].destination = clamp(homeX, to: lane, for: i)
-                // One cat at a time hops from the edge of the free space into the tower.
+                // One cat at a time hops from the edge of the free space into the tower (or the wheel).
                 if abs(cats[i].destination - cats[i].x) < 0.5 && abs(cats[i].velocity) < 0.5 && !cats.contains(where: { $0.action == .hopping && $0.hopIn }) {
                     beginHop(i, from: cats[i].x, to: homeX, entering: true)
                     continue
@@ -524,7 +534,7 @@ final class Colony {
             let delta = moving.contains(cats[i].action) && !holding ? cats[i].destination - cats[i].x : 0
             let (baseSpeed, baseAccel): (Double, Double) = switch cats[i].action {
             case .walking: (Self.walkSpeed, Self.walkAcceleration)
-            case .goingHome: (55, 90)
+            case .goingHome: cats[i].wheelBound ? (30, 70) : (55, 90)   // to the wheel it trots, unhurried
             case .running: (Self.runSpeed, 90)
             case .chasing: (50, 90)
             case .playing: ball?.kind == .laser ? (Self.runSpeed, 160) : (30, 70)
@@ -612,14 +622,14 @@ final class Colony {
     var anyHomeBound: Bool { cats.contains { $0.homeBound || $0.home } }
     /// Someone is still on the way to the tower: no toys, laser or picking up until everyone is in.
     /// A cat going in to swap keeps only itself out of play; the others carry on.
-    var walkingHome: Bool { cats.contains { $0.homeBound && !$0.home && !$0.swapping } }
+    var walkingHome: Bool { cats.contains { $0.homeBound && !$0.home && !$0.swapping && !$0.wheelBound } }
     /// Everyone runs toward the tower icon and hops in, one by one.
     func callHome(at x: Double) {
         homeX = x
         ball = nil
         for i in cats.indices {
-            // A cat waiting inside to swap stays in too.
-            cats[i].homeBound = true; cats[i].swapping = false
+            // A cat waiting inside to swap stays in too; one on its way to the wheel comes home instead.
+            cats[i].homeBound = true; cats[i].swapping = false; cats[i].wheelBound = false
             if cats[i].home { continue }
             if !cats[i].visible { cats[i].home = true; continue }
             if cats[i].action != .hopping && !cats[i].inTunnel { start(i, .goingHome, for: .infinity) }
@@ -629,7 +639,7 @@ final class Colony {
     /// or nobody outside can still walk (hidden with the menu bar, or paused).
     func sendHomeNow() {
         for i in cats.indices {
-            cats[i].swapping = false
+            cats[i].swapping = false; cats[i].wheelBound = false
             if cats[i].home { cats[i].homeBound = true; continue }
             cats[i].home = true; cats[i].visible = false; cats[i].homeBound = true
             cats[i].inTunnel = false; cats[i].escaping = false; cats[i].velocity = 0
@@ -640,7 +650,7 @@ final class Colony {
     /// At launch everyone waits in the tower and hops out one by one once there is free space.
     func startInTower() {
         for i in cats.indices {
-            cats[i].home = true; cats[i].visible = false; cats[i].homeBound = false; cats[i].swapping = false
+            cats[i].home = true; cats[i].visible = false; cats[i].homeBound = false; cats[i].swapping = false; cats[i].wheelBound = false
             cats[i].outDelay = 0.6 + Double(i) * 0.7
             start(i, .sitting, for: 2)
         }
@@ -652,7 +662,7 @@ final class Colony {
         homeX = x
         var order = delay
         for i in cats.indices {
-            cats[i].homeBound = false
+            cats[i].homeBound = false; cats[i].wheelBound = false
             if cats[i].home { cats[i].outDelay = order; order += 0.7 }
             else if cats[i].action == .goingHome { start(i, .sitting, for: 1 + random()) }
         }
@@ -673,6 +683,7 @@ final class Colony {
         cats[i].gait += abs(cats[i].x - before)
         cats[i].destination = cats[i].x
         guard q >= 1 else { return }
+        if cats[i].hopIn && cats[i].wheelBound && enterWheel(i) { return }
         if cats[i].hopIn {
             cats[i].home = true; cats[i].visible = false; start(i, .sitting, for: 2)
             if cats[i].swapping {
@@ -703,6 +714,89 @@ final class Colony {
             cats[i].swapping = false; swapped?()
         }
         beginHop(i, from: homeX, to: spot, entering: false)
+    }
+    // MARK: CPU wheel
+    /// The coats worn by the whole colony, the wheel cat included.
+    var takenCoats: Set<Int> { Set(cats.map(\.coat) + [wheel?.coat].compactMap { $0 }) }
+    /// Cats in all: those that go out to play, plus the one in the wheel.
+    var population: Int { cats.count + (wheel == nil ? 0 : 1) }
+    /// The wheel is switched on: the saved wheel cat comes back (the orange tabby the first time),
+    /// unless a cat outside wears its coat now; then another free coat.
+    func enableWheel(_ saved: CatAppearance?) {
+        wheel = saved.map { CatAppearance(coat: max(0, min(7, $0.coat)), size: $0.size) } ?? CatAppearance(coat: 0, size: .adult)
+        settleWheel()
+    }
+    /// A cat outside got the wheel cat's coat (picked by hand, a saved lineup): the wheel cat changes.
+    func settleWheel() {
+        guard let current = wheel, cats.contains(where: { $0.coat == current.coat }) else { return }
+        let free = (0..<8).filter { coat in !cats.contains { $0.coat == coat } }
+        guard !free.isEmpty else { return }
+        wheel = CatAppearance(coat: free[min(free.count - 1, Int(random() * Double(free.count)))], size: current.size)
+        wheelChanged?()
+    }
+    enum Baton { case started, busy, nobodyOut }
+    /// The wheel cat's turn is over: one cat out playing walks to the wheel, jumps in and the wheel cat
+    /// jumps out in its place. Busy (a swap, a toy, everyone on the move) means try again in a moment.
+    func beginBaton() -> Baton {
+        guard wheel != nil, wheelX != nil, onStage, !quiet, !shuffling else { return .nobodyOut }
+        let out = cats.indices.filter { cats[$0].visible && !cats[$0].home }
+        guard !out.isEmpty else { return .nobodyOut }
+        guard swapGap <= 0, ball == nil, !cats.contains(where: { $0.swapping || $0.wheelBound || ($0.homeBound && !$0.home) }) else { return .busy }
+        let ready = out.filter { i in
+            !cats[i].homeBound && !cats[i].inTunnel && !cats[i].escaping && cats[i].hiddenFor <= 0
+                && ![.held, .hopping].contains(cats[i].action) && lanes.contains { $0.contains(cats[i].x, margin: cats[i].radius) }
+        }
+        let rested = ready.filter { cats[$0].coat != lastWheelOut }
+        let pool = rested.isEmpty ? ready : rested
+        guard !pool.isEmpty else { return .busy }
+        let i = pool[min(pool.count - 1, Int(random() * Double(pool.count)))]
+        cats[i].wheelBound = true; cats[i].homeBound = true
+        swapGap = Self.swapSpacing   // auto rotation waits its turn too
+        start(i, .goingHome, for: .infinity)
+        return .started
+    }
+    /// A cat is nearly at the wheel, or jumping in: the wheel cat stops and waits for it.
+    var wheelWaiting: Bool {
+        guard let wheelX else { return false }
+        return cats.contains { $0.wheelBound && !$0.home && ($0.action == .hopping || abs($0.x - wheelX) < 90) }
+    }
+    /// Landed in the wheel: the two trade places, and the cat that was in it jumps out and trots off.
+    private func enterWheel(_ i: Int) -> Bool {
+        guard let leaving = wheel, let wheelX else { return false }
+        wheel = cats[i].appearance
+        cats[i].appearance = leaving
+        cats[i].wheelBound = false; cats[i].homeBound = false
+        cats[i].stay = nextStay(); lastWheelOut = leaving.coat
+        wheelChanged?(); swapped?()
+        let spot = lanes.map { clamp(wheelX, to: $0, for: i) }.min { abs($0 - wheelX) < abs($1 - wheelX) } ?? cats[i].hopFrom
+        cats[i].x = wheelX
+        beginHop(i, from: wheelX, to: spot, entering: false)
+        return true
+    }
+    /// A turn nobody sees. With a cat resting in the tower the two trade places there; with none, or to keep
+    /// the lineup as it is, a cat from outside the colony takes the wheel.
+    func swapWheelOffstage(keepLineup: Bool) {
+        guard let leaving = wheel else { return }
+        let inside = cats.indices.filter { cats[$0].home && !cats[$0].swapping }
+        if !keepLineup, !inside.isEmpty {
+            let rested = inside.filter { cats[$0].coat != lastWheelOut }
+            let pool = rested.isEmpty ? inside : rested
+            let i = pool[min(pool.count - 1, Int(random() * Double(pool.count)))]
+            wheel = cats[i].appearance; cats[i].appearance = leaving
+            lastWheelOut = leaving.coat
+            swapped?()
+        } else {
+            wheel = CatAppearance(coat: WheelOverlayView.nextCoat(after: leaving.coat, outside: takenCoats, roll: random()),
+                                  size: CatSize.allCases[min(2, Int(random() * 3))])
+        }
+        wheelChanged?()
+    }
+    /// Taking turns in the wheel ends (the wheel is off): a cat on its way carries on as itself.
+    func cancelBaton() {
+        for i in cats.indices where cats[i].wheelBound {
+            cats[i].wheelBound = false; cats[i].homeBound = false
+            if cats[i].action == .goingHome { start(i, .sitting, for: 2 + random() * 3) }
+        }
     }
     // Mouse handling: a held cat stays inside its own free interval and is never carried over menus or icons.
     /// Where a held cat can be carried: its own free space, or both sides of the notch joined through it.
