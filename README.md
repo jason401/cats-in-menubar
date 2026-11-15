@@ -15,6 +15,7 @@ Free and open source. Native Swift, AppKit and SwiftUI. macOS 14 or later.
 - Cats use the available menu bar space, return to their tower, and can travel behind a MacBook notch.
 - Choose which display the cats live on; pause them, call them home, or set quiet hours.
 - A compact dashboard for CPU, memory, storage, battery and network activity.
+- Optional CPU wheel next to the tower: a cat runs faster as the Mac gets busier and naps when it is idle (Settings > Monitor, off by default).
 - Optional scroll direction controls for individual scrolling sources, off by default.
 - Adaptive animation rates for system load, temperature and Low Power Mode; optional launch at login.
 

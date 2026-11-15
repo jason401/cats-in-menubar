@@ -798,6 +798,7 @@ func runSelfTests() {
     testUpdateProgress(expect)
     testUpdateChannels(expect)
     testBatteryTone(expect)
+    testWheel(expect)
     print("PASS: \(checks) assertions; 30,000 simulation steps with changing obstacles")
 }
 
@@ -1184,4 +1185,71 @@ func testUpdateProgress(_ expect: (@autoclosure () -> Bool, String) -> Void) {
     expect(UpdateProgress.lastLine(Data("\u{1B}[31mfirst\nlast\u{1B}[0m\n".utf8)) == "last",
            "the latest output strips terminal colors")
     expect(UpdateProgress.lastLine(Data("\n \n".utf8)) == nil, "blank output has no line")
+}
+
+/// The CPU wheel's pace, from fixed CPU values only (nothing reads the real CPU or preferences).
+func testWheel(_ expect: (@autoclosure () -> Bool, String) -> Void) {
+    func settled(_ cpu: Double) -> WheelPace { var pace = WheelPace(); for _ in 0..<12 { pace.update(cpu: cpu) }; return pace }
+    expect(settled(0.01).gait == .rest && settled(0.12).gait == .walk && settled(0.6).gait == .run, "wheel: nap, walk, run by CPU")
+    var pace = settled(0.6); for _ in 0..<12 { pace.update(cpu: 0.19) }
+    expect(pace.gait == .run, "wheel: just under the run threshold keeps running (no flicker)")
+    for _ in 0..<12 { pace.update(cpu: 0.1) }
+    expect(pace.gait == .walk, "wheel: well under it slows to a walk")
+    var spike = settled(0.01); spike.update(cpu: 0.9)
+    expect(spike.cpu < 0.9, "wheel: one sample is averaged, not jumped to")
+    expect(settled(0.25).motion().frameRate < settled(1).motion().frameRate, "wheel: busier runs faster")
+    for step in 0...100 {
+        for lowPower in [false, true] {
+            let motion = settled(Double(step) / 100).motion(lowPower: lowPower)
+            expect(motion.frameRate <= (lowPower ? WheelPace.lowPowerFPS : 24), "wheel: frame rate cap \(motion)")
+            // 12 rungs are 30° apart: under 15° a frame the tread never seems to turn backwards; ≤180°/s overall.
+            expect(motion.frameRate == 0 ? motion.degreesPerSecond == 0 : motion.degreesPerSecond / motion.frameRate < 15 && motion.degreesPerSecond <= 180,
+                   "wheel: rungs turn forward \(motion)")
+        }
+    }
+    expect(TowerIcon.menuBar(wheel: 0).size == TowerIcon.wheelSize && TowerIcon.menuBar().size == NSSize(width: 18, height: 18), "wheel widens the icon only when on")
+    for gait in [WheelPace.Gait.rest, .walk, .run] {
+        expect((0..<20).allSatisfy { (0..<SpriteAtlas.frameCount).contains(WheelCatView.cell(gait, step: $0, coat: 0)) }, "wheel cat cells exist for \(gait)")
+    }
+}
+
+/// Tower + wheel at each pace on dark and light menu bars, enlarged and at actual Retina size.
+func renderWheel(to path: String) {
+    _ = NSApplication.shared
+    let width = 1100, height = 560
+    let bitmap = NSBitmapImageRep(bitmapDataPlanes: nil, pixelsWide: width, pixelsHigh: height, bitsPerSample: 8, samplesPerPixel: 4, hasAlpha: true, isPlanar: false, colorSpaceName: .deviceRGB, bytesPerRow: 0, bitsPerPixel: 0)!
+    NSGraphicsContext.saveGraphicsState()
+    NSGraphicsContext.current = NSGraphicsContext(bitmapImageRep: bitmap)
+    NSColor.white.setFill(); NSRect(x: 0, y: 0, width: width, height: height).fill()
+    let label: [NSAttributedString.Key: Any] = [.font: NSFont.systemFont(ofSize: 13), .foregroundColor: NSColor.darkGray]
+    func icon(cats: Int, angle: Double, gait: WheelPace.Gait, step: Int, at origin: NSPoint, scale: CGFloat, ink: NSColor) {
+        let image = TowerIcon.menuBar(cats: cats, wheel: angle)
+        let tinted = NSImage(size: image.size, flipped: false) { rect in image.draw(in: rect); ink.set(); rect.fill(using: .sourceAtop); return true }
+        tinted.draw(in: NSRect(x: origin.x, y: origin.y, width: image.size.width * scale, height: image.size.height * scale))
+        NSGraphicsContext.saveGraphicsState()
+        let transform = NSAffineTransform(); transform.translateX(by: origin.x, yBy: origin.y); transform.scale(by: scale); transform.concat()
+        WheelCatView.draw(cell: WheelCatView.cell(gait, step: step, coat: 0), coat: 0, origin: NSPoint(x: 20, y: 0))
+        NSGraphicsContext.restoreGraphicsState()
+    }
+    let states: [(String, WheelPace.Gait, Int, Double, Int)] = [("CPU 2% · nap", .rest, 0, 0, 0), ("CPU 12% · walk", .walk, 3, -20, 0),
+        ("CPU 60% · run", .run, 1, -45, 1), ("CPU 95% · run", .run, 5, -75, 3)]
+    for (row, (bar, ink)) in [(NSColor(calibratedWhite: 0.13, alpha: 1), NSColor(calibratedWhite: 0.95, alpha: 1)),
+                              (NSColor(calibratedWhite: 0.9, alpha: 1), NSColor(calibratedWhite: 0.1, alpha: 1))].enumerated() {
+        let y = CGFloat(370 - row * 260)
+        for (i, (name, gait, step, angle, cats)) in states.enumerated() {
+            let x = CGFloat(20 + i * 270)
+            bar.setFill(); NSBezierPath(roundedRect: NSRect(x: x, y: y, width: 250, height: 150), xRadius: 10, yRadius: 10).fill()
+            icon(cats: cats, angle: angle, gait: gait, step: step, at: NSPoint(x: x + 15, y: y + 25), scale: 5.5, ink: ink)
+            (name as NSString).draw(at: NSPoint(x: x + 6, y: y - 20), withAttributes: label)
+        }
+        // Actual size on a 2x screen: 1 pt = 2 px, menu bar 24 pt.
+        bar.setFill(); NSRect(x: 20, y: y - 76, width: 1060, height: 36).fill()
+        for i in 0..<8 {
+            let gait: WheelPace.Gait = i < 2 ? .rest : i < 4 ? .walk : .run
+            icon(cats: i % 4, angle: Double(-i * 9), gait: gait, step: i, at: NSPoint(x: CGFloat(40 + i * 130), y: y - 74), scale: 1.6, ink: ink)
+        }
+    }
+    NSGraphicsContext.restoreGraphicsState()
+    try! bitmap.representation(using: .png, properties: [:])!.write(to: URL(fileURLWithPath: path))
+    print("Wheel preview: \(path)")
 }

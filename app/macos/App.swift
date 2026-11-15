@@ -57,6 +57,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     var governor = PowerGovernor()
     var appliedLineup: Data?
     var lineupLoaded = false    // with turns on, the saved lineup only sets who comes out at launch
+    // The CPU wheel: a template tower + wheel image, and the colored cat as its own layer on top.
+    var wheelOn = false
+    var wheelPace = WheelPace()
+    var wheelCat: WheelCatView?
+    var wheelTimer: Timer?
+    var wheelAngle = 0.0, wheelStep = 0.0, wheelLast = 0.0
+    var wheelGait = WheelPace.Gait.rest
     let defaults = UserDefaults.standard
 
     func applicationDidFinishLaunching(_ notification: Notification) {
@@ -148,6 +155,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         colony.activity = defaults.integer(forKey: Pref.activity)
         let toyColor = defaults.integer(forKey: Pref.toyColor)
         colony.toyColor = Toy.colors.indices.contains(toyColor) ? toyColor : nil
+        if defaults.bool(forKey: Pref.cpuWheel) != wheelOn { setWheel(!wheelOn) }
         habitatView?.showLanes = model.debug
         system.wantsApps = defaults.integer(forKey: Pref.topApps) > 0 && (defaults.bool(forKey: Pref.showCPU) || defaults.bool(forKey: Pref.showMemory))
         system.wantsWiFi = defaults.bool(forKey: Pref.showNetwork)
@@ -238,6 +246,50 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             if interval != monitorInterval { monitorInterval = interval; system.start(interval: interval) }
         }
         colony.quiet = quietNow
+        let gait = wheelPace.gait
+        wheelPace.update(cpu: stats.cpu)
+        // Waking from a nap should not wait for the resting cat's next one-second look.
+        if wheelOn && gait == .rest && wheelPace.gait != .rest { stepWheel() }
+    }
+    /// Shows or hides the wheel. The status item gets wider, so free space is measured again.
+    func setWheel(_ on: Bool) {
+        wheelOn = on
+        wheelTimer?.invalidate(); wheelTimer = nil
+        guard let button = statusItem.button else { return }
+        button.imagePosition = on ? .imageOnly : .imageLeft
+        if on {
+            let view = WheelCatView(frame: NSRect(x: 0, y: 0, width: 20, height: TowerIcon.wheelSize.height))
+            button.addSubview(view); wheelCat = view
+            wheelLast = ProcessInfo.processInfo.systemUptime
+            stepWheel()
+        } else {
+            wheelCat?.removeFromSuperview(); wheelCat = nil
+            shownHomeCount = -1; updateTowerIcon()
+        }
+        AppModel.log("CPU wheel: \(on ? "on" : "off")")
+        layoutChanged()
+    }
+    /// One wheel frame, then the next is scheduled at the current pace (RunCat style), independent of
+    /// the cats' animation timer, which slows down exactly when the CPU is busy.
+    func stepWheel() {
+        wheelTimer?.invalidate(); wheelTimer = nil
+        guard wheelOn, !suspended, let button = statusItem.button, let cat = wheelCat else { return }
+        let now = ProcessInfo.processInfo.systemUptime
+        let dt = min(0.5, max(0, now - wheelLast)); wheelLast = now
+        // Paused cats rest in the wheel too.
+        let gait = paused ? .rest : wheelPace.gait
+        let motion = paused ? WheelPace.Motion(frameRate: 0, degreesPerSecond: 0) : wheelPace.motion(lowPower: ProcessInfo.processInfo.isLowPowerModeEnabled)
+        if gait != wheelGait { wheelGait = gait; wheelStep = 0 } else { wheelStep += dt * motion.frameRate }
+        // Turning clockwise: the cat runs right, so the tread under its paws moves left.
+        wheelAngle = (wheelAngle - dt * motion.degreesPerSecond).truncatingRemainder(dividingBy: 360)
+        shownHomeCount = colony.homeCount
+        button.image = TowerIcon.menuBar(cats: shownHomeCount, wheel: wheelAngle)
+        // The image is centered in the button; the cat layer covers its right 20 pt.
+        let size = TowerIcon.wheelSize
+        cat.frame = NSRect(x: (button.bounds.width - size.width) / 2 + 20, y: (button.bounds.height - size.height) / 2, width: 20, height: size.height)
+        cat.cell = WheelCatView.cell(gait, step: Int(wheelStep), coat: cat.coat)
+        let timer = Timer(timeInterval: motion.frameRate > 0 ? 1 / motion.frameRate : 1, repeats: false) { [weak self] _ in self?.stepWheel() }
+        RunLoop.main.add(timer, forMode: .common); wheelTimer = timer
     }
     @objc func togglePanel() {
         if popover.isShown { popover.performClose(nil); return }
@@ -268,10 +320,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
               lastScreen != .zero, from != lastScreen else { return rect }
         return Displays.mapRightAligned(rect, from: from, to: lastScreen)
     }
-    /// Overlay x of the tower icon's center.
+    /// Overlay x of the tower icon's center (with the wheel on, the tower is the image's left 18 pt).
     var towerX: Double? {
         guard let rect = towerRect, let overlay else { return nil }
-        return rect.midX - overlay.frame.minX
+        let center = wheelOn ? rect.minX + (rect.width - TowerIcon.wheelSize.width) / 2 + 9 : rect.midX
+        return center - overlay.frame.minX
     }
     /// The screen the cats are on now (mid-move, still the old one).
     var currentScreen: NSScreen? {
@@ -320,6 +373,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     func updateTowerIcon() {
         let count = colony.homeCount
         guard count != shownHomeCount else { return }
+        // The wheel redraws the whole icon each frame; show the change now rather than on its next frame.
+        if wheelOn { stepWheel(); return }
         shownHomeCount = count
         statusItem.button?.image = TowerIcon.menuBar(cats: count)
     }
@@ -332,8 +387,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         epoch += 1
         scan()
     }
-    @objc func willSleep() { suspended = true; habitatView?.endDrag(); overlay?.orderOut(nil) }
-    @objc func didWake() { suspended = false; lastTick = ProcessInfo.processInfo.systemUptime; layoutChanged() }
+    @objc func willSleep() { suspended = true; habitatView?.endDrag(); overlay?.orderOut(nil); wheelTimer?.invalidate(); wheelTimer = nil }
+    @objc func didWake() {
+        suspended = false; lastTick = ProcessInfo.processInfo.systemUptime; layoutChanged()
+        wheelLast = lastTick; stepWheel()
+    }
     func tick() {
         let now = ProcessInfo.processInfo.systemUptime
         updateMouse()
@@ -430,5 +488,5 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool { showSettings(); return true }
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { false }
-    func applicationWillTerminate(_ notification: Notification) { animationTimer?.invalidate(); layoutTimer?.invalidate(); overlay?.close() }
+    func applicationWillTerminate(_ notification: Notification) { animationTimer?.invalidate(); layoutTimer?.invalidate(); wheelTimer?.invalidate(); overlay?.close() }
 }

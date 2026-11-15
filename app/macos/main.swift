@@ -9,6 +9,9 @@ if let index = CommandLine.arguments.firstIndex(of: "--render-panels"), CommandL
 if let index = CommandLine.arguments.firstIndex(of: "--render-scenario"), CommandLine.arguments.count > index + 1 {
     renderScenario(to: CommandLine.arguments[index + 1]); exit(0)
 }
+if let index = CommandLine.arguments.firstIndex(of: "--render-wheel"), CommandLine.arguments.count > index + 1 {
+    renderWheel(to: CommandLine.arguments[index + 1]); exit(0)
+}
 if CommandLine.arguments.contains("--probe") { runProbe(); exit(0) }
 if let index = CommandLine.arguments.firstIndex(of: "--render-lineup"), CommandLine.arguments.count > index + 1 {
     renderLineup(to: CommandLine.arguments[index + 1]); exit(0)

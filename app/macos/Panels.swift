@@ -14,11 +14,12 @@ enum Pref {
     static let laser = "laserPointer"
     static let scrollReverse = "scrollReverse", scrollSources = "scrollSources"
     static let display = "catDisplay", displayName = "catDisplayName"   // "" = the main display
+    static let cpuWheel = "cpuWheel"   // a cat in a running wheel next to the tower shows CPU use
     static let showCPU = "showCPU", showMemory = "showMemory", showDisk = "showDisk", showBattery = "showBattery", showNetwork = "showNetwork"
     static let defaults: [String: Any] = [
         count: 3, fixedLineup: false, rotate: false, rotatePace: 1, paused: false, quiet: false, activity: 1, adaptivePower: true, allowDrag: true,
         nightQuiet: false, nightFrom: 23, nightTo: 7, interval: 2.0, topApps: 2, toyColor: -1, laser: true, scrollReverse: false, display: "",
-        showCPU: true, showMemory: true, showDisk: true, showBattery: true, showNetwork: true,
+        showCPU: true, showMemory: true, showDisk: true, showBattery: true, showNetwork: true, cpuWheel: false,
     ]
 }
 
@@ -966,8 +967,13 @@ struct MonitorTab: View {
     @AppStorage(Pref.showDisk) private var showDisk = true
     @AppStorage(Pref.showBattery) private var showBattery = true
     @AppStorage(Pref.showNetwork) private var showNetwork = true
+    @AppStorage(Pref.cpuWheel) private var cpuWheel = false
     var body: some View {
         SettingsPage {
+            SettingsCard(title: "Menu bar") {
+                SettingsRow(title: "CPU wheel") { SettingsSwitch(title: "CPU wheel", isOn: $cpuWheel) }
+                SettingsNote(text: "A cat runs in a wheel next to the tower: the busier the Mac, the faster it runs. Under 5 % it naps.")
+            }
             SettingsCard(title: "Update") {
                 SettingsRow(title: "Every") { SettingsSegments(options: [("1 s", 1.0), ("2 s", 2.0), ("5 s", 5.0)], selection: $interval) }
             }
