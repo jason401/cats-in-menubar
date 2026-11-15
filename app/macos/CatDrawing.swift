@@ -363,13 +363,17 @@ enum CatDrawing {
 
 final class HabitatView: NSView {
     let colony: Colony
+    private let defaults: UserDefaults
     var showLanes = false
     private(set) var dragging: Int?
     private(set) var lasering = false
     var interactionEnded: (() -> Void)?
+    var wheelDropAllowed: (() -> Bool)?
     private var grabOffset = 0.0
     private var lastDrag = 0.0
-    init(colony: Colony, frame: NSRect) { self.colony = colony; super.init(frame: frame) }
+    init(colony: Colony, frame: NSRect, defaults: UserDefaults = .standard) {
+        self.colony = colony; self.defaults = defaults; super.init(frame: frame)
+    }
     required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
     override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
     /// Last pose shown per cat slot, so a pose change (sit, stand, turn) blends instead of jumping.
@@ -439,10 +443,10 @@ final class HabitatView: NSView {
     }
     override func mouseDown(with event: NSEvent) {
         let point = convert(event.locationInWindow, from: nil)
-        let canDrag = UserDefaults.standard.bool(forKey: Pref.allowDrag)
+        let canDrag = defaults.bool(forKey: Pref.allowDrag)
         guard canDrag, let i = colony.catIndex(at: point.x) else {
             // Empty menu bar space: press and hold for the laser pointer.
-            if UserDefaults.standard.bool(forKey: Pref.laser) && colony.laser(at: point.x) { lasering = true; needsDisplay = true }
+            if defaults.bool(forKey: Pref.laser) && colony.laser(at: point.x) { lasering = true; needsDisplay = true }
             return
         }
         dragging = i; grabOffset = 0; lastDrag = event.timestamp
@@ -455,7 +459,14 @@ final class HabitatView: NSView {
         colony.drag(i, to: point.x + grabOffset, dt: event.timestamp - lastDrag)
         lastDrag = event.timestamp; needsDisplay = true
     }
-    override func mouseUp(with event: NSEvent) { endDrag(); NSCursor.openHand.set() }
+    override func mouseUp(with event: NSEvent) {
+        if let i = dragging, wheelDropAllowed?() == true {
+            let point = convert(event.locationInWindow, from: nil)
+            colony.drag(i, to: point.x + grabOffset, dt: event.timestamp - lastDrag)
+            colony.dropped(i)
+        }
+        endDrag(); NSCursor.openHand.set()
+    }
     func endDrag() {
         let wasInteracting = dragging != nil || lasering
         if let i = dragging { colony.release(i); needsDisplay = true }

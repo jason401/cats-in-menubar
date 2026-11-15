@@ -352,6 +352,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         guard let wheel = colony.wheel else { return }
         if let data = try? JSONEncoder().encode(wheel) { defaults.set(data, forKey: Pref.wheelCat) }
         AppModel.log("CPU wheel: \(CatAppearance.names[wheel.coat]) takes a turn")
+        wheelNextShift = nil   // every completed turn, including a manual drop, starts a fresh wait
         wheelStep = 0
         if wheelOn && wheelCat != nil { stepWheel() }
     }
@@ -526,6 +527,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             panel.hidesOnDeactivate = false
             let view = HabitatView(colony: colony, frame: NSRect(x: 0, y: 0, width: frame.width, height: height))
             view.interactionEnded = { Updater.shared.resumeWhenIdle() }
+            view.wheelDropAllowed = { [weak self] in
+                guard let self else { return false }
+                return self.wheelOn && !self.defaults.bool(forKey: Pref.fixedLineup)
+                    && !self.paused && !self.suspended && !self.barHidden && !self.model.catsAway
+                    && !self.model.shuffling && self.moveTarget == nil && self.overlay?.isVisible == true
+            }
             view.showLanes = model.debug
             panel.contentView = view
             overlay = panel; habitatView = view; lastScreen = frame; lastHeight = height

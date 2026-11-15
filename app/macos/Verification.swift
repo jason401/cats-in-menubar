@@ -800,6 +800,7 @@ func runSelfTests() {
     testBatteryTone(expect)
     testWheel(expect)
     testWheelBaton(expect)
+    testWheelDrop(expect)
     print("PASS: \(checks) assertions; 30,000 simulation steps with changing obstacles")
 }
 
@@ -1500,4 +1501,127 @@ func testWheelBaton(_ expect: (@autoclosure () -> Bool, String) -> Void) {
     expect(!stop.cats[w].wheelBound && !stop.cats[w].homeBound && stop.cats[w].appearance == mine && stop.population == 3, "baton: wheel off cancels it")
     run(stop, seconds: 5)
     expect(stop.cats.allSatisfy { !$0.home }, "baton: after the wheel goes off nobody walks into the tower")
+}
+
+
+/// Manual drops use the same hop/appearance exchange, without touching production preferences.
+func testWheelDrop(_ expect: (@autoclosure () -> Bool, String) -> Void) {
+    func make() -> Colony {
+        let c = Colony(count: 2, random: { 0.4 })
+        c.updateLanes([Lane(lower: 100, upper: 600)])
+        c.wheelX = 680; c.enableWheel(nil)
+        for i in c.cats.indices {
+            c.cats[i].visible = true; c.cats[i].home = false; c.cats[i].hiddenFor = 0
+            c.cats[i].x = 300 + Double(i) * 100
+            c.start(i, .sitting, for: 100)
+        }
+        return c
+    }
+    func heldAtEdge(_ c: Colony, _ i: Int = 0) {
+        c.grab(i); c.drag(i, to: 1000, dt: 1.0 / 30)
+    }
+    func finish(_ c: Colony) {
+        for _ in 0..<600 { c.step(1.0 / 30); if !c.cats.contains(where: { $0.action == .hopping }) { break } }
+    }
+    let geometry = make()
+    expect(geometry.wheelDropZone(680) == Lane(lower: 572, upper: 600), "wheel drop: lane left of wheel")
+    expect(geometry.wheelDropZone(20) == Lane(lower: 100, upper: 128), "wheel drop: lane right of wheel")
+    expect(geometry.wheelDropZone(350) == Lane(lower: 336, upper: 364), "wheel drop: wheel inside lane")
+    expect(geometry.wheelDropZone(105)?.contains(124) == true
+           && geometry.wheelDropZone(595)?.contains(576) == true, "wheel drop: inside wheel near lane ends stays reachable")
+    geometry.lanes = [Lane(lower: 0, upper: 200), Lane(lower: 400, upper: 600)]
+    expect(geometry.wheelDropZone(350) == Lane(lower: 400, upper: 428), "wheel drop: nearest lane across a gap")
+    geometry.lanes = []
+    expect(geometry.wheelDropZone(350) == nil, "wheel drop: no free lane")
+
+    let c = make()
+    let before = c.wheel!, entering = c.cats[0].appearance
+    var changes = 0
+    c.wheelChanged = { changes += 1 }
+    heldAtEdge(c)
+    let from = c.cats[0].x
+    expect(c.dropped(0) && c.cats[0].action == .hopping && c.cats[0].hopFrom == from
+           && c.cats[0].hopTo == 680 && c.wheelWaiting, "wheel drop: jumps straight from the drop and waits")
+    finish(c)
+    expect(c.wheel == entering && c.cats[0].appearance == before && changes == 1,
+           "wheel drop: exchanges whole appearance and notifies the timer owner once")
+    expect(c.swapGap > 0 && !c.cats[0].home && c.cats[0].visible,
+           "wheel drop: resets swap spacing and sends previous wheel cat outside")
+    heldAtEdge(c)
+    expect(c.dropped(0), "wheel drop: user can send the last wheel cat back during swap spacing")
+    finish(c)
+    expect(c.wheel == before, "wheel drop: last wheel cat can take over again")
+
+    for size in CatSize.allCases {
+        let sized = make(); sized.cats[0].size = size; heldAtEdge(sized)
+        expect(sized.dropped(0), "wheel drop: every size can drop at its clamped edge")
+    }
+
+    let outside = make(); outside.grab(0)
+    expect(!outside.dropped(0) && outside.cats[0].action == .grooming, "wheel drop: outside zone grooms")
+    let programmatic = make(); heldAtEdge(programmatic)
+    let original = programmatic.wheel
+    programmatic.release(0)
+    expect(programmatic.wheel == original && programmatic.cats[0].action == .grooming
+           && !programmatic.cats[0].wheelBound, "wheel drop: programmatic release cannot swap")
+
+    let blockers: [(String, (Colony) -> Void)] = [
+        ("off", { $0.wheel = nil }), ("no position", { $0.wheelX = nil }),
+        ("quiet", { $0.quiet = true }), ("offstage", { $0.onStage = false }),
+        ("shuffle", { $0.shuffling = true }),
+        ("walking home", { $0.cats[1].homeBound = true }),
+        ("coat swap", { $0.cats[1].swapping = true }),
+        ("baton", { $0.cats[1].wheelBound = true }),
+        ("hop out", { $0.beginHop(1, from: 680, to: 500, entering: false) })
+    ]
+    for (name, block) in blockers {
+        let blocked = make(); heldAtEdge(blocked); block(blocked)
+        let old = blocked.wheel
+        expect(!blocked.dropped(0) && blocked.wheel == old && blocked.cats[0].action == .grooming,
+               "wheel drop: ignored while " + name)
+    }
+    let fixed = make(); heldAtEdge(fixed)
+    expect(!fixed.dropped(0, keepLineup: true) && fixed.cats[0].action == .grooming,
+           "wheel drop: fixed lineup settles normally")
+
+    // Exercise the view's actual mouse handlers with isolated preferences and no visible windows.
+    _ = NSApplication.shared
+    let suite = "CatsInMenubar.selftest.wheelDrop"
+    let prefs = UserDefaults(suiteName: suite)!
+    prefs.removePersistentDomain(forName: suite)
+    defer { prefs.removePersistentDomain(forName: suite) }
+    prefs.set(true, forKey: Pref.allowDrag)
+    for mode in 0..<3 {
+        let model = make()
+        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 800, height: 24),
+                              styleMask: [.borderless], backing: .buffered, defer: false)
+        window.isReleasedWhenClosed = false
+        defer { window.close() }
+        let view = HabitatView(colony: model, frame: NSRect(x: 0, y: 0, width: 800, height: 24), defaults: prefs)
+        window.contentView = view
+        view.wheelDropAllowed = { mode != 2 }
+        var ended = 0
+        view.interactionEnded = { ended += 1 }
+        func event(_ type: NSEvent.EventType, _ x: Double, _ time: Double) -> NSEvent {
+            NSEvent.mouseEvent(with: type, location: NSPoint(x: x, y: 12), modifierFlags: [],
+                               timestamp: time, windowNumber: window.windowNumber, context: nil,
+                               eventNumber: 0, clickCount: 1, pressure: 0)!
+        }
+        let old = model.wheel
+        view.mouseDown(with: event(.leftMouseDown, model.cats[0].x, 1))
+        view.mouseDragged(with: event(.leftMouseDragged, 1000, 2))
+        expect(view.dragging == 0, "wheel drop view: grabbed and dragged")
+        if mode == 1 { view.endDrag() }
+        else { view.mouseUp(with: event(.leftMouseUp, 1000, 3)) }
+        expect(view.dragging == nil && ended == 1, "wheel drop view: ends interaction once")
+        if mode == 0 {
+            expect(model.cats[0].wheelBound && model.cats[0].action == .hopping, "wheel drop view: mouseUp starts baton")
+            finish(model)
+            expect(model.wheel != old, "wheel drop view: mouseUp completes exchange")
+        } else {
+            expect(model.wheel == old && !model.cats[0].wheelBound && model.cats[0].action == .grooming,
+                   "wheel drop view: endDrag or app veto settles without swapping")
+        }
+    }
+
 }

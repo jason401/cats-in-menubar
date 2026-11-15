@@ -802,6 +802,37 @@ final class Colony {
             if cats[i].action == .goingHome { start(i, .sitting, for: 2 + random() * 3) }
         }
     }
+    /// The nearest free-space edge, with enough room for an adult cat's center and a small margin.
+    func wheelDropZone(_ wheelX: Double) -> Lane? {
+        guard wheelX.isFinite, let lane = lanes.min(by: { $0.distance(to: wheelX) < $1.distance(to: wheelX) }) else { return nil }
+        if lane.contains(wheelX) {
+            // Near an edge, the wheel itself may be closer than a carried adult can reach.
+            let center = min(lane.upper - Habitat.catRadius, max(lane.lower + Habitat.catRadius, wheelX))
+            return Lane(lower: max(lane.lower, center - 14), upper: min(lane.upper, center + 14))
+        }
+        let reach = Habitat.catRadius + 4
+        return wheelX < lane.lower
+            ? Lane(lower: lane.lower, upper: min(lane.upper, lane.lower + reach))
+            : Lane(lower: max(lane.lower, lane.upper - reach), upper: lane.upper)
+    }
+    /// Only a real mouse drop can request a baton pass; programmatic release always settles normally.
+    @discardableResult func dropped(_ i: Int, keepLineup: Bool = false) -> Bool {
+        guard cats.indices.contains(i), cats[i].action == .held else { return false }
+        guard !keepLineup, wheel != nil, let wheelX, onStage, !quiet, !shuffling, !walkingHome,
+              cats[i].visible, !cats[i].home, !cats[i].homeBound, !cats[i].inTunnel, !cats[i].escaping,
+              cats[i].hiddenFor <= 0,
+              !cats.contains(where: { $0.swapping || $0.wheelBound || $0.action == .hopping }),
+              lanes.contains(where: { $0.contains(cats[i].x, margin: cats[i].radius) }),
+              wheelDropZone(wheelX)?.contains(cats[i].x) == true else {
+            release(i)
+            return false
+        }
+        // An intentional drop may send the last wheel cat straight back, even during swapSpacing.
+        cats[i].wheelBound = true; cats[i].homeBound = true
+        cats[i].swing = 0; swapGap = Self.swapSpacing
+        beginHop(i, from: cats[i].x, to: wheelX, entering: true)
+        return true
+    }
     // Mouse handling: a held cat stays inside its own free interval and is never carried over menus or icons.
     /// Where a held cat can be carried: its own free space, or both sides of the notch joined through it.
     func carryLane(for i: Int) -> Lane? {
