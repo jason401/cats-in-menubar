@@ -774,9 +774,12 @@ final class Colony {
         return true
     }
     /// A turn nobody sees. With a cat resting in the tower the two trade places there; with none, or to keep
-    /// the lineup as it is, a cat from outside the colony takes the wheel.
-    func swapWheelOffstage(keepLineup: Bool) {
-        guard let leaving = wheel else { return }
+    /// the lineup as it is, a cat from outside the colony takes the wheel. Spaced from auto rotation like a
+    /// baton pass: false (try again shortly) while a swap is under way or too recent.
+    @discardableResult func swapWheelOffstage(keepLineup: Bool) -> Bool {
+        guard let leaving = wheel else { return true }
+        guard swapGap <= 0, !cats.contains(where: { $0.swapping || $0.wheelBound }) else { return false }
+        swapGap = Self.swapSpacing
         let inside = cats.indices.filter { cats[$0].home && !cats[$0].swapping }
         if !keepLineup, !inside.isEmpty {
             let rested = inside.filter { cats[$0].coat != lastWheelOut }
@@ -790,6 +793,7 @@ final class Colony {
                                   size: CatSize.allCases[min(2, Int(random() * 3))])
         }
         wheelChanged?()
+        return true
     }
     /// Taking turns in the wheel ends (the wheel is off): a cat on its way carries on as itself.
     func cancelBaton() {

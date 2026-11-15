@@ -1480,9 +1480,11 @@ func testWheelBaton(_ expect: (@autoclosure () -> Bool, String) -> Void) {
     // Nobody out: they trade in the tower, or (Keep my cats) a cat from outside the colony takes the wheel.
     expect(c.beginBaton() == .nobodyOut, "baton: nobody out to walk over")
     let inside = Set(c.cats.map(\.coat)), all = c.takenCoats, wheelBefore = c.wheel!.coat
-    c.swapWheelOffstage(keepLineup: false)
+    c.swapGap = 0; c.swapWheelOffstage(keepLineup: false)
     expect(inside.contains(c.wheel!.coat) && c.takenCoats == all && c.cats.contains { $0.coat == wheelBefore }, "fallback: trades with a cat in the tower")
     let lineup = c.cats.map(\.appearance)
+    expect(!c.swapWheelOffstage(keepLineup: true) && c.cats.map(\.appearance) == lineup, "fallback: spaced from the last swap like auto rotation")
+    c.swapGap = 0
     c.swapWheelOffstage(keepLineup: true)
     expect(c.cats.map(\.appearance) == lineup && c.takenCoats.count == 4, "fallback: Keep my cats keeps the lineup, a new wheel cat")
     let empty = make(); empty.updateLanes([])

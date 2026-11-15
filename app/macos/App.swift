@@ -306,7 +306,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         else if let left = wheelNextShift {
             if !paused { wheelNextShift = left - elapsed }
             if let left = wheelNextShift, left <= 0 {
-                // A busy moment (a swap, a toy, everyone on the move) tries again shortly.
+                // A busy moment (a swap, a toy, everyone on the move) tries again shortly. The wait is reset
+                // first: a new wheel cat redraws through stepWheel, which must not start another turn.
+                wheelNextShift = 10
                 wheelNextShift = takeWheelTurn() ? nextWheelShift(range) : 10
             }
         } else { wheelNextShift = nextWheelShift(range) }
@@ -343,8 +345,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             case .nobodyOut: break
             }
         }
-        colony.swapWheelOffstage(keepLineup: keep)
-        return true
+        return colony.swapWheelOffstage(keepLineup: keep)
     }
     /// Another cat is in the wheel: saved for the next launch and shown from this frame on.
     func wheelCatChanged() {
