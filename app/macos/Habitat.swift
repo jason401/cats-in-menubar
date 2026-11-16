@@ -85,6 +85,7 @@ struct Cat {
     var escapeTop = 0.0     // top speed of the current escape dash
     var homeBound = false   // called back to the cat tower
     var swapping = false    // auto rotation: on the way in, or waiting inside, to come back out as another cat
+    var handSwap = false    // that swap was asked for by dropping the cat on the tower: always comes out as another cat
     var wheelBound = false  // walking to the CPU wheel to take over from the cat in it (homeBound too)
     var stay = 0.0          // auto rotation: seconds left outside before going in to swap
     var tunnelBound = false // walking to the notch to cross to the other side
@@ -156,7 +157,7 @@ final class Colony {
             if rotation == nil {
                 // Off: a cat still walking in to swap carries on as itself. One already hopping in or
                 // inside comes back out unchanged.
-                for i in cats.indices where cats[i].swapping && !cats[i].home && cats[i].action != .hopping {
+                for i in cats.indices where cats[i].swapping && !cats[i].handSwap && !cats[i].home && cats[i].action != .hopping {
                     cats[i].swapping = false; cats[i].homeBound = false
                     if cats[i].action == .goingHome { start(i, .sitting, for: 2 + random() * 3) }
                 }
@@ -271,7 +272,7 @@ final class Colony {
         shuffling = false
         reroll()
         for i in cats.indices {
-            cats[i].home = false; cats[i].homeBound = false; cats[i].swapping = false; cats[i].wheelBound = false; cats[i].visible = false
+            cats[i].home = false; cats[i].homeBound = false; cats[i].swapping = false; cats[i].handSwap = false; cats[i].wheelBound = false; cats[i].visible = false
             cats[i].x = -100; cats[i].velocity = 0; cats[i].escaping = false; cats[i].inTunnel = false
             start(i, .sitting, for: 2)
         }
@@ -640,7 +641,7 @@ final class Colony {
         ball = nil
         for i in cats.indices {
             // A cat waiting inside to swap stays in too; one on its way to the wheel comes home instead.
-            cats[i].homeBound = true; cats[i].swapping = false; cats[i].wheelBound = false
+            cats[i].homeBound = true; cats[i].swapping = false; cats[i].handSwap = false; cats[i].wheelBound = false
             if cats[i].home { continue }
             if !cats[i].visible { cats[i].home = true; continue }
             if cats[i].action != .hopping && !cats[i].inTunnel { start(i, .goingHome, for: .infinity) }
@@ -650,7 +651,7 @@ final class Colony {
     /// or nobody outside can still walk (hidden with the menu bar, or paused).
     func sendHomeNow() {
         for i in cats.indices {
-            cats[i].swapping = false; cats[i].wheelBound = false
+            cats[i].swapping = false; cats[i].handSwap = false; cats[i].wheelBound = false
             if cats[i].home { cats[i].homeBound = true; continue }
             cats[i].home = true; cats[i].visible = false; cats[i].homeBound = true
             cats[i].inTunnel = false; cats[i].escaping = false; cats[i].velocity = 0
@@ -661,7 +662,7 @@ final class Colony {
     /// At launch everyone waits in the tower and hops out one by one once there is free space.
     func startInTower() {
         for i in cats.indices {
-            cats[i].home = true; cats[i].visible = false; cats[i].homeBound = false; cats[i].swapping = false; cats[i].wheelBound = false
+            cats[i].home = true; cats[i].visible = false; cats[i].homeBound = false; cats[i].swapping = false; cats[i].handSwap = false; cats[i].wheelBound = false
             cats[i].outDelay = 0.6 + Double(i) * 0.7
             start(i, .sitting, for: 2)
         }
@@ -701,7 +702,8 @@ final class Colony {
                 // Out again after a short wait, as another cat (picked on the way out, so turning
                 // turns off meanwhile brings the same cat back).
                 cats[i].homeBound = false
-                cats[i].outDelay = 3 + random() * 5
+                // Dropped in by hand: out again soon, so it reads as one move.
+                cats[i].outDelay = cats[i].handSwap ? 1 + random() : 3 + random() * 5
             }
         }
         else {
@@ -721,8 +723,10 @@ final class Colony {
         cats[i].home = false; cats[i].visible = true; cats[i].hiddenFor = 0; cats[i].x = homeX
         cats[i].stay = nextStay()
         if cats[i].swapping {
-            if rotation != nil { swapAppearance(i) }
-            cats[i].swapping = false; swapped?()
+            if rotation != nil || cats[i].handSwap { swapAppearance(i) }
+            // A swap by hand pushes the next automatic one back by a full spacing.
+            if cats[i].handSwap { swapGap = Self.swapSpacing }
+            cats[i].swapping = false; cats[i].handSwap = false; swapped?()
         }
         beginHop(i, from: homeX, to: spot, entering: false)
     }
@@ -773,6 +777,8 @@ final class Colony {
     }
     /// A held cat is over the wheel and letting go would hand it the turn: the wheel cat stops and waits too.
     var wheelDropReady: Bool { cats.indices.contains { dropTarget($0) == .wheel && acceptsWheelDrop($0) } }
+    /// A held cat is over the tower and letting go would send it in for a new cat: the tower door opens.
+    var towerDropReady: Bool { cats.indices.contains { dropTarget($0) == .tower && acceptsTowerDrop($0) } }
     /// Landed in the wheel: the two trade places, and the cat that was in it jumps out and trots off.
     private func enterWheel(_ i: Int) -> Bool {
         guard let leaving = wheel, let wheelX else { return false }
@@ -823,13 +829,16 @@ final class Colony {
     }
     /// How far from the wheel's center a held cat counts as over the wheel.
     static let wheelReach = 10.0
+    /// How far from the tower's center (`homeX`) a held cat counts as over the tower.
+    static let towerReach = 9.0
     enum DropTarget { case free, wheel, tower, icons }
-    /// What a held cat is over: its free space (or the notch), the wheel, the tower, or other icons.
+    /// What a held cat is over: its free space (or the notch), the wheel, the tower, or other icons
+    /// (the rest of our status item included).
     func dropTarget(_ i: Int) -> DropTarget {
         guard cats.indices.contains(i), cats[i].action == .held else { return .free }
         if let wheelX, wheel != nil, abs(cats[i].x - wheelX) <= Self.wheelReach { return .wheel }
         if carryLane(for: i) != nil { return .free }
-        if let own = ownItem, own.contains(cats[i].x) { return .tower }
+        if let homeX, abs(cats[i].x - homeX) <= Self.towerReach { return .tower }
         return .icons
     }
     /// Held over the icons, outside the free space: drawn on top of them, not clipped to the free space.
@@ -840,9 +849,18 @@ final class Colony {
               cats[i].hiddenFor <= 0 else { return false }
         return !cats.contains { $0.swapping || $0.wheelBound || ($0.action == .hopping && ($0.hopIn || $0.hopFrom == wheelX)) }
     }
-    /// Only a real mouse drop can request a baton pass; programmatic release always settles normally.
-    /// `wheelAllowed` is false where the app does not take turns by hand (Keep my cats, paused, moving).
-    @discardableResult func dropped(_ i: Int, wheelAllowed: Bool = true) -> Bool {
+    /// Not while everyone is called in or shuffling, another cat is swapping or on its way to the wheel,
+    /// or the cats sleep. The swap spacing does not apply: this is the user's own pick.
+    private func acceptsTowerDrop(_ i: Int) -> Bool {
+        guard homeX != nil, onStage, !quiet, !shuffling, !walkingHome,
+              cats[i].visible, !cats[i].home, !cats[i].homeBound, !cats[i].inTunnel, !cats[i].escaping,
+              cats[i].hiddenFor <= 0 else { return false }
+        return !cats.contains { $0.swapping || $0.wheelBound || ($0.action == .hopping && $0.hopIn) }
+    }
+    /// Only a real mouse drop can request a baton pass or a new cat; programmatic release always settles normally.
+    /// `wheelAllowed` is false where the app does not take turns by hand (Keep my cats, paused, moving);
+    /// `towerAllowed` is false while paused, moving to another display or with everyone in the tower.
+    @discardableResult func dropped(_ i: Int, wheelAllowed: Bool = true, towerAllowed: Bool = true) -> Bool {
         guard cats.indices.contains(i), cats[i].action == .held else { return false }
         switch dropTarget(i) {
         case .wheel where wheelAllowed && acceptsWheelDrop(i):
@@ -851,12 +869,17 @@ final class Colony {
             cats[i].swing = 0; swapGap = Self.swapSpacing
             beginHop(i, from: cats[i].x, to: wheelX!, entering: true)
             return true
-        case .tower where droppedOnTower(i): return true
+        case .tower where towerAllowed && acceptsTowerDrop(i): droppedOnTower(i); return true
         default: release(i); return false
         }
     }
-    /// Dropped on the cat tower. Drag 2/3 makes this a way into the tower; for now it is an ordinary drop.
-    private func droppedOnTower(_ i: Int) -> Bool { false }
+    /// Dropped on the cat tower: it hops in from where it was let go, and after a moment the same slot
+    /// comes back out as another cat (the auto rotation's swap, picked on the way out).
+    private func droppedOnTower(_ i: Int) {
+        cats[i].swapping = true; cats[i].handSwap = true; cats[i].homeBound = true
+        cats[i].swing = 0; cats[i].carryFrom = nil; swapGap = Self.swapSpacing
+        beginHop(i, from: cats[i].x, to: homeX!, entering: true)
+    }
     // Mouse handling: a held cat stays inside its own free interval, except that it may be carried over the
     // icons toward ours (never over the app menus or into another free space the other way).
     /// Where a held cat can be carried: its own free space, or both sides of the notch joined through it.

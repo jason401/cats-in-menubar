@@ -1505,12 +1505,12 @@ func testWheelBaton(_ expect: (@autoclosure () -> Bool, String) -> Void) {
 
 
 /// Manual drops use the same hop/appearance exchange, without touching production preferences.
-/// The free space is 100...600; our status item spans 668...710 with the wheel centered at 680.
+/// The free space is 100...600; our status item spans 668...710 with the wheel centered at 680 and the tower at 700.
 func testWheelDrop(_ expect: (@autoclosure () -> Bool, String) -> Void) {
     func make() -> Colony {
         let c = Colony(count: 2, random: { 0.4 })
         c.updateLanes([Lane(lower: 100, upper: 600)])
-        c.wheelX = 680; c.enableWheel(nil); c.ownItem = Lane(lower: 668, upper: 710)
+        c.wheelX = 680; c.enableWheel(nil); c.ownItem = Lane(lower: 668, upper: 710); c.homeX = 700
         for i in c.cats.indices {
             c.cats[i].visible = true; c.cats[i].home = false; c.cats[i].hiddenFor = 0
             c.cats[i].x = 300 + Double(i) * 100
@@ -1533,7 +1533,7 @@ func testWheelDrop(_ expect: (@autoclosure () -> Bool, String) -> Void) {
     // Carry corridor: over the icons toward ours, clamped as before the other way.
     let corridor = make(); corridor.grab(0)
     corridor.drag(0, to: 1000, dt: 1.0 / 30)
-    expect(corridor.cats[0].x == 710 && corridor.heldOverIcons(0) && corridor.dropTarget(0) == .tower,
+    expect(corridor.cats[0].x == 710 && corridor.heldOverIcons(0) && corridor.dropTarget(0) == .icons,
            "corridor: carried over the icons to the far edge of our status item")
     corridor.step(1.0 / 30); corridor.updateLanes(corridor.lanes)
     expect(corridor.cats[0].action == .held && corridor.cats[0].x == 710, "corridor: stays in hand over the icons across a rescan")
@@ -1568,11 +1568,12 @@ func testWheelDrop(_ expect: (@autoclosure () -> Bool, String) -> Void) {
     // Drop targets: the wheel itself, the tower (drag 2/3), other icons.
     let targets = make(); targets.grab(0)
     for (x, want, name) in [(670.0, Colony.DropTarget.wheel, "left wheel edge"), (690, .wheel, "right wheel edge"),
-                            (691, .tower, "tower"), (650, .icons, "other icons"), (400, .free, "free space")] {
+                            (691, .tower, "tower left edge"), (709, .tower, "tower right edge"), (710, .icons, "past the tower"),
+                            (650, .icons, "other icons"), (400, .free, "free space")] {
         targets.drag(0, to: x, dt: 1.0 / 30)
         expect(targets.dropTarget(0) == want, "drop target: " + name)
     }
-    for (x, name) in [(650.0, "other icons"), (700, "the tower")] {
+    for (x, name) in [(650.0, "other icons"), (710, "beside the tower")] {
         let icons = make(); held(icons, at: x)
         let old = icons.wheel
         expect(!icons.dropped(0) && icons.wheel == old && !icons.cats[0].wheelBound, "icon drop: " + name + " is an ordinary drop")
@@ -1668,6 +1669,74 @@ func testWheelDrop(_ expect: (@autoclosure () -> Bool, String) -> Void) {
     expect(!fixed.dropped(0, wheelAllowed: false) && !fixed.cats[0].wheelBound && settled(fixed),
            "wheel drop: fixed lineup settles back on free space")
 
+    // Tower drop (drag 2/3): in through the tower, and the same slot comes back out as another cat.
+    do {
+        var seed: UInt64 = 5
+        let t = make()
+        t.random = { seed = seed &* 6364136223846793005 &+ 1442695040888963407; return Double(seed >> 11) / Double(1 << 53) }
+        let old = t.cats[0].appearance, wheelCoat = t.wheel!.coat, other = t.cats[1].coat
+        var swaps = 0
+        t.swapped = { swaps += 1 }
+        held(t, at: 702)
+        expect(t.towerDropReady && !t.wheelDropReady, "tower drop: held over the tower, the door opens (not the wheel's signal)")
+        expect(t.dropped(0) && t.cats[0].action == .hopping && t.cats[0].hopIn && t.cats[0].hopFrom == 702 && t.cats[0].hopTo == 700
+               && t.cats[0].swapping && !t.cats[0].wheelBound, "tower drop: hops in from where it was let go")
+        var wentIn = false, insideFor = 0.0, steps = 0, shownInside = 0
+        while (t.cats[0].home || !wentIn) && steps < 30 * 20 {
+            t.step(1.0 / 30); steps += 1
+            if t.cats[0].home { wentIn = true; insideFor += 1.0 / 30; shownInside = max(shownInside, t.homeCount) }
+        }
+        expect(wentIn && shownInside == 1 && insideFor >= 1 && insideFor <= 2.2, "tower drop: shown in the tower icon for 1-2 s: \(insideFor)")
+        expect(t.cats.count == 2 && t.cats[0].coat != old.coat && t.cats[0].coat != other && t.cats[0].coat != wheelCoat && swaps == 1,
+               "tower drop: same slot, new coat unlike the others and the wheel cat: \(old.coat) -> \(t.cats[0].coat)")
+        expect(t.swapGap > Colony.swapSpacing - 1, "tower drop: auto rotation pushed back a full spacing")
+        expect(settled(t) && !t.cats[0].swapping && !t.cats[0].handSwap, "tower drop: trots out onto the free space")
+        // Again right away: allowed during the swap spacing, and never back into the coat just worn.
+        let second = t.cats[0].coat
+        held(t, at: 700)
+        expect(t.swapGap > 0 && t.dropped(0), "tower drop: allowed during swap spacing")
+        for _ in 0..<(30 * 6) { t.step(1.0 / 30) }
+        expect(!t.cats[0].home && t.cats[0].coat != second && t.cats[0].coat != old.coat, "tower drop: not the coat it just wore, nor the one before")
+    }
+    // Auto rotation off: a swap by hand still changes the cat.
+    let manual = make(); manual.rotation = nil; held(manual, at: 700)
+    let manualOld = manual.cats[0].coat
+    expect(manual.dropped(0), "tower drop: works with auto rotation off")
+    for _ in 0..<(30 * 6) { manual.step(1.0 / 30) }
+    expect(!manual.cats[0].home && manual.cats[0].coat != manualOld, "tower drop: a new cat even with auto rotation off")
+    // Busy: ignored, back on the free space as the same cat.
+    let towerBlockers: [(String, (Colony) -> Void)] = [
+        ("shuffle", { $0.shuffling = true }), ("walking home", { $0.callHome(at: 700) }),
+        ("coat swap", { $0.cats[1].swapping = true }), ("baton", { $0.cats[1].wheelBound = true }),
+        ("quiet", { $0.quiet = true }), ("offstage", { $0.onStage = false }), ("no tower", { $0.homeX = nil })
+    ]
+    for (name, block) in towerBlockers {
+        let blocked = make(); held(blocked, at: 700); block(blocked)
+        let look = blocked.cats[0].appearance
+        expect(!blocked.towerDropReady, "tower drop: no open door while " + name)
+        expect(!blocked.dropped(0) && !blocked.cats[0].swapping && blocked.cats[0].appearance == look, "tower drop: ignored while " + name)
+        if name != "walking home" && name != "shuffle" {
+            expect(settled(blocked) && blocked.cats[0].appearance == look, "tower drop: back on free space while " + name)
+        }
+    }
+    let moving = make(); held(moving, at: 700)
+    let movingLook = moving.cats[0].appearance
+    expect(!moving.dropped(0, towerAllowed: false) && settled(moving) && moving.cats[0].appearance == movingLook,
+           "tower drop: app veto (paused, moving displays) settles back as the same cat")
+    let byCode = make(); held(byCode, at: 700)
+    let byCodeLook = byCode.cats[0].appearance
+    byCode.release(0)
+    expect(!byCode.cats[0].swapping && settled(byCode) && byCode.cats[0].appearance == byCodeLook && byCode.homeCount == 0,
+           "tower drop: programmatic release never swaps")
+    // Called home while it waits inside: it stays in as itself.
+    let recalled = make(); held(recalled, at: 700)
+    let recalledLook = recalled.cats[0].appearance
+    _ = recalled.dropped(0)
+    for _ in 0..<20 { recalled.step(1.0 / 30) }
+    recalled.callHome(at: 700)
+    for _ in 0..<(30 * 20) { recalled.step(1.0 / 30) }
+    expect(recalled.cats.allSatisfy(\.home) && recalled.cats[0].appearance == recalledLook, "tower drop: callHome keeps it in as itself")
+
     // Exercise the view's actual mouse handlers with isolated preferences and no visible windows.
     _ = NSApplication.shared
     let suite = "CatsInMenubar.selftest.wheelDrop"
@@ -1706,6 +1775,33 @@ func testWheelDrop(_ expect: (@autoclosure () -> Bool, String) -> Void) {
             expect(model.wheel == old && !model.cats[0].wheelBound && model.cats[0].action == .grooming,
                    "wheel drop view: endDrag or app veto settles without swapping")
             expect(settled(model) && model.wheel == old, "wheel drop view: endDrag or app veto over the wheel goes back to free space")
+        }
+    }
+    // The same through the view for the tower: mouseUp trades the cat, endDrag never does.
+    for viaMouse in [true, false] {
+        let model = make()
+        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 800, height: 24),
+                              styleMask: [.borderless], backing: .buffered, defer: false)
+        window.isReleasedWhenClosed = false
+        defer { window.close() }
+        let view = HabitatView(colony: model, frame: NSRect(x: 0, y: 0, width: 800, height: 24), defaults: prefs)
+        window.contentView = view
+        view.wheelDropAllowed = { true }; view.towerDropAllowed = { true }
+        func event(_ type: NSEvent.EventType, _ x: Double, _ time: Double) -> NSEvent {
+            NSEvent.mouseEvent(with: type, location: NSPoint(x: x, y: 12), modifierFlags: [],
+                               timestamp: time, windowNumber: window.windowNumber, context: nil,
+                               eventNumber: 0, clickCount: 1, pressure: 0)!
+        }
+        let look = model.cats[0].appearance
+        view.mouseDown(with: event(.leftMouseDown, model.cats[0].x, 1))
+        view.mouseDragged(with: event(.leftMouseDragged, 700, 2))
+        if viaMouse { view.mouseUp(with: event(.leftMouseUp, 700, 3)) } else { view.endDrag() }
+        if viaMouse {
+            expect(model.cats[0].swapping && model.cats[0].action == .hopping, "tower drop view: mouseUp sends it in")
+            for _ in 0..<(30 * 6) { model.step(1.0 / 30) }
+            expect(!model.cats[0].home && model.cats[0].coat != look.coat, "tower drop view: comes back out as another cat")
+        } else {
+            expect(!model.cats[0].swapping && settled(model) && model.cats[0].appearance == look, "tower drop view: endDrag settles as the same cat")
         }
     }
 

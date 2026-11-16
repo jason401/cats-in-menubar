@@ -68,6 +68,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// Wheel seconds left until the next cat's turn; counts down only while the wheel runs unpaused.
     var wheelNextShift: Double?
     var wheelDropShown = false   // a held cat is over the wheel and letting go would trade places
+    var towerDropShown = false   // a held cat is over the tower and letting go would trade it for another cat
     var wheelShiftRange = -1
     let defaults = UserDefaults.standard
 
@@ -318,7 +319,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // Turning clockwise: the cat runs right, so the tread under its paws moves left.
         wheelAngle = (wheelAngle - dt * motion.degreesPerSecond).truncatingRemainder(dividingBy: 360)
         shownHomeCount = colony.homeCount
-        button.image = TowerIcon.menuBar(cats: shownHomeCount, wheel: wheelAngle, battery: wheelBattery)
+        button.image = TowerIcon.menuBar(cats: shownHomeCount, wheel: wheelAngle, battery: wheelBattery, open: towerDropShown)
         // The image is centered in the button; the cat layer covers its left 20 pt.
         let size = TowerIcon.wheelSize
         cat.frame = NSRect(x: (button.bounds.width - size.width) / 2, y: (button.bounds.height - size.height) / 2, width: 20, height: size.height)
@@ -447,7 +448,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // The wheel redraws the whole icon each frame; show the change now rather than on its next frame.
         if wheelOn { stepWheel(); return }
         shownHomeCount = count
-        statusItem.button?.image = TowerIcon.menuBar(cats: count)
+        statusItem.button?.image = TowerIcon.menuBar(cats: count, open: towerDropShown)
     }
     @objc func showSettings() {
         popover.performClose(nil)
@@ -481,6 +482,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         if let rect = towerRect, let overlay { colony.ownItem = Lane(lower: rect.minX - overlay.frame.minX, upper: rect.maxX - overlay.frame.minX) }
         let dropReady = wheelOn && colony.wheelDropReady && habitatView?.wheelDropAllowed?() == true
         if dropReady != wheelDropShown { wheelDropShown = dropReady; stepWheel() }
+        // Over the tower, ready to go in: the tower's door opens wide.
+        let towerReady = colony.towerDropReady && habitatView?.towerDropAllowed?() == true
+        if towerReady != towerDropShown { towerDropShown = towerReady; shownHomeCount = -1; updateTowerIcon() }
         if moveTarget != nil && colony.cats.allSatisfy(\.home) { updateDisplay(); scan() }
         // Out of sight (hidden menu bar, unplugged screen) the cats carry on as usual; only pausing stops them.
         guard !paused, !suspended else { return }
@@ -536,6 +540,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 guard let self else { return false }
                 return self.wheelOn && !self.defaults.bool(forKey: Pref.fixedLineup)
                     && !self.paused && !self.suspended && !self.barHidden && !self.model.catsAway
+                    && !self.model.shuffling && self.moveTarget == nil && self.overlay?.isVisible == true
+            }
+            // Keep my cats only fixes the lineup at launch, so a new cat by hand is still fine.
+            view.towerDropAllowed = { [weak self] in
+                guard let self else { return false }
+                return !self.paused && !self.suspended && !self.barHidden && !self.model.catsAway
                     && !self.model.shuffling && self.moveTarget == nil && self.overlay?.isVisible == true
             }
             view.showLanes = model.debug

@@ -3,7 +3,8 @@ import Cocoa
 // Original cat-tower icon: a base, post, side shelf and a little house with a round door.
 enum TowerIcon {
     /// Draws the tower in a 18 x 18 unit box. `fill` colors parts; nil cuts the door out (template use).
-    private static func draw(wood: NSColor, house: NSColor, post: NSColor, door: NSColor?) {
+    /// `open` widens the door: a held cat let go here would go in.
+    private static func draw(wood: NSColor, house: NSColor, post: NSColor, door: NSColor?, open: Bool = false) {
         post.set()
         NSBezierPath(roundedRect: NSRect(x: 7.2, y: 2.5, width: 2.6, height: 9), xRadius: 0.6, yRadius: 0.6).fill()
         wood.set()
@@ -11,7 +12,7 @@ enum TowerIcon {
         NSBezierPath(roundedRect: NSRect(x: 9.2, y: 6.6, width: 7, height: 1.9), xRadius: 0.9, yRadius: 0.9).fill()
         house.set()
         let body = NSBezierPath(roundedRect: NSRect(x: 2.5, y: 10.4, width: 12, height: 6.8), xRadius: 2, yRadius: 2)
-        let hole = NSBezierPath(ovalIn: NSRect(x: 6.1, y: 11.5, width: 4.8, height: 4.4))
+        let hole = NSBezierPath(ovalIn: open ? NSRect(x: 5.1, y: 11.0, width: 6.8, height: 5.6) : NSRect(x: 6.1, y: 11.5, width: 4.8, height: 4.4))
         if door == nil { body.append(hole.reversed) }
         body.fill()
         if let door { door.set(); hole.fill() }
@@ -32,14 +33,15 @@ enum TowerIcon {
     /// Monochrome template image for the menu bar; cats that came home show up in the tower.
     /// With `wheel` (the teeth's angle in degrees) the running wheel stands to the left of the tower, its band
     /// showing `battery`.
-    static func menuBar(cats: Int = 0, wheel: Double? = nil, tooth: CGFloat = wheelTooth, battery: WheelBattery = .plain) -> NSImage {
+    /// `open` widens the tower's door while a held cat over it would go in when let go.
+    static func menuBar(cats: Int = 0, wheel: Double? = nil, tooth: CGFloat = wheelTooth, battery: WheelBattery = .plain, open: Bool = false) -> NSImage {
         let image = NSImage(size: wheel == nil ? NSSize(width: 18, height: 18) : wheelSize, flipped: false) { _ in
             NSColor.black.set()
             if let wheel {
                 drawWheel(angle: wheel, tooth: tooth, battery: battery)
                 let lift = NSAffineTransform(); lift.translateX(by: towerOffset, yBy: (wheelSize.height - 18) / 2); lift.concat()
             }
-            draw(wood: .black, house: .black, post: .black, door: nil)
+            draw(wood: .black, house: .black, post: .black, door: nil, open: open)
             NSColor.black.set()
             // 1: peeking out of the door, 2: sitting under the house, 3: loafing under the shelf.
             if cats >= 1 { catShape(head: NSPoint(x: 8.5, y: 12.9), radius: 1.55, body: nil).fill() }

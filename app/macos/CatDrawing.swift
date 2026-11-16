@@ -369,6 +369,7 @@ final class HabitatView: NSView {
     private(set) var lasering = false
     var interactionEnded: (() -> Void)?
     var wheelDropAllowed: (() -> Bool)?
+    var towerDropAllowed: (() -> Bool)?
     private var grabOffset = 0.0
     private var lastDrag = 0.0
     init(colony: Colony, frame: NSRect, defaults: UserDefaults = .standard) {
@@ -460,11 +461,12 @@ final class HabitatView: NSView {
         lastDrag = event.timestamp; needsDisplay = true
     }
     override func mouseUp(with event: NSEvent) {
-        // Let go on an icon: the wheel takes a turn (where the app allows it), elsewhere the cat settles.
+        // Let go on an icon: the wheel takes a turn, the tower trades the cat for another (where the app
+        // allows it), elsewhere the cat settles.
         if let i = dragging {
             let point = convert(event.locationInWindow, from: nil)
             colony.drag(i, to: point.x + grabOffset, dt: event.timestamp - lastDrag)
-            colony.dropped(i, wheelAllowed: wheelDropAllowed?() == true)
+            colony.dropped(i, wheelAllowed: wheelDropAllowed?() == true, towerAllowed: towerDropAllowed?() == true)
         }
         endDrag(); NSCursor.openHand.set()
     }
