@@ -255,17 +255,33 @@ final class Colony {
         settleWheel()
         reconcile()
     }
-    /// New, distinct coats and sizes for everyone, avoiding the coats worn now where there are enough.
+    /// New, distinct coats and sizes for everyone (the wheel cat too), avoiding the coats worn now where there are enough.
     func reroll() {
         let worn = Set(cats.map(\.coat))
-        let open = (0..<8).filter { $0 != wheel?.coat }
-        let fresh = open.filter { !worn.contains($0) }
-        var unused = fresh.count >= cats.count ? fresh : open
+        let fresh = (0..<8).filter { !takenCoats.contains($0) }
+        var unused = fresh.count >= population ? fresh : Array(0..<8)
         for i in cats.indices {
             cats[i].coat = unused.remove(at: min(unused.count - 1, Int(random() * Double(unused.count))))
             cats[i].size = CatSize.allCases[min(2, Int(random() * 3))]
         }
+        if wheel != nil {
+            wheel = CatAppearance(coat: unused.remove(at: min(unused.count - 1, Int(random() * Double(unused.count)))),
+                                  size: CatSize.allCases[min(2, Int(random() * 3))])
+            wheelChanged?()
+        }
         recentCoats = Array(worn.prefix(3))
+    }
+    /// A cat dressed by hand (`nil`: the wheel cat). A coat another cat of the colony wears now is traded:
+    /// that cat takes the old coat, so no two cats, the wheel cat included, look alike.
+    func dress(_ index: Int?, _ appearance: CatAppearance) {
+        let current: CatAppearance? = if let index { cats.indices.contains(index) ? cats[index].appearance : nil } else { wheel }
+        guard let old = current else { return }
+        if appearance.coat != old.coat {
+            if let j = cats.indices.first(where: { $0 != index && cats[$0].coat == appearance.coat }) { cats[j].coat = old.coat }
+            else if index != nil, wheel?.coat == appearance.coat { wheel?.coat = old.coat; wheelChanged?() }
+        }
+        if let index { cats[index].appearance = appearance } else { wheel = appearance; wheelChanged?() }
+        reconcile()
     }
     /// New cats at once, anywhere in the free space (paused, or the tower cannot be reached).
     func shuffle() {
@@ -737,8 +753,14 @@ final class Colony {
     var population: Int { cats.count + (wheel == nil ? 0 : 1) }
     /// The wheel is switched on: the saved wheel cat comes back (the orange tabby the first time),
     /// unless a cat outside wears its coat now; then another free coat.
-    func enableWheel(_ saved: CatAppearance?) {
-        wheel = saved.map { CatAppearance(coat: max(0, min(7, $0.coat)), size: $0.size) } ?? CatAppearance(coat: 0, size: .adult)
+    /// `fresh`: a new cat instead (a launch without Keep my cats), in a coat nobody outside wears.
+    func enableWheel(_ saved: CatAppearance?, fresh: Bool = false) {
+        if fresh {
+            let free = (0..<8).filter { coat in !cats.contains { $0.coat == coat } }
+            wheel = CatAppearance(coat: free[min(free.count - 1, Int(random() * Double(free.count)))], size: CatSize.allCases[min(2, Int(random() * 3))])
+        } else {
+            wheel = saved.map { CatAppearance(coat: max(0, min(7, $0.coat)), size: $0.size) } ?? CatAppearance(coat: 0, size: .adult)
+        }
         settleWheel()
     }
     /// A cat outside got the wheel cat's coat (picked by hand, a saved lineup): the wheel cat changes.

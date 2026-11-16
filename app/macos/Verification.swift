@@ -925,6 +925,15 @@ func renderPanels(to directory: String) {
         view.frame = NSRect(origin: .zero, size: SettingsWindowController.size)
         save(view, "settings-\(tab.0)")
     }
+    // With the CPU wheel on, Your cats shows the wheel cat as a fourth row.
+    model.wheelCat = CatAppearance(coat: 3, size: .young)
+    if let cats = SettingsWindowController.tabs.firstIndex(where: { $0.0.lowercased() == "cats" }) {
+        let view = NSHostingView(rootView: controller.view(for: cats))
+        // Tall enough to reach Your cats without scrolling.
+        view.frame = NSRect(x: 0, y: 0, width: SettingsWindowController.size.width, height: 1700)
+        save(view, "settings-cats-wheel")
+    }
+    model.wheelCat = nil
     let now = Date()
     var progress = UpdateProgress(at: now.addingTimeInterval(-25))
     progress.move(to: 1, at: now.addingTimeInterval(-20))
@@ -1456,6 +1465,48 @@ func testWheelBaton(_ expect: (@autoclosure () -> Bool, String) -> Void) {
     expect(clean, "wheel: swap and reroll never pick the wheel cat's coat")
     pick.applyAppearances([CatAppearance(coat: pick.wheel!.coat, size: .kitten)])
     expect(pick.takenCoats.count == 4 && pick.cats[0].size == .kitten, "wheel: a cat picked by hand keeps its coat; the wheel cat changes")
+
+    // Settings > Your cats: the wheel cat is the fourth row; a coat another cat wears is traded between the two.
+    let dressed = make()
+    let outsideCoat = dressed.cats[1].coat, wheelCoat = dressed.wheel!.coat
+    dressed.dress(nil, CatAppearance(coat: outsideCoat, size: .kitten))
+    expect(dressed.wheel == CatAppearance(coat: outsideCoat, size: .kitten) && dressed.cats[1].coat == wheelCoat && dressed.takenCoats.count == 4,
+           "wheel row: picking an outside cat's coat swaps the two")
+    let fromRow = dressed.cats[2].coat
+    dressed.dress(2, CatAppearance(coat: dressed.wheel!.coat, size: .adult))
+    expect(dressed.wheel!.coat == fromRow && dressed.cats[2].coat == outsideCoat && dressed.takenCoats.count == 4,
+           "cat row: picking the wheel cat's coat swaps with the wheel cat")
+    let peers = make(), peerCoat = peers.cats[2].coat, ownCoat = peers.cats[0].coat
+    peers.dress(0, CatAppearance(coat: peerCoat, size: .young))
+    expect(peers.cats[0].coat == peerCoat && peers.cats[2].coat == ownCoat && peers.takenCoats.count == 4, "cat row: two cats outside swap coats too")
+    let sized = make(), sizedCoats = sized.takenCoats
+    sized.dress(nil, CatAppearance(coat: sized.wheel!.coat, size: .kitten))
+    expect(sized.takenCoats == sizedCoats && sized.wheel!.size == .kitten, "wheel row: a new size alone changes nobody else")
+    var shuffledApart = true
+    let mixer = make()
+    for _ in 0..<50 { mixer.shuffle(); if mixer.takenCoats.count != 4 || mixer.population != 4 { shuffledApart = false } }
+    expect(shuffledApart, "shuffle: the wheel cat is drawn again, all four coats differ")
+    let rerolled = make(); let firstWheel = rerolled.wheel
+    var newWheel = false
+    for _ in 0..<8 { rerolled.reroll(); if rerolled.wheel != firstWheel { newWheel = true } }
+    expect(newWheel, "shuffle: the wheel cat changes too")
+    // Keep my cats: lineup and wheel cat saved as the app saves them, on a throwaway defaults suite.
+    let keepSuite = "CatsInMenubar.selftest.keepWheel"
+    if let prefs = UserDefaults(suiteName: keepSuite) {
+        prefs.removePersistentDomain(forName: keepSuite)
+        let kept = make()
+        prefs.set(try? JSONEncoder().encode(kept.cats.map(\.appearance)), forKey: Pref.lineup)
+        prefs.set(try? JSONEncoder().encode(kept.wheel!), forKey: Pref.wheelCat)
+        let relaunch = make()
+        if let data = prefs.data(forKey: Pref.lineup), let lineup = try? JSONDecoder().decode([CatAppearance].self, from: data) { relaunch.applyAppearances(lineup) }
+        relaunch.enableWheel(prefs.data(forKey: Pref.wheelCat).flatMap { try? JSONDecoder().decode(CatAppearance.self, from: $0) })
+        expect(relaunch.cats.map(\.appearance) == kept.cats.map(\.appearance) && relaunch.wheel == kept.wheel,
+               "keep my cats: the wheel cat comes back with the lineup")
+        var freshApart = true
+        for _ in 0..<30 { relaunch.enableWheel(kept.wheel, fresh: true); if relaunch.takenCoats.count != 4 { freshApart = false } }
+        expect(freshApart, "launch without keep: a new wheel cat, never an outside coat")
+        prefs.removePersistentDomain(forName: keepSuite)
+    } else { expect(false, "keep my cats: isolated defaults suite") }
 
     // The baton: one cat walks over, jumps in, and the wheel cat comes out wearing its own coat.
     let before = c.wheel!

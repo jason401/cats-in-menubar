@@ -902,6 +902,36 @@ struct CatsTab: View {
                         }.disabled(model.shuffling)
                     }.padding(.horizontal, 10).padding(.vertical, 5)
                 }
+                // The cat in the CPU wheel, one of the colony; only while the wheel is on.
+                if let wheel = model.wheelCat {
+                    Divider()
+                    VStack(alignment: .leading, spacing: 4) {
+                        HStack(spacing: 8) {
+                            Image(nsImage: CatDrawing.thumbnail(wheel)).frame(width: 46, height: 30)
+                            Text("Wheel cat").font(.system(size: 11, weight: .medium))
+                            Image(nsImage: TowerIcon.menuBar(wheel: 0)).renderingMode(.template).resizable().scaledToFit().frame(height: 13)
+                                .foregroundStyle(.secondary).accessibilityHidden(true)
+                            Spacer()
+                        }
+                        HStack(spacing: 6) {
+                            SettingsMenu(options: CatAppearance.names.enumerated().map { ($0.element, $0.offset) }, selection: Binding(
+                                get: { model.wheelCat?.coat ?? 0 },
+                                set: { value in
+                                    guard var appearance = model.wheelCat else { return }
+                                    appearance.coat = value; model.configureWheelCat?(appearance)
+                                }))
+                                .accessibilityLabel("Wheel cat color")
+                            SettingsMenu(options: CatSize.allCases.map { ($0.label, $0) }, selection: Binding(
+                                get: { model.wheelCat?.size ?? .adult },
+                                set: { value in
+                                    guard var appearance = model.wheelCat else { return }
+                                    appearance.size = value; model.configureWheelCat?(appearance)
+                                }))
+                                .frame(width: 91).accessibilityLabel("Wheel cat size")
+                        }.disabled(model.shuffling)
+                    }.padding(.horizontal, 10).padding(.vertical, 5)
+                }
+                SettingsNote(text: "With the CPU wheel on, one more cat runs in the wheel (up to 4). Picking a color another cat wears swaps the two.")
                 Divider()
                 SettingsRow(title: "Keep my cats") {
                     SettingsSwitch(title: "Keep my cats at launch", isOn: Binding(get: { model.keepLineup }, set: { model.rememberCats?($0) }))

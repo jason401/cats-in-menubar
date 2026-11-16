@@ -13,7 +13,9 @@ final class AppModel: ObservableObject {
     @Published var power = PowerLevel.full
     @Published var lineup: [CatAppearance] = []
     @Published var keepLineup = false
+    @Published var wheelCat: CatAppearance?   // the cat in the CPU wheel, nil while the wheel is off
     var configureCat: ((Int, CatAppearance) -> Void)?
+    var configureWheelCat: ((CatAppearance) -> Void)?
     var shuffleCats: (() -> Void)?
     var rememberCats: ((Bool) -> Void)?
     var keepCurrent: (() -> Void)?
@@ -57,6 +59,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     var governor = PowerGovernor()
     var appliedLineup: Data?
     var lineupLoaded = false    // with turns on, the saved lineup only sets who comes out at launch
+    var wheelLoaded = false     // the saved wheel cat comes back at launch only with Keep my cats
     // The CPU wheel: a template tower + wheel image, and the colored cat as its own layer on top.
     var wheelOn = false
     var wheelPace = WheelPace()
@@ -98,6 +101,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         defaults.set(false, forKey: "catsHome")
         model.keepLineup = defaults.bool(forKey: Pref.fixedLineup)
         model.configureCat = { [weak self] i, appearance in self?.configureCat(i, appearance) }
+        model.configureWheelCat = { [weak self] appearance in self?.configureWheelCat(appearance) }
         model.shuffleCats = { [weak self] in self?.shuffleCats() }
         model.rememberCats = { [weak self] enabled in self?.rememberCats(enabled) }
         model.keepCurrent = { [weak self] in self?.keepCurrent() }
@@ -165,6 +169,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let toyColor = defaults.integer(forKey: Pref.toyColor)
         colony.toyColor = Toy.colors.indices.contains(toyColor) ? toyColor : nil
         if defaults.bool(forKey: Pref.cpuWheel) != wheelOn { setWheel(!wheelOn) }
+        wheelLoaded = true
         habitatView?.showLanes = model.debug
         system.wantsApps = defaults.integer(forKey: Pref.topApps) > 0 && (defaults.bool(forKey: Pref.showCPU) || defaults.bool(forKey: Pref.showMemory))
         system.wantsWiFi = defaults.bool(forKey: Pref.showNetwork)
@@ -179,6 +184,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     func syncLineup() {
         let appearances = colony.cats.map(\.appearance)
         if model.lineup != appearances { model.lineup = appearances }
+        if model.wheelCat != colony.wheel { model.wheelCat = colony.wheel }
         model.keepLineup = defaults.bool(forKey: Pref.fixedLineup)
     }
     func saveLineup() {
@@ -192,15 +198,26 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             appliedLineup = data
             defaults.set(data, forKey: Pref.lineup)
         }
+        // The wheel cat is kept under its own key (also saved at every turn).
+        if let wheel = colony.wheel, let data = try? JSONEncoder().encode(wheel) { defaults.set(data, forKey: Pref.wheelCat) }
     }
     func configureCat(_ index: Int, _ appearance: CatAppearance) {
         guard colony.cats.indices.contains(index) else { return }
         habitatView?.endDrag()
         // Picking a cat by hand ends taking turns.
         defaults.set(false, forKey: Pref.rotate); colony.rotation = nil
-        colony.cats[index].appearance = appearance
-        colony.settleWheel()
-        colony.reconcile()
+        // A coat another cat wears (the wheel cat too) is traded between the two.
+        colony.dress(index, appearance)
+        saveLineup()
+        defaults.set(true, forKey: Pref.fixedLineup)
+        syncLineup()
+        habitatView?.needsDisplay = true
+    }
+    /// The wheel cat picked by hand; a coat a cat outside wears is traded. Turns in the wheel carry on.
+    func configureWheelCat(_ appearance: CatAppearance) {
+        guard colony.wheel != nil else { return }
+        habitatView?.endDrag()
+        colony.dress(nil, appearance)
         saveLineup()
         defaults.set(true, forKey: Pref.fixedLineup)
         syncLineup()
@@ -275,7 +292,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         guard let button = statusItem.button else { return }
         button.imagePosition = on ? .imageOnly : .imageLeft
         if on {
-            colony.enableWheel(defaults.data(forKey: Pref.wheelCat).flatMap { try? JSONDecoder().decode(CatAppearance.self, from: $0) })
+            // At launch without Keep my cats the wheel cat is new too; switched on again later, the last one comes back.
+            let saved = defaults.data(forKey: Pref.wheelCat).flatMap { try? JSONDecoder().decode(CatAppearance.self, from: $0) }
+            colony.enableWheel(saved, fresh: saved != nil && !wheelLoaded && !defaults.bool(forKey: Pref.fixedLineup))
             let view = WheelOverlayView(frame: NSRect(x: 0, y: 0, width: 20, height: TowerIcon.wheelSize.height))
             button.addSubview(view); wheelCat = view
             wheelLast = ProcessInfo.processInfo.systemUptime; wheelNextShift = nil
@@ -286,6 +305,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             shownHomeCount = -1; updateTowerIcon()
         }
         AppModel.log("CPU wheel: \(on ? "on" : "off")")
+        syncLineup()
         layoutChanged()
     }
     /// One wheel frame, then the next is scheduled at the current pace (RunCat style), independent of
@@ -356,6 +376,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         guard let wheel = colony.wheel else { return }
         if let data = try? JSONEncoder().encode(wheel) { defaults.set(data, forKey: Pref.wheelCat) }
         AppModel.log("CPU wheel: \(CatAppearance.names[wheel.coat]) takes a turn")
+        syncLineup()
         wheelStep = 0
         if wheelOn && wheelCat != nil { stepWheel() }
     }
