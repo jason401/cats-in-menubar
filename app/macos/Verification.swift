@@ -1505,11 +1505,12 @@ func testWheelBaton(_ expect: (@autoclosure () -> Bool, String) -> Void) {
 
 
 /// Manual drops use the same hop/appearance exchange, without touching production preferences.
+/// The free space is 100...600; our status item spans 668...710 with the wheel centered at 680.
 func testWheelDrop(_ expect: (@autoclosure () -> Bool, String) -> Void) {
     func make() -> Colony {
         let c = Colony(count: 2, random: { 0.4 })
         c.updateLanes([Lane(lower: 100, upper: 600)])
-        c.wheelX = 680; c.enableWheel(nil)
+        c.wheelX = 680; c.enableWheel(nil); c.ownItem = Lane(lower: 668, upper: 710)
         for i in c.cats.indices {
             c.cats[i].visible = true; c.cats[i].home = false; c.cats[i].hiddenFor = 0
             c.cats[i].x = 300 + Double(i) * 100
@@ -1517,22 +1518,66 @@ func testWheelDrop(_ expect: (@autoclosure () -> Bool, String) -> Void) {
         }
         return c
     }
-    func heldAtEdge(_ c: Colony, _ i: Int = 0) {
-        c.grab(i); c.drag(i, to: 1000, dt: 1.0 / 30)
+    func held(_ c: Colony, at x: Double = 680, _ i: Int = 0) {
+        c.grab(i); c.drag(i, to: x, dt: 1.0 / 30); c.step(1.0 / 30)
     }
     func finish(_ c: Colony) {
         for _ in 0..<600 { c.step(1.0 / 30); if !c.cats.contains(where: { $0.action == .hopping }) { break } }
     }
-    let geometry = make()
-    expect(geometry.wheelDropZone(680) == Lane(lower: 572, upper: 600), "wheel drop: lane left of wheel")
-    expect(geometry.wheelDropZone(20) == Lane(lower: 100, upper: 128), "wheel drop: lane right of wheel")
-    expect(geometry.wheelDropZone(350) == Lane(lower: 336, upper: 364), "wheel drop: wheel inside lane")
-    expect(geometry.wheelDropZone(105)?.contains(124) == true
-           && geometry.wheelDropZone(595)?.contains(576) == true, "wheel drop: inside wheel near lane ends stays reachable")
-    geometry.lanes = [Lane(lower: 0, upper: 200), Lane(lower: 400, upper: 600)]
-    expect(geometry.wheelDropZone(350) == Lane(lower: 400, upper: 428), "wheel drop: nearest lane across a gap")
-    geometry.lanes = []
-    expect(geometry.wheelDropZone(350) == nil, "wheel drop: no free lane")
+    func settled(_ c: Colony, _ i: Int = 0) -> Bool {
+        for _ in 0..<300 { c.step(1.0 / 30) }
+        return c.cats[i].visible && !c.cats[i].escaping && c.cats[i].action != .held && c.cats[i].action != .hopping
+            && c.lanes.contains { $0.contains(c.cats[i].x, margin: c.cats[i].radius) }
+    }
+
+    // Carry corridor: over the icons toward ours, clamped as before the other way.
+    let corridor = make(); corridor.grab(0)
+    corridor.drag(0, to: 1000, dt: 1.0 / 30)
+    expect(corridor.cats[0].x == 710 && corridor.heldOverIcons(0) && corridor.dropTarget(0) == .tower,
+           "corridor: carried over the icons to the far edge of our status item")
+    corridor.step(1.0 / 30); corridor.updateLanes(corridor.lanes)
+    expect(corridor.cats[0].action == .held && corridor.cats[0].x == 710, "corridor: stays in hand over the icons across a rescan")
+    corridor.drag(0, to: -100, dt: 1.0 / 30)
+    expect(corridor.cats[0].x == 100 + corridor.cats[0].radius && !corridor.heldOverIcons(0), "corridor: the other way clamps at the free space")
+    let gap = make(); gap.updateLanes([Lane(lower: 0, upper: 200), Lane(lower: 400, upper: 600)])
+    gap.cats[0].x = 100; gap.cats[1].x = 500; gap.grab(0); gap.grab(1)
+    gap.drag(0, to: 1000, dt: 1.0 / 30); gap.drag(1, to: -100, dt: 1.0 / 30)
+    expect(gap.cats[0].x == 710, "corridor: crosses other icons and free space on the way to ours")
+    expect(gap.cats[1].x == 400 + gap.cats[1].radius, "corridor: never toward another free space away from our icons")
+    gap.drag(0, to: 500, dt: 1.0 / 30); gap.step(1.0 / 30); gap.updateLanes(gap.lanes)
+    gap.drag(0, to: 50, dt: 1.0 / 30)
+    expect(gap.cats[0].x == 50, "corridor: back to where it was picked up after passing another free space")
+    let right = make(); right.updateLanes([Lane(lower: 800, upper: 1200)]); right.cats[0].x = 1000
+    right.grab(0); right.drag(0, to: 0, dt: 1.0 / 30)
+    let rightEnd = right.cats[0].x
+    right.drag(0, to: 5000, dt: 1.0 / 30)
+    expect(rightEnd == 668 && right.cats[0].x == 1200 - right.cats[0].radius, "corridor: our icon on the left side stretches leftward only")
+    let notched = make(); notched.tunnel = Lane(lower: 308, upper: 332)
+    notched.updateLanes([Lane(lower: 100, upper: 300), Lane(lower: 340, upper: 600)])
+    notched.cats[0].x = 200; notched.cats[1].x = 500; notched.grab(0)
+    notched.drag(0, to: 1000, dt: 1.0 / 30)
+    let far = notched.cats[0].x
+    notched.drag(0, to: 320, dt: 1.0 / 30); notched.step(1.0 / 30)
+    expect(far == 710 && notched.cats[0].action == .held && notched.dropTarget(0) == .free && !notched.heldOverIcons(0),
+           "corridor: the notch stays joined and hides the cat")
+    notched.release(0)
+    expect(notched.cats[0].inTunnel, "corridor: let go behind the notch still walks out of it")
+    let plain = make(); plain.ownItem = nil; plain.grab(0); plain.drag(0, to: 1000, dt: 1.0 / 30)
+    expect(plain.cats[0].x == 600 - plain.cats[0].radius, "corridor: unknown status item keeps the free space")
+
+    // Drop targets: the wheel itself, the tower (drag 2/3), other icons.
+    let targets = make(); targets.grab(0)
+    for (x, want, name) in [(670.0, Colony.DropTarget.wheel, "left wheel edge"), (690, .wheel, "right wheel edge"),
+                            (691, .tower, "tower"), (650, .icons, "other icons"), (400, .free, "free space")] {
+        targets.drag(0, to: x, dt: 1.0 / 30)
+        expect(targets.dropTarget(0) == want, "drop target: " + name)
+    }
+    for (x, name) in [(650.0, "other icons"), (700, "the tower")] {
+        let icons = make(); held(icons, at: x)
+        let old = icons.wheel
+        expect(!icons.dropped(0) && icons.wheel == old && !icons.cats[0].wheelBound, "icon drop: " + name + " is an ordinary drop")
+        expect(settled(icons), "icon drop: back on free space after letting go over " + name)
+    }
 
     let c = make()
     let before = c.wheel!, entering = c.cats[0].appearance
@@ -1540,28 +1585,29 @@ func testWheelDrop(_ expect: (@autoclosure () -> Bool, String) -> Void) {
     var turnResets = 0
     c.wheelTurnCompleted = { turnResets += 1 }
     c.wheelChanged = { changes += 1 }
-    heldAtEdge(c)
-    let from = c.cats[0].x
-    expect(c.dropped(0) && c.cats[0].action == .hopping && c.cats[0].hopFrom == from
-           && c.cats[0].hopTo == 680 && c.wheelWaiting, "wheel drop: jumps straight from the drop and waits")
+    held(c, at: 684)
+    expect(c.wheelDropReady && c.cats[0].action == .held && c.heldOverIcons(0), "wheel drop: held over the wheel, the wheel cat waits")
+    expect(c.dropped(0) && c.cats[0].action == .hopping && c.cats[0].hopFrom == 684
+           && c.cats[0].hopTo == 680 && c.cats[0].hopTotal == Colony.hopTime && c.wheelWaiting,
+           "wheel drop: a short hop in from where it was let go")
     finish(c)
     expect(c.wheel == entering && c.cats[0].appearance == before && changes == 1 && turnResets == 1,
            "wheel drop: exchanges whole appearance and notifies the timer owner once")
     expect(c.swapGap > 0 && !c.cats[0].home && c.cats[0].visible,
            "wheel drop: resets swap spacing and sends previous wheel cat outside")
-    heldAtEdge(c)
+    held(c)
     expect(c.dropped(0), "wheel drop: user can send the last wheel cat back during swap spacing")
     finish(c)
     expect(c.wheel == before, "wheel drop: last wheel cat can take over again")
 
     for size in CatSize.allCases {
-        let sized = make(); sized.cats[0].size = size; heldAtEdge(sized)
-        expect(sized.dropped(0), "wheel drop: every size can drop at its clamped edge")
+        let sized = make(); sized.cats[0].size = size; held(sized)
+        expect(sized.dropped(0), "wheel drop: every size can be carried onto the wheel")
     }
 
-    // Switching off at any point of the entry hop never sends the cat into the tower.
-    for delay in [0.0, 0.4, 1.5] {
-        let cancelled = make(); heldAtEdge(cancelled)
+    // Switching off at any point of the short entry hop never sends the cat into the tower.
+    for delay in [0.0, 0.2, 0.45] {
+        let cancelled = make(); held(cancelled)
         let look = cancelled.cats[0].appearance
         var completed = 0
         cancelled.wheelTurnCompleted = { completed += 1 }
@@ -1579,7 +1625,7 @@ func testWheelDrop(_ expect: (@autoclosure () -> Bool, String) -> Void) {
 
     let unrelated = make()
     unrelated.beginHop(1, from: 700, to: 400, entering: false)
-    heldAtEdge(unrelated)
+    held(unrelated)
     expect(unrelated.dropped(0), "wheel drop: unrelated tower hop-out does not block")
 
     let appearanceOnly = make()
@@ -1589,13 +1635,15 @@ func testWheelDrop(_ expect: (@autoclosure () -> Bool, String) -> Void) {
     appearanceOnly.applyAppearances([CatAppearance(coat: appearanceOnly.wheel!.coat, size: .kitten)])
     expect(resets == 0, "wheel timer: appearance reconciliation does not reset turn")
 
-    let outside = make(); outside.grab(0)
-    expect(!outside.dropped(0) && outside.cats[0].action == .grooming, "wheel drop: outside zone grooms")
-    let programmatic = make(); heldAtEdge(programmatic)
+    let outside = make(); outside.grab(0); outside.drag(0, to: 450, dt: 1.0 / 30)
+    expect(!outside.dropped(0) && outside.cats[0].action == .grooming && outside.cats[0].x == 450,
+           "wheel drop: let go on free space grooms where it is")
+    let programmatic = make(); held(programmatic)
     let original = programmatic.wheel
     programmatic.release(0)
     expect(programmatic.wheel == original && programmatic.cats[0].action == .grooming
            && !programmatic.cats[0].wheelBound, "wheel drop: programmatic release cannot swap")
+    expect(settled(programmatic) && programmatic.wheel == original, "wheel drop: programmatic release over the wheel goes back to free space")
 
     let blockers: [(String, (Colony) -> Void)] = [
         ("off", { $0.wheel = nil }), ("no position", { $0.wheelX = nil }),
@@ -1607,14 +1655,18 @@ func testWheelDrop(_ expect: (@autoclosure () -> Bool, String) -> Void) {
         ("hop out", { $0.beginHop(1, from: 680, to: 500, entering: false) })
     ]
     for (name, block) in blockers {
-        let blocked = make(); heldAtEdge(blocked); block(blocked)
+        let blocked = make(); held(blocked); block(blocked)
         let old = blocked.wheel
-        expect(!blocked.dropped(0) && blocked.wheel == old && blocked.cats[0].action == .grooming,
+        expect(!blocked.wheelDropReady, "wheel drop: no waiting signal while " + name)
+        expect(!blocked.dropped(0) && blocked.wheel == old && !blocked.cats[0].wheelBound,
                "wheel drop: ignored while " + name)
+        if name != "walking home" && name != "shuffle" {
+            expect(settled(blocked) && blocked.wheel == old, "wheel drop: back on free space while " + name)
+        }
     }
-    let fixed = make(); heldAtEdge(fixed)
-    expect(!fixed.dropped(0, keepLineup: true) && fixed.cats[0].action == .grooming,
-           "wheel drop: fixed lineup settles normally")
+    let fixed = make(); held(fixed)
+    expect(!fixed.dropped(0, wheelAllowed: false) && !fixed.cats[0].wheelBound && settled(fixed),
+           "wheel drop: fixed lineup settles back on free space")
 
     // Exercise the view's actual mouse handlers with isolated preferences and no visible windows.
     _ = NSApplication.shared
@@ -1641,10 +1693,10 @@ func testWheelDrop(_ expect: (@autoclosure () -> Bool, String) -> Void) {
         }
         let old = model.wheel
         view.mouseDown(with: event(.leftMouseDown, model.cats[0].x, 1))
-        view.mouseDragged(with: event(.leftMouseDragged, 1000, 2))
+        view.mouseDragged(with: event(.leftMouseDragged, 682, 2))
         expect(view.dragging == 0, "wheel drop view: grabbed and dragged")
         if mode == 1 { view.endDrag() }
-        else { view.mouseUp(with: event(.leftMouseUp, 1000, 3)) }
+        else { view.mouseUp(with: event(.leftMouseUp, 682, 3)) }
         expect(view.dragging == nil && ended == 1, "wheel drop view: ends interaction once")
         if mode == 0 {
             expect(model.cats[0].wheelBound && model.cats[0].action == .hopping, "wheel drop view: mouseUp starts baton")
@@ -1653,6 +1705,7 @@ func testWheelDrop(_ expect: (@autoclosure () -> Bool, String) -> Void) {
         } else {
             expect(model.wheel == old && !model.cats[0].wheelBound && model.cats[0].action == .grooming,
                    "wheel drop view: endDrag or app veto settles without swapping")
+            expect(settled(model) && model.wheel == old, "wheel drop view: endDrag or app veto over the wheel goes back to free space")
         }
     }
 

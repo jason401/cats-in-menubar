@@ -67,6 +67,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     var wheelGait = WheelPace.Gait.rest
     /// Wheel seconds left until the next cat's turn; counts down only while the wheel runs unpaused.
     var wheelNextShift: Double?
+    var wheelDropShown = false   // a held cat is over the wheel and letting go would trade places
     var wheelShiftRange = -1
     let defaults = UserDefaults.standard
 
@@ -295,7 +296,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // Frames are at most 1 s apart, so a longer gap is sleep and does not count toward a turn.
         let elapsed = min(2, max(0, now - wheelLast)), dt = min(0.5, elapsed); wheelLast = now
         // Paused cats rest in the wheel too, and so does a wheel cat waiting for the cat taking over.
-        let waiting = paused || colony.wheelWaiting
+        // A cat held over the wheel, ready to take over when let go, gets the same pause as a signal.
+        let waiting = paused || colony.wheelWaiting || wheelDropShown
         let gait = waiting ? .rest : wheelPace.gait
         let motion = waiting ? WheelPace.Motion(frameRate: 0, degreesPerSecond: 0) : wheelPace.motion(lowPower: ProcessInfo.processInfo.isLowPowerModeEnabled)
         if gait != wheelGait { wheelGait = gait; wheelStep = 0 } else { wheelStep += dt * motion.frameRate }
@@ -476,6 +478,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // walks cats in and out without a fresh callHome/letOut, so follow the icon every frame.
         if let x = towerX, colony.homeX == nil || (0...(overlay?.frame.width ?? 0)).contains(x) { colony.homeX = x }
         if !wheelOn { colony.wheelX = nil } else if let x = wheelX, colony.wheelX == nil || (0...(overlay?.frame.width ?? 0)).contains(x) { colony.wheelX = x }
+        if let rect = towerRect, let overlay { colony.ownItem = Lane(lower: rect.minX - overlay.frame.minX, upper: rect.maxX - overlay.frame.minX) }
+        let dropReady = wheelOn && colony.wheelDropReady && habitatView?.wheelDropAllowed?() == true
+        if dropReady != wheelDropShown { wheelDropShown = dropReady; stepWheel() }
         if moveTarget != nil && colony.cats.allSatisfy(\.home) { updateDisplay(); scan() }
         // Out of sight (hidden menu bar, unplugged screen) the cats carry on as usual; only pausing stops them.
         guard !paused, !suspended else { return }

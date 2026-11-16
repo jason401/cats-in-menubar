@@ -78,6 +78,7 @@ struct Cat {
     var heldLean = 0.0
     var heldLeanVelocity = 0.0
     var swing = 0.0         // horizontal speed while carried by the mouse
+    var carryFrom: Lane?    // the free space a held cat was picked up in; it may be carried from there over to our icons
     /// Drawn dangling: picked up with the mouse, or being pulled out from under a menu or icon.
     var dangling: Bool { action == .held || escaping }
     var escaping = false    // covered by a menu or icon: pulled out to the nearest free space, dangling as if held
@@ -146,6 +147,7 @@ final class Colony {
     var mood = 0.0          // from the power level: negative = more naps, positive = livelier
     var activity = 1        // 0 calm, 1 normal, 2 playful
     var homeX: Double?      // overlay x of the cat tower icon
+    var ownItem: Lane?      // overlay span of our status item (wheel and tower): a held cat may be carried over to it
     var tunnel: Lane?       // the camera notch: nothing can be seen there, but cats may walk through it
     /// Auto rotation: how long each cat stays out before another one takes its turn; nil = off.
     var rotation: ClosedRange<Double>? {
@@ -201,7 +203,14 @@ final class Colony {
     func reconcile() {
         for i in cats.indices {
             if cats[i].home || cats[i].action == .hopping || cats[i].inTunnel { continue }
-            if cats[i].action == .held, carryLane(for: i) != nil, !lanes.contains(where: { $0.contains(cats[i].x, margin: cats[i].radius) }) { continue }
+            if cats[i].action == .held, !lanes.contains(where: { $0.contains(cats[i].x, margin: cats[i].radius) }) {
+                // Carried behind the notch or over the icons: it stays in the hand, on the free space it came from.
+                if let from = cats[i].carryFrom {
+                    let spaces = lanes + [tunnelEnds().map { Lane(lower: $0.left.lower, upper: $0.right.upper) }].compactMap { $0 }
+                    cats[i].carryFrom = spaces.max { overlap($0, from) < overlap($1, from) }.flatMap { overlap($0, from) > 0 ? $0 : nil } ?? from
+                }
+                if carryCorridor(for: i)?.contains(cats[i].x, margin: cats[i].radius) == true { continue }
+            }
             // Existing positions stay stable when space grows; never walk across an obstacle.
             if let lane = lanes.first(where: { $0.contains(cats[i].x, margin: cats[i].radius) }) {
                 cats[i].destination = clamp(cats[i].destination, to: lane, for: i)
@@ -236,6 +245,7 @@ final class Colony {
     func start(_ i: Int, _ action: CatAction, for duration: Double) {
         cats[i].action = action; cats[i].remaining = duration; cats[i].elapsed = 0; cats[i].wiggle = 0; cats[i].tunnelBound = false
     }
+    private func overlap(_ a: Lane, _ b: Lane) -> Double { min(a.upper, b.upper) - max(a.lower, b.lower) }
     func clamp(_ x: Double, to lane: Lane, for i: Int) -> Double {
         min(lane.upper - cats[i].radius, max(lane.lower + cats[i].radius, x))
     }
@@ -437,7 +447,7 @@ final class Colony {
             guard cats[i].visible else { continue }
             if cats[i].action == .hopping { hop(i, dt); continue }
             if cats[i].inTunnel { crossTunnel(i, dt); continue }
-            guard let lane = lanes.first(where: { $0.contains(cats[i].x, margin: cats[i].radius) }) ?? (cats[i].action == .held ? carryLane(for: i) : nil) else { escape(i, dt); continue }
+            guard let lane = lanes.first(where: { $0.contains(cats[i].x, margin: cats[i].radius) }) ?? (cats[i].action == .held ? carryCorridor(for: i) : nil) else { escape(i, dt); continue }
             cats[i].escaping = false
             cats[i].hiddenFor = max(0, cats[i].hiddenFor - dt)
             cats[i].phase += dt
@@ -761,6 +771,8 @@ final class Colony {
         guard let wheelX else { return false }
         return cats.contains { $0.wheelBound && !$0.home && ($0.action == .hopping || abs($0.x - wheelX) < 90) }
     }
+    /// A held cat is over the wheel and letting go would hand it the turn: the wheel cat stops and waits too.
+    var wheelDropReady: Bool { cats.indices.contains { dropTarget($0) == .wheel && acceptsWheelDrop($0) } }
     /// Landed in the wheel: the two trade places, and the cat that was in it jumps out and trots off.
     private func enterWheel(_ i: Int) -> Bool {
         guard let leaving = wheel, let wheelX else { return false }
@@ -809,39 +821,44 @@ final class Colony {
             } else if cats[i].action == .goingHome { start(i, .sitting, for: 2 + random() * 3) }
         }
     }
-    /// The nearest free-space edge, with enough room for an adult cat's center and a small margin.
-    func wheelDropZone(_ wheelX: Double) -> Lane? {
-        guard wheelX.isFinite, let lane = lanes.min(by: { $0.distance(to: wheelX) < $1.distance(to: wheelX) }) else { return nil }
-        if lane.contains(wheelX) {
-            // Near an edge, the wheel itself may be closer than a carried adult can reach.
-            let center = min(lane.upper - Habitat.catRadius, max(lane.lower + Habitat.catRadius, wheelX))
-            return Lane(lower: max(lane.lower, center - 14), upper: min(lane.upper, center + 14))
-        }
-        let reach = Habitat.catRadius + 4
-        return wheelX < lane.lower
-            ? Lane(lower: lane.lower, upper: min(lane.upper, lane.lower + reach))
-            : Lane(lower: max(lane.lower, lane.upper - reach), upper: lane.upper)
+    /// How far from the wheel's center a held cat counts as over the wheel.
+    static let wheelReach = 10.0
+    enum DropTarget { case free, wheel, tower, icons }
+    /// What a held cat is over: its free space (or the notch), the wheel, the tower, or other icons.
+    func dropTarget(_ i: Int) -> DropTarget {
+        guard cats.indices.contains(i), cats[i].action == .held else { return .free }
+        if let wheelX, wheel != nil, abs(cats[i].x - wheelX) <= Self.wheelReach { return .wheel }
+        if carryLane(for: i) != nil { return .free }
+        if let own = ownItem, own.contains(cats[i].x) { return .tower }
+        return .icons
+    }
+    /// Held over the icons, outside the free space: drawn on top of them, not clipped to the free space.
+    func heldOverIcons(_ i: Int) -> Bool { cats[i].action == .held && carryLane(for: i) == nil }
+    private func acceptsWheelDrop(_ i: Int) -> Bool {
+        guard wheel != nil, let wheelX, onStage, !quiet, !shuffling, !walkingHome,
+              cats[i].visible, !cats[i].home, !cats[i].homeBound, !cats[i].inTunnel, !cats[i].escaping,
+              cats[i].hiddenFor <= 0 else { return false }
+        return !cats.contains { $0.swapping || $0.wheelBound || ($0.action == .hopping && ($0.hopIn || $0.hopFrom == wheelX)) }
     }
     /// Only a real mouse drop can request a baton pass; programmatic release always settles normally.
-    @discardableResult func dropped(_ i: Int, keepLineup: Bool = false) -> Bool {
+    /// `wheelAllowed` is false where the app does not take turns by hand (Keep my cats, paused, moving).
+    @discardableResult func dropped(_ i: Int, wheelAllowed: Bool = true) -> Bool {
         guard cats.indices.contains(i), cats[i].action == .held else { return false }
-        guard !keepLineup, wheel != nil, let wheelX, onStage, !quiet, !shuffling, !walkingHome,
-              cats[i].visible, !cats[i].home, !cats[i].homeBound, !cats[i].inTunnel, !cats[i].escaping,
-              cats[i].hiddenFor <= 0,
-              !cats.contains(where: { $0.swapping || $0.wheelBound
-                  || ($0.action == .hopping && ($0.hopIn || $0.hopFrom == wheelX)) }),
-              lanes.contains(where: { $0.contains(cats[i].x, margin: cats[i].radius) }),
-              wheelDropZone(wheelX)?.contains(cats[i].x) == true else {
-            release(i)
-            return false
+        switch dropTarget(i) {
+        case .wheel where wheelAllowed && acceptsWheelDrop(i):
+            // An intentional drop may send the last wheel cat straight back, even during swapSpacing.
+            cats[i].wheelBound = true; cats[i].homeBound = true
+            cats[i].swing = 0; swapGap = Self.swapSpacing
+            beginHop(i, from: cats[i].x, to: wheelX!, entering: true)
+            return true
+        case .tower where droppedOnTower(i): return true
+        default: release(i); return false
         }
-        // An intentional drop may send the last wheel cat straight back, even during swapSpacing.
-        cats[i].wheelBound = true; cats[i].homeBound = true
-        cats[i].swing = 0; swapGap = Self.swapSpacing
-        beginHop(i, from: cats[i].x, to: wheelX, entering: true)
-        return true
     }
-    // Mouse handling: a held cat stays inside its own free interval and is never carried over menus or icons.
+    /// Dropped on the cat tower. Drag 2/3 makes this a way into the tower; for now it is an ordinary drop.
+    private func droppedOnTower(_ i: Int) -> Bool { false }
+    // Mouse handling: a held cat stays inside its own free interval, except that it may be carried over the
+    // icons toward ours (never over the app menus or into another free space the other way).
     /// Where a held cat can be carried: its own free space, or both sides of the notch joined through it.
     func carryLane(for i: Int) -> Lane? {
         if let ends = tunnelEnds() {
@@ -858,18 +875,31 @@ final class Colony {
     func grab(_ i: Int) {
         guard cats.indices.contains(i), cats[i].visible, !cats[i].homeBound else { return }
         start(i, .held, for: .infinity); cats[i].velocity = 0; cats[i].swing = 0; cats[i].heldLean = 0; cats[i].heldLeanVelocity = 0
+        cats[i].carryFrom = carryLane(for: i)
+    }
+    /// Where a held cat can be carried now: the free space it was picked up in, stretched over the icons up
+    /// to the far edge of our status item when that lies beyond it.
+    func carryCorridor(for i: Int) -> Lane? {
+        guard let from = cats[i].carryFrom ?? carryLane(for: i) else { return nil }
+        guard let own = ownItem else { return from }
+        let r = cats[i].radius
+        if own.upper > from.upper { return Lane(lower: from.lower, upper: own.upper + r) }
+        if own.lower < from.lower { return Lane(lower: own.lower - r, upper: from.upper) }
+        return from
     }
     func drag(_ i: Int, to x: Double, dt: Double) {
-        guard cats.indices.contains(i), cats[i].action == .held, let lane = carryLane(for: i) else { return }
+        guard cats.indices.contains(i), cats[i].action == .held, let lane = carryCorridor(for: i) else { return }
         let next = clamp(x, to: lane, for: i)
         cats[i].swing += ((next - cats[i].x) / max(dt, 0.001) - cats[i].swing) * min(1, dt * 12)
         cats[i].x = next; cats[i].destination = next
     }
     func release(_ i: Int) {
         guard cats.indices.contains(i), cats[i].action == .held else { return }
-        start(i, .grooming, for: 2 + random() * 2); cats[i].swing = 0
+        let behindNotch = carryLane(for: i) != nil && !lanes.contains(where: { $0.contains(cats[i].x, margin: cats[i].radius) })
+        start(i, .grooming, for: 2 + random() * 2); cats[i].swing = 0; cats[i].carryFrom = nil
+        // Let go over the icons: it is pulled back to the nearest free space (`escape`) on the next step.
         // Let go behind the notch: it walks out of the nearer side.
-        if !lanes.contains(where: { $0.contains(cats[i].x, margin: cats[i].radius) }), let ends = tunnelEnds() {
+        if behindNotch, let ends = tunnelEnds() {
             start(i, .walking, for: 14)
             cats[i].direction = cats[i].x < (ends.left.upper + ends.right.lower) / 2 ? -1 : 1
             cats[i].velocity = 0; cats[i].inTunnel = true

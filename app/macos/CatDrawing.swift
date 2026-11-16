@@ -460,10 +460,11 @@ final class HabitatView: NSView {
         lastDrag = event.timestamp; needsDisplay = true
     }
     override func mouseUp(with event: NSEvent) {
-        if let i = dragging, wheelDropAllowed?() == true {
+        // Let go on an icon: the wheel takes a turn (where the app allows it), elsewhere the cat settles.
+        if let i = dragging {
             let point = convert(event.locationInWindow, from: nil)
             colony.drag(i, to: point.x + grabOffset, dt: event.timestamp - lastDrag)
-            colony.dropped(i)
+            colony.dropped(i, wheelAllowed: wheelDropAllowed?() == true)
         }
         endDrag(); NSCursor.openHand.set()
     }
@@ -488,11 +489,11 @@ final class HabitatView: NSView {
             for lane in colony.lanes { NSRect(x: lane.lower, y: 0, width: lane.width, height: bounds.height).fill() }
         }
         let baseline = max(0, floor((bounds.height - 22) / 2))
-        for (i, cat) in colony.cats.enumerated() where !cat.escaping && cat.action != .hopping { drawCat(i, baseline: baseline) }
+        for (i, cat) in colony.cats.enumerated() where !cat.escaping && cat.action != .hopping && !colony.heldOverIcons(i) { drawCat(i, baseline: baseline) }
         if let toy = colony.ball { CatDrawing.toy(toy, baseline: baseline) }
         NSGraphicsContext.restoreGraphicsState()
-        // Cats leaving covered space or hopping into the tower may briefly pass over icons.
-        for (i, cat) in colony.cats.enumerated() where cat.visible && (cat.escaping || cat.action == .hopping) {
+        // Cats leaving covered space, hopping into the tower or carried to our icons pass over icons.
+        for (i, cat) in colony.cats.enumerated() where cat.visible && (cat.escaping || cat.action == .hopping || colony.heldOverIcons(i)) {
             drawCat(i, baseline: baseline)
         }
     }
