@@ -14,16 +14,20 @@ trap 'rm -rf "$STAGING"' EXIT
 APP="$STAGING/Cats in Menubar.app"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources" "$PWD/build/module-cache"
 xcrun swift -module-cache-path "$PWD/build/module-cache" tools/prepare_assets.swift "$APP/Contents/Resources/Cats"
+# The menu bar visibility shim (from Hidden Bar) is Objective-C so a changed private API raises a catchable exception.
+xcrun clang -fobjc-arc -O2 -target "$(uname -m)-apple-macos14.0" -c app/macos/MenuBarVisibilityShim.m -o "$STAGING/MenuBarVisibilityShim.o"
 xcrun swiftc -swift-version 5 -O -target "$(uname -m)-apple-macos14.0" \
   -module-cache-path "$PWD/build/module-cache" \
+  -import-objc-header app/macos/Bridging.h \
   -framework Cocoa -framework SwiftUI -framework ApplicationServices -framework IOKit -framework SystemConfiguration -framework ServiceManagement -framework CoreWLAN -framework CoreLocation \
-  app/macos/*.swift -o "$APP/Contents/MacOS/CatsInMenubar"
+  -framework CoreAudio -framework CoreMediaIO \
+  app/macos/*.swift "$STAGING/MenuBarVisibilityShim.o" -o "$APP/Contents/MacOS/CatsInMenubar"
 "$APP/Contents/MacOS/CatsInMenubar" --render-iconset "$STAGING/AppIcon.iconset"
 iconutil -c icns "$STAGING/AppIcon.iconset" -o "$APP/Contents/Resources/AppIcon.icns"
 # The updater runs this bundled installer to swap /Applications safely.
 cp tools/install_app.py "$APP/Contents/Resources/"
-# Third-party notices travel with the app (Apache-2.0 requires the NOTICE and license with the work).
-cp THIRD_PARTY_NOTICES.md LICENSES/Apache-2.0.txt "$APP/Contents/Resources/"
+# Third-party notices travel with the app (Apache-2.0 requires the NOTICE and license with the work; MIT the notice).
+cp THIRD_PARTY_NOTICES.md LICENSES/Apache-2.0.txt LICENSES/MIT-HiddenBar.txt "$APP/Contents/Resources/"
 # The built commit is how the updater compares this app with its update channel (stable, or main for beta).
 REVISION=$(git rev-parse HEAD)
 CHANNEL=$(git rev-parse --abbrev-ref HEAD)

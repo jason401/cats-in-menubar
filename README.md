@@ -16,6 +16,7 @@ Free and open source. Native Swift, AppKit and SwiftUI. macOS 14 or later.
 - Choose which display the cats live on; pause them, call them home, or set quiet hours.
 - A compact dashboard for CPU, memory, storage, battery and network activity.
 - Optional CPU wheel next to the tower: a cat runs faster as the Mac gets busier and naps when it is idle; cats take turns in it every 15 minutes, or carry a cat onto the wheel icon to hand it the turn (Settings > Monitor, off by default).
+- Optional menu bar tidy on macOS 27 (Settings > Menu Bar, off by default): picked apps leave the menu bar and show as icons at the top right of the panel; click one to open its own menu. The cats get the freed space, and the tower can keep itself left of other icons so new ones appear away from the cats.
 - Optional scroll direction controls for individual scrolling sources, off by default.
 - Adaptive animation rates for system load, temperature and Low Power Mode; optional launch at login.
 
@@ -105,6 +106,7 @@ For development work, check out `main`. Build outputs and previews stay in ignor
 - No AI service, API key, advertising or analytics is used by the running app.
 - Menu layout detection reads Accessibility roles, positions, sizes, visibility and structure, not menu text. It does not request Screen Recording or capture your screen.
 - The dashboard reads local system/process/network statistics. Optional Location permission is requested to display the Wi-Fi network name; the app does not request location coordinates.
+- The optional menu bar tidy asks macOS 27 to hide the picked apps through a private interface (the menu bar restriction behind assessment mode, as Hidden Bar does). It watches for clicks on the clock so Notification Center still opens, reads whether a microphone or camera is in use (not what it records) so the recording indicator is never hidden, and with "Tower leftmost" on it ⌘-drags its own tower icon, which moves the pointer for a moment. Everything shows again when the app quits. It needs the app in /Applications.
 - The optional scroll feature observes scrolling events to identify their source and change their direction. It is not a keystroke logger.
 - The speed test in the panel (Wi-Fi → Test) runs macOS's `networkQuality`, which contacts Apple's test servers and fills the connection for about 20 seconds. It runs only when clicked.
 - The installed app's update checks contact GitHub and download repository data. Clicking **Update Now** runs the repository's build and test scripts locally. The previous README's claim of no network requests was inaccurate.
@@ -122,4 +124,6 @@ This project was developed with assistance from AI coding tools, including ChatG
 
 Original project contributions are available under the **[MIT License](LICENSE)**, copyright © 2026 **jason401**.
 
-The scroll direction feature is derived from **Scroll Reverser** by Nicholas Moore and retains the **Apache License 2.0** conditions and attribution. See [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) and [LICENSES/Apache-2.0.txt](LICENSES/Apache-2.0.txt). The MIT license does not replace third-party licenses or grant rights to third-party trademarks, Apple frameworks, system fonts or system symbols.
+The scroll direction feature is derived from **Scroll Reverser** by Nicholas Moore and retains the **Apache License 2.0** conditions and attribution. See [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) and [LICENSES/Apache-2.0.txt](LICENSES/Apache-2.0.txt).
+
+The menu bar tidy feature includes code from **Hidden Bar** (copyright © 2019 Dwarves Foundation, © 2026 Console Labs) under the **MIT License**. See [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) and [LICENSES/MIT-HiddenBar.txt](LICENSES/MIT-HiddenBar.txt). The MIT license does not replace third-party licenses or grant rights to third-party trademarks, Apple frameworks, system fonts or system symbols.

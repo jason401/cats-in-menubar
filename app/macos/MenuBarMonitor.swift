@@ -5,6 +5,7 @@ struct MenuBarSnapshot {
     var obstacles: [Lane]
     var reliable: Bool
     var message: String
+    var extras: [StatusExtra] = []   // each app's status items, for the menu bar tidy
 }
 
 final class MenuBarMonitor {
@@ -27,7 +28,8 @@ final class MenuBarMonitor {
     private var knownExtras = Set<pid_t>()
     static let systemBars: Set<String> = ["com.apple.MenuBarAgent", "com.apple.controlcenter", "com.apple.systemuiserver"]
 
-    func scan(screen: NSRect, barHeight: CGFloat, ownItem: NSRect?, completion: @escaping (MenuBarSnapshot) -> Void) {
+    /// `skip`: apps macOS hides now. Their icons can still report where they were, which is free space.
+    func scan(screen: NSRect, barHeight: CGFloat, ownItem: NSRect?, skip: Set<String> = [], completion: @escaping (MenuBarSnapshot) -> Void) {
         guard !scanning else { return }
         guard Self.trusted else {
             completion(MenuBarSnapshot(obstacles: [], reliable: false, message: "Accessibility access is needed to find empty space.")); return
@@ -55,6 +57,7 @@ final class MenuBarMonitor {
             var systemRead = false
             var unreadableApps: [String] = []
             var extrasOwners = Set<pid_t>()
+            var owners: [StatusExtra] = []
             func lanes(_ frames: [CGRect], rightAligned: Bool) -> [Lane] {
                 frames.compactMap { frame in
                     guard frame.minY < barHeight, frame.maxY > 0,
@@ -79,6 +82,8 @@ final class MenuBarMonitor {
                 if extras.0 == .success, let root = extras.1 {
                     extrasOwners.insert(app.processIdentifier)
                     let found = Self.items(root)
+                    owners.append(StatusExtra(pid: app.processIdentifier, bundle: id, frames: found.0))
+                    if skip.contains(id) { continue }
                     obstacles += lanes(found.0, rightAligned: true)
                     if !found.1 { unreadableApps.append(id) }
                     if Self.systemBars.contains(id) && found.1 && !found.0.isEmpty { systemRead = true }
@@ -91,7 +96,8 @@ final class MenuBarMonitor {
             if let ownItem { obstacles.append(Lane(lower: ownItem.minX - screen.minX, upper: ownItem.maxX - screen.minX)) }
             let reliable = frontRead && systemRead && unreadableApps.isEmpty
             let snapshot = MenuBarSnapshot(obstacles: obstacles, reliable: reliable,
-                message: reliable ? "Menu layout detected" : "Waiting for menu layout (app menu: \(frontRead), system icons: \(systemRead)). Unreadable: \(unreadableApps.joined(separator: ", "))")
+                message: reliable ? "Menu layout detected" : "Waiting for menu layout (app menu: \(frontRead), system icons: \(systemRead)). Unreadable: \(unreadableApps.joined(separator: ", "))",
+                extras: owners)
             DispatchQueue.main.async { self.knownExtras = extrasOwners; self.scanning = false; completion(snapshot) }
         }
     }

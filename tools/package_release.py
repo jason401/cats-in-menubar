@@ -42,10 +42,10 @@ def main():
     arch = labels.get(tuple(archs))
     if not arch:
         parser.error('Unexpected app architecture: ' + ' '.join(archs))
-    for name in ['THIRD_PARTY_NOTICES.md', 'Apache-2.0.txt', 'Cats/coats.json']:
+    for name in ['THIRD_PARTY_NOTICES.md', 'Apache-2.0.txt', 'MIT-HiddenBar.txt', 'Cats/coats.json']:
         if not (app / 'Contents/Resources' / name).is_file():
             parser.error('Missing app resource: ' + name)
-    notices = ['LICENSE', 'THIRD_PARTY_NOTICES.md', 'LICENSES/Apache-2.0.txt', 'docs/INSTALL.md']
+    notices = ['LICENSE', 'THIRD_PARTY_NOTICES.md', 'LICENSES/Apache-2.0.txt', 'LICENSES/MIT-HiddenBar.txt', 'docs/INSTALL.md']
     for name in notices:
         if not (root / name).is_file():
             parser.error('Missing release notice: ' + name)

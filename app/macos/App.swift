@@ -20,6 +20,7 @@ final class AppModel: ObservableObject {
     var rememberCats: ((Bool) -> Void)?
     var keepCurrent: (() -> Void)?
     var home: (() -> Void)?
+    var openHiddenApp: ((String) -> Void)?   // a hidden menu bar app's icon clicked in the panel
     @Published var access = MenuBarMonitor.trusted { didSet { if access != oldValue { AppModel.log("Accessibility: \(access)") } } }
     static let logURL = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Library/Logs/CatsInMenubar.log")
     // Geometry/status only, so live behavior can be checked without screen capture.
@@ -97,6 +98,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         model.changed = { [weak self] in self?.applyOptions() }
         model.play = { [weak self] in self?.play() }
         model.home = { [weak self] in self?.toggleHome() }
+        model.openHiddenApp = { [weak self] bundle in
+            // The panel goes first: the app's own menu opens from the menu bar.
+            self?.popover.performClose(nil)
+            MenuBarTidy.shared.open(bundle)
+        }
+        MenuBarTidy.shared.layoutChanged = { [weak self] in self?.layoutChanged() }
+        MenuBarTidy.shared.start()
         // Each launch the cats hop out of the tower one by one. A saved lineup overrides only appearance, never location.
         defaults.set(false, forKey: "catsHome")
         model.keepLineup = defaults.bool(forKey: Pref.fixedLineup)
@@ -575,8 +583,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         let generation = epoch
         let ownRect = towerRect
-        monitor.scan(screen: frame, barHeight: height, ownItem: ownRect) { [weak self] snapshot in
-            guard let self, generation == self.epoch, !self.paused, !self.suspended else { return }
+        let tidy = MenuBarTidy.shared
+        monitor.scan(screen: frame, barHeight: height, ownItem: ownRect, skip: tidy.hiddenNow) { [weak self] snapshot in
+            guard let self else { return }
+            tidy.update(extras: snapshot.extras)
+            if !self.popover.isShown, self.habitatView?.dragging == nil, let button = self.statusItem.button, let window = button.window {
+                tidy.keepLeftmost(own: window.convertToScreen(button.convert(button.bounds, to: nil)), extras: snapshot.extras)
+            }
+            guard generation == self.epoch, !self.paused, !self.suspended else { return }
             // An unreadable moment keeps the last good layout instead of making everyone vanish.
             if !snapshot.reliable && !self.colony.lanes.isEmpty { self.model.status = "Using last layout · \(snapshot.message)"; return }
             var obstacles = snapshot.obstacles
@@ -600,5 +614,5 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool { showSettings(); return true }
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { false }
-    func applicationWillTerminate(_ notification: Notification) { animationTimer?.invalidate(); layoutTimer?.invalidate(); wheelTimer?.invalidate(); overlay?.close() }
+    func applicationWillTerminate(_ notification: Notification) { MenuBarTidy.shared.stop(); animationTimer?.invalidate(); layoutTimer?.invalidate(); wheelTimer?.invalidate(); overlay?.close() }
 }

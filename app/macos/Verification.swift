@@ -801,6 +801,7 @@ func runSelfTests() {
     testWheel(expect)
     testWheelBaton(expect)
     testWheelDrop(expect)
+    testMenuBarTidy(expect)
     print("PASS: \(checks) assertions; 30,000 simulation steps with changing obstacles")
 }
 
@@ -909,6 +910,16 @@ func renderPanels(to directory: String) {
     let dashboard = NSHostingView(rootView: DashboardView(model: model, system: system, openSettings: {}, play: {}).background(Color(nsColor: .windowBackgroundColor)))
     dashboard.frame = NSRect(origin: .zero, size: dashboard.fittingSize)
     save(dashboard, "dashboard")
+    // Hidden menu bar apps in the header: two full rows and a "+N" menu.
+    let apps = ["com.apple.Safari", "com.apple.mail", "com.apple.Notes", "com.apple.Music", "com.apple.Maps", "com.apple.Photos", "com.apple.iCal",
+                "com.apple.reminders", "com.apple.FaceTime", "com.apple.Preview", "com.apple.TextEdit", "com.apple.calculator", "com.apple.Terminal",
+                "com.apple.ActivityMonitor", "com.apple.systempreferences", "com.apple.AppStore"].map { TidyApp(bundle: $0) }
+    for (name, count) in [("dashboard-tidy", 16), ("dashboard-tidy-few", 3)] {
+        let view = NSHostingView(rootView: DashboardView(model: model, system: system, openSettings: {}, play: {}, previewApps: Array(apps.prefix(count)))
+            .background(Color(nsColor: .windowBackgroundColor)))
+        view.frame = NSRect(origin: .zero, size: view.fittingSize)
+        save(view, name)
+    }
     let batteries = NSHostingView(rootView: VStack(alignment: .leading, spacing: 0) {
         ForEach(batteryPreviewStates(), id: \.0) { name, stats in
             VStack(alignment: .leading, spacing: 0) {
@@ -1856,4 +1867,35 @@ func testWheelDrop(_ expect: (@autoclosure () -> Bool, String) -> Void) {
         }
     }
 
+}
+
+func testMenuBarTidy(_ expect: (@autoclosure () -> Bool, String) -> Void) {
+    expect(FileManager.default.fileExists(atPath: Bundle.main.resourceURL!.appendingPathComponent("MIT-HiddenBar.txt").path),
+           "Hidden Bar's MIT license ships inside the app with the code taken from it")
+    // Every running app stays allowed except the hidden ones; this app is always allowed.
+    let allowed = MenuBarTidy.allowList(running: ["a", "b", "c", "b"], hidden: ["b", "x"], own: "me")
+    expect(allowed == ["a", "c", "me"], "allow-list: running minus hidden plus own, each once")
+    expect(MenuBarTidy.allowList(running: ["me"], hidden: ["me"], own: "me") == ["me"], "this app can never hide itself")
+    expect(MenuBarTidy.systemItems == Array(0..<64), "macOS's own items always stay")
+    // Two rows of seven; past fourteen the last spot is a +N menu.
+    expect(PanelGrid.layout(count: 0) == (0, 0) && PanelGrid.layout(count: 3) == (3, 0), "a few apps show as they are")
+    expect(PanelGrid.layout(count: 14) == (14, 0), "fourteen apps fill both rows")
+    expect(PanelGrid.layout(count: 15) == (13, 2), "fifteen: thirteen icons and +2")
+    expect(PanelGrid.layout(count: 40) == (13, 27), "many: the menu holds the rest")
+    // Only an Applications folder counts; macOS hides an app run from elsewhere even when allowed.
+    expect(MenuBarTidy.inApplications(URL(fileURLWithPath: "/Applications/Cats in Menubar.app")), "/Applications counts")
+    expect(MenuBarTidy.inApplications(URL(fileURLWithPath: "/Applications/Setapp/X.app")), "folders inside /Applications count")
+    expect(!MenuBarTidy.inApplications(URL(fileURLWithPath: "/Users/me/Downloads/Cats in Menubar.app")), "Downloads does not count")
+    expect(!MenuBarTidy.inApplications(URL(fileURLWithPath: "/Users/me/Applications/Cats in Menubar.app")), "~/Applications does not count")
+    // Icons left of the tower on its own menu bar, ignoring hidden apps' stale frames and this app.
+    let band = CGRect(x: 0, y: 0, width: 1512, height: 37)
+    let own = NSRect(x: 1100, y: 945, width: 24, height: 37)
+    let extras = [StatusExtra(pid: 1, bundle: "left", frames: [CGRect(x: 1000, y: 0, width: 24, height: 37)]),
+                  StatusExtra(pid: 2, bundle: "right", frames: [CGRect(x: 1200, y: 0, width: 24, height: 37)]),
+                  StatusExtra(pid: 3, bundle: "hidden", frames: [CGRect(x: 900, y: 0, width: 24, height: 37)]),
+                  StatusExtra(pid: 4, bundle: "otherScreen", frames: [CGRect(x: 1000, y: -900, width: 24, height: 37)]),
+                  StatusExtra(pid: 9, bundle: "me", frames: [CGRect(x: 1100, y: 0, width: 24, height: 37)])]
+    let left = MenuBarTidy.itemsLeft(of: own, extras: extras, skip: ["hidden"], ownPid: 9, band: band)
+    expect(left == [CGRect(x: 1000, y: 0, width: 24, height: 37)], "only a visible icon left of the tower on its menu bar counts")
+    expect(MenuBarTidy.itemsLeft(of: own, extras: Array(extras.dropFirst()), skip: ["hidden"], ownPid: 9, band: band).isEmpty, "leftmost tower: nothing to move")
 }

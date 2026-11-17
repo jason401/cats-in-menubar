@@ -22,10 +22,14 @@ enum Pref {
     static let wheelBattery = "wheelBattery"         // the wheel's band shows the battery charge
     static let wheelBatteryMono = "wheelBatteryMono" // that gauge in the menu bar's color instead of green
     static let showCPU = "showCPU", showMemory = "showMemory", showDisk = "showDisk", showBattery = "showBattery", showNetwork = "showNetwork"
+    static let tidy = "menuBarTidy"                 // picked apps leave the menu bar and show in the panel (macOS 27)
+    static let tidyApps = "menuBarTidyApps"         // their bundle ids, in panel order
+    static let tidyLeftmost = "menuBarTidyLeftmost" // keep the tower left of every other icon while tidying
     static let defaults: [String: Any] = [
         count: 3, fixedLineup: false, rotate: false, rotatePace: 1, paused: false, quiet: false, activity: 1, adaptivePower: true, allowDrag: true,
         nightQuiet: false, nightFrom: 23, nightTo: 7, interval: 2.0, topApps: 2, toyColor: -1, laser: true, scrollReverse: false, display: "",
         showCPU: true, showMemory: true, showDisk: true, showBattery: true, showNetwork: true, cpuWheel: false, wheelSwapRange: WheelShift.defaultRange, wheelBattery: true, wheelBatteryMono: false,
+        tidy: false, tidyLeftmost: true,
     ]
 }
 
@@ -54,8 +58,11 @@ struct DashboardView: View {
     @AppStorage(Pref.showBattery) private var showBattery = true
     @AppStorage(Pref.showNetwork) private var showNetwork = true
     @AppStorage(Pref.topApps) private var topApps = 2
+    @AppStorage(Pref.tidy) private var tidyOn = false
+    @ObservedObject var tidy = MenuBarTidy.shared
     var openSettings: () -> Void
     var play: () -> Void
+    var previewApps: [TidyApp]? = nil   // rendered previews only, without touching the saved settings
 
     var body: some View {
         let s = system.stats
@@ -66,10 +73,17 @@ struct DashboardView: View {
                     .frame(width: 20, height: 20).frame(width: 34, height: 34).padding(.top, 7)
                     .background(CatTile().fill(Color.primary.opacity(0.12)))
                 VStack(alignment: .leading, spacing: 2) {
-                    Text("Cats in Menubar").font(.headline)
+                    Text("Cats in Menubar").font(.headline).lineLimit(1).fixedSize()
                     Text(paused ? "Cats are paused" : model.catSummary).font(.caption).foregroundStyle(.secondary).lineLimit(2)
                 }
-                Spacer()
+                Spacer(minLength: 8)
+                // Menu bar apps moved into the panel: up to two rows in the header's free corner.
+                if let apps = previewApps ?? (tidyOn ? tidy.panelApps : nil), !apps.isEmpty {
+                    PanelAppsGrid(apps: apps) { model.openHiddenApp?($0) }
+                }
+            }
+            if tidyOn, let notice = tidy.notice {
+                Label(notice, systemImage: "exclamationmark.circle").font(.caption).foregroundStyle(.secondary)
             }
             VStack(spacing: 0) {
                 if showCPU {
@@ -462,6 +476,48 @@ private struct Sparkline: View {
                 }.fill(Color.accentColor.opacity(0.75))
             }
         }
+    }
+}
+
+/// Hidden menu bar apps, seven to a row and two rows at most; a "+N" menu holds the rest.
+private struct PanelAppsGrid: View {
+    let apps: [TidyApp]
+    let open: (String) -> Void
+    var body: some View {
+        let (shown, overflow) = PanelGrid.layout(count: apps.count)
+        let cells = Array(apps.prefix(shown))
+        let rows = (shown + (overflow > 0 ? 1 : 0) + PanelGrid.perRow - 1) / PanelGrid.perRow
+        VStack(alignment: .trailing, spacing: 3) {
+            ForEach(0..<rows, id: \.self) { row in
+                HStack(spacing: 3) {
+                    ForEach(cells[min(cells.count, row * PanelGrid.perRow)..<min(cells.count, (row + 1) * PanelGrid.perRow)]) { app in
+                        PanelAppCell(app: app) { open(app.id) }
+                    }
+                    if overflow > 0 && row == rows - 1 {
+                        Menu {
+                            ForEach(apps.dropFirst(shown)) { app in Button(app.name) { open(app.id) } }
+                        } label: { Text("+\(overflow)").font(.system(size: 10, weight: .semibold)) }
+                        .menuStyle(.borderlessButton).menuIndicator(.hidden).fixedSize()
+                        .frame(width: 24, height: 22).background(RoundedRectangle(cornerRadius: 5).fill(Color.primary.opacity(0.08)))
+                    }
+                }
+            }
+        }
+    }
+}
+
+private struct PanelAppCell: View {
+    let app: TidyApp
+    let action: () -> Void
+    @StateObject private var hover = Hover()
+    var body: some View {
+        Button(action: action) {
+            Image(nsImage: app.icon).resizable().interpolation(.high).frame(width: 18, height: 18)
+                .frame(width: 22, height: 22)
+                .background(RoundedRectangle(cornerRadius: 5).fill(Color.primary.opacity(hover.on ? 0.14 : 0)))
+                .contentShape(RoundedRectangle(cornerRadius: 5))
+        }
+        .buttonStyle(.plain).onHover { hover.on = $0 }.help(app.name)
     }
 }
 
@@ -1084,6 +1140,58 @@ struct ScrollTab: View {
     }
 }
 
+struct MenuBarTab: View {
+    @ObservedObject var model: AppModel
+    @ObservedObject var tidy: MenuBarTidy
+    @AppStorage(Pref.tidy) private var enabled = false
+    @AppStorage(Pref.tidyLeftmost) private var leftmost = true
+    var body: some View {
+        SettingsPage {
+            SettingsCard(title: "Accessibility") {
+                AccessibilityPermissionRow(model: model)
+                SettingsNote(text: "Needed to find menu bar apps and open a hidden app's menu from the panel.")
+            }
+            SettingsCard(title: "Tidy menu bar") {
+                SettingsRow(title: "Move to panel", titleWidth: 118) {
+                    SettingsSwitch(title: "Move picked apps to the panel", isOn: $enabled)
+                        .help("Picked apps leave the menu bar and show at the top right of the panel. Click one there to open its menu.")
+                }
+                SettingsNote(text: tidy.status)
+                Divider()
+                SettingsRow(title: "Tower leftmost", titleWidth: 118) {
+                    SettingsSwitch(title: "Keep the tower left of other icons", isOn: $leftmost)
+                }
+                SettingsNote(text: "Other icons, also one opened from the panel, appear right of the tower, away from the cats. The tower is ⌘-dragged there, so the pointer moves for a moment.")
+            }
+            SettingsCard(title: "Apps in the panel") {
+                if tidy.menuBarApps.isEmpty {
+                    SettingsNote(text: "No menu bar apps found yet.").padding(.top, 7)
+                }
+                ForEach(tidy.menuBarApps) { app in
+                    if app.id != tidy.menuBarApps.first?.id { Divider() }
+                    HStack(spacing: 8) {
+                        Image(nsImage: app.icon).resizable().frame(width: 16, height: 16)
+                        Text(app.name).lineLimit(1)
+                        if !app.running { Text("not running").font(.system(size: 10)).foregroundStyle(.secondary) }
+                        Spacer(minLength: 0)
+                        Toggle(app.name, isOn: Binding(get: { tidy.picked.contains(app.id) }, set: { tidy.setPicked(app.id, $0) }))
+                            .labelsHidden().toggleStyle(.switch)
+                    }.padding(.horizontal, 10).padding(.vertical, 4)
+                }
+                if !tidy.unknownToMacOS.isEmpty {
+                    SettingsNote(text: "macOS may hide these too while apps are hidden, as they run from outside Applications: \(tidy.unknownToMacOS.joined(separator: ", ")).")
+                }
+            }
+            SettingsCard(title: "How it works") {
+                SettingsNote(text: "macOS hides whole apps: an app with two icons moves both. Its own icons (clock, Wi-Fi, battery) always stay.").padding(.top, 7)
+                SettingsNote(text: "Everything shows again while a microphone or camera is in use, and when Cats in Menubar quits.")
+                SettingsNote(text: "Uses a private macOS 27 interface, as Hidden Bar does (MIT License). Details: General → About → Licenses.")
+            }
+        }
+        .onAppear { tidy.refresh(list: true) }
+    }
+}
+
 private struct ScrollSourceView: View {
     let row: ScrollSourceRow
     let reverser: ScrollDirection
@@ -1125,7 +1233,7 @@ private struct ScrollSourceView: View {
 /// Toolbar tabs in a fixed-size settings window.
 final class SettingsWindowController: NSObject {
     static let size = NSSize(width: 334, height: 460)
-    static let tabs: [(String, String)] = [("General", "gearshape"), ("Cats", "pawprint"), ("Scroll", "arrow.up.arrow.down"), ("Monitor", "gauge.with.dots.needle.33percent")]
+    static let tabs: [(String, String)] = [("General", "gearshape"), ("Cats", "pawprint"), ("Menu Bar", "menubar.rectangle"), ("Scroll", "arrow.up.arrow.down"), ("Monitor", "gauge.with.dots.needle.33percent")]
     let model: AppModel
     let state = SettingsState()
     private(set) var window: NSWindow?
@@ -1135,7 +1243,8 @@ final class SettingsWindowController: NSObject {
         switch index {
         case 0: AnyView(GeneralTab(model: model, state: state))
         case 1: AnyView(CatsTab(model: model))
-        case 2: AnyView(ScrollTab(model: model, reverser: ScrollDirection.shared))
+        case 2: AnyView(MenuBarTab(model: model, tidy: MenuBarTidy.shared))
+        case 3: AnyView(ScrollTab(model: model, reverser: ScrollDirection.shared))
         default: AnyView(MonitorTab())
         }
     }
