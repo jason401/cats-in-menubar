@@ -425,6 +425,7 @@ final class MenuBarTidy: ObservableObject {
 
     private var lastMove = -100.0
     private var failedMoves = 0
+    private var leftCount = -1
 
     /// Status items left of `own` (its AppKit frame) on its menu bar, ignoring hidden apps and this app.
     static func itemsLeft(of own: NSRect, extras: [StatusExtra], skip: Set<String>, ownPid: pid_t, band: CGRect) -> [CGRect] {
@@ -442,6 +443,10 @@ final class MenuBarTidy: ObservableObject {
               let screen = NSScreen.screens.first(where: { $0.frame.contains(NSPoint(x: own.midX, y: own.midY)) }) else { return }
         let band = MenuBarItemPresser.menuBarBands().first { $0.minX == screen.frame.minX && $0.width == screen.frame.width } ?? .zero
         let left = Self.itemsLeft(of: own, extras: extras, skip: hiddenNow, ownPid: ProcessInfo.processInfo.processIdentifier, band: band)
+        if left.count != leftCount {
+            leftCount = left.count
+            AppModel.log("Menu bar tidy: \(left.isEmpty ? "the tower is leftmost" : "\(left.count) icon(s) left of the tower")")
+        }
         guard let leftmost = left.min(by: { $0.minX < $1.minX }) else { failedMoves = 0; return }
         let now = ProcessInfo.processInfo.systemUptime
         // Never while the user holds a button, and give up after a few tries that changed nothing.
