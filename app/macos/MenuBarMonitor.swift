@@ -39,7 +39,11 @@ final class MenuBarMonitor {
         let running = NSWorkspace.shared.runningApplications
         let alive = Set(running.map(\.processIdentifier))
         candidates = candidates.filter { alive.contains($0.key) }
+        // Our own process answers AX on the calling thread, so AppKit would touch our status button off the main thread
+        // and crash. `ownItem` already covers our icon; while we own the bar the scan keeps the last layout.
+        let me = ProcessInfo.processInfo.processIdentifier
         let apps = running.filter { app in
+            if app.processIdentifier == me { return false }
             if let known = candidates[app.processIdentifier] { return known }
             let relevant = app.bundleURL?.pathExtension == "app" || Self.systemBars.contains(app.bundleIdentifier ?? "")
             candidates[app.processIdentifier] = relevant

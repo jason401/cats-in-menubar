@@ -461,9 +461,11 @@ final class MenuBarTidy: ObservableObject {
     // MARK: Accessibility reads
 
     /// Each app's status items (the cats' scan collects the same on its own pass).
+    /// Runs off the main thread, so our own process is never asked (see MenuBarMonitor.scan).
     static func readExtras(_ apps: [NSRunningApplication]) -> [StatusExtra] {
-        apps.compactMap { app in
-            guard let id = app.bundleIdentifier, app.bundleURL?.pathExtension == "app" || MenuBarMonitor.systemBars.contains(id) else { return nil }
+        let me = ProcessInfo.processInfo.processIdentifier
+        return apps.compactMap { app in
+            guard app.processIdentifier != me, let id = app.bundleIdentifier, app.bundleURL?.pathExtension == "app" || MenuBarMonitor.systemBars.contains(id) else { return nil }
             let element = AXUIElementCreateApplication(app.processIdentifier)
             AXUIElementSetMessagingTimeout(element, 0.1)
             guard let bar = MenuBarItemPresser.value(of: element, kAXExtrasMenuBarAttribute),
