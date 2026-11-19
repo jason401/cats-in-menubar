@@ -1878,6 +1878,10 @@ func testMenuBarTidy(_ expect: (@autoclosure () -> Bool, String) -> Void) {
     expect(MenuBarTidy.allowList(running: ["me"], hidden: ["me"], own: "me") == ["me"], "this app can never hide itself")
     expect(MenuBarTidy.systemItems == Array(0..<64), "macOS's own items always stay")
     // Two rows of seven; past fourteen the last spot is a +N menu.
+    expect(!CaptureActivity.counts(["com.apple.CoreSpeech"]), "the Siri listener does not count as recording")
+    expect(CaptureActivity.counts(["com.apple.CoreSpeech", "us.zoom.xos"]), "an app recording beside it still counts")
+    expect(CaptureActivity.counts([nil]), "a recorder of unknown bundle counts")
+    expect(!CaptureActivity.counts([]), "no recorder, nothing in use")
     expect(PanelGrid.layout(count: 0) == (0, 0) && PanelGrid.layout(count: 3) == (3, 0), "a few apps show as they are")
     expect(PanelGrid.layout(count: 14) == (14, 0), "fourteen apps fill both rows")
     expect(PanelGrid.layout(count: 15) == (13, 2), "fifteen: thirteen icons and +2")

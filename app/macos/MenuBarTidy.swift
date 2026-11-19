@@ -488,12 +488,33 @@ enum PanelGrid {
 /// Whether any app records from a microphone or uses a camera: the public state the recording
 /// indicators reflect, with no microphone or camera permission. Based on Hidden Bar's CaptureActivityMonitor.
 enum CaptureActivity {
+    /// Listeners macOS shows no recording capsule for: corespeechd keeps the microphone open for
+    /// "Siri" / "Hey Siri" for minutes or hours at a time, which would keep every icon shown.
+    static let quietListeners: Set<String> = ["com.apple.CoreSpeech"]
+
     static var isActive: Bool {
         if #available(macOS 14.2, *) {
             // Each process's "is running input"; a device's "running somewhere" also fires for a headset only playing.
-            if audioObjects(kAudioHardwarePropertyProcessObjectList).contains(where: { audioFlag(kAudioProcessPropertyIsRunningInput, of: $0) }) { return true }
+            let recording = audioObjects(kAudioHardwarePropertyProcessObjectList)
+                .filter { audioFlag(kAudioProcessPropertyIsRunningInput, of: $0) }
+                .map { audioBundle(of: $0) }
+            if counts(recording) { return true }
         }
         return cameras().contains(where: cameraRunning)
+    }
+
+    /// Whether the processes recording now (by bundle id, nil when unknown) count as a microphone in use.
+    static func counts(_ recording: [String?]) -> Bool {
+        recording.contains { $0.map { !quietListeners.contains($0) } ?? true }
+    }
+
+    @available(macOS 14.2, *)
+    private static func audioBundle(of object: AudioObjectID) -> String? {
+        var address = audioAddress(kAudioProcessPropertyBundleID)
+        var value: Unmanaged<CFString>?
+        var size = UInt32(MemoryLayout<Unmanaged<CFString>?>.size)
+        guard AudioObjectGetPropertyData(object, &address, 0, nil, &size, &value) == noErr, let value else { return nil }
+        return value.takeRetainedValue() as String
     }
 
     private static func audioAddress(_ selector: AudioObjectPropertySelector) -> AudioObjectPropertyAddress {
