@@ -1448,9 +1448,13 @@ func testFaceStream(_ expect: (@autoclosure () -> Bool, String) -> Void) {
     let rgba = WheelScene.rgba(angle: 0, cell: 0, coat: 0, battery: .plain)
     let background = WheelScene.rgb565(Array(rgba[0..<4]))
     expect(pixel(rest, 0, 0) == UInt16(background[0]) | UInt16(background[1]) << 8, "corners show the background")
-    // Rows go top to bottom: the stand is at the bottom of the screen, nothing above the teeth at the top.
+    // Rows go top to bottom: the cat sits low in the wheel, the panel above it is bare, nothing above the teeth.
     expect(pixel(rest, 120, 6) == pixel(rest, 0, 0), "the top edge above the teeth is background")
-    expect(pixel(rest, 120, 234) != pixel(rest, 0, 0), "the wheel's stand is at the bottom (rows top to bottom)")
+    let panel = WheelScene.rgb565(Array(WheelScene.rgba(angle: 0, cell: 0, coat: 0, battery: .plain)[(60 * 240 + 120) * 4..<(60 * 240 + 120) * 4 + 4]))
+    expect(pixel(rest, 120, 60) != pixel(rest, 0, 0) && pixel(rest, 120, 60) == UInt16(panel[0]) | UInt16(panel[1]) << 8,
+           "the wheel's back panel is lighter than the background, so a black cat shows")
+    expect(pixel(rest, 120, 175) != pixel(rest, 120, 60), "the resting cat sits in the lower half (rows top to bottom)")
+    expect(pixel(rest, 120, 0) == pixel(rest, 120, 239), "no stand cut off at the bottom of the round screen")
     expect(pixel(rest, 120, 120 - 92) != pixel(rest, 0, 0), "the band crosses the top of the wheel")
     expect(WheelScene.frame(angle: -15, cell: WheelOverlayView.cell(.rest, step: 0, coat: 0), coat: 0, battery: .plain) != rest, "turned teeth change the picture")
     let low = WheelScene.frame(angle: 0, cell: 0, coat: 0, battery: .gauge(hasBattery: true, level: 0.1, enabled: true, mono: false))

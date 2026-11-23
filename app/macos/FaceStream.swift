@@ -1,16 +1,38 @@
 import Cocoa
 
-/// The CPU wheel as the AI Face board shows it: the round 240 x 240 LCD next to the Mac. Drawn here like the
-/// menu bar wheel, only bigger and in fixed colors (the board has no menu bar appearance to follow).
+/// The CPU wheel as the AI Face board shows it: the round 240 x 240 LCD next to the Mac. The board has room
+/// for more than the menu bar's template wheel, so this is its own drawing in the cats' style: a warm wooden
+/// wheel with the same dark brown outline as the cat art, soft edges, and the cat at exactly twice its sheet
+/// size on a contact shadow. Only the teeth turn; the background, band and shadow stay put between pictures,
+/// so AI Face sends the board little more than the teeth and the cat.
 enum WheelScene {
     static let size = 240
     static let frameBytes = size * size * 2
-    /// Board pixels per wheel point: the teeth tips (9.75 pt from the hub) stay inside the round edge.
-    static let scale: CGFloat = 11.5
-    static let background = NSColor(srgbRed: 0.04, green: 0.04, blue: 0.05, alpha: 1)
-    static let wheel = NSColor(srgbRed: 0.86, green: 0.86, blue: 0.88, alpha: 1)
-    static let green = NSColor(srgbRed: 0.2, green: 0.82, blue: 0.36, alpha: 1)
-    static let red = NSColor(srgbRed: 1, green: 0.27, blue: 0.23, alpha: 1)
+    static let center = NSPoint(x: 120, y: 120)
+    /// Board pixels per sheet pixel. A whole number keeps the art's pixels on the board's grid, so the cat is
+    /// as sharp as the 102 x 68 sheet allows (the sheet is all there is, no bigger original).
+    static let catScale: CGFloat = 2
+    /// Radii in board pixels: the band the cat runs on, the battery rims inside it, the teeth and outline.
+    static let inner: CGFloat = 82, outer: CGFloat = 101.5, rim: CGFloat = 5, line: CGFloat = 1.5
+    static let toothRoot: CGFloat = 97, toothTip: CGFloat = 111, toothWidth: CGFloat = 18
+    /// Paws stand this far above the band's inner edge.
+    static let groundLift: CGFloat = 3
+
+    private static func rgb(_ hex: Int) -> NSColor {
+        NSColor(srgbRed: CGFloat(hex >> 16 & 255) / 255, green: CGFloat(hex >> 8 & 255) / 255, blue: CGFloat(hex & 255) / 255, alpha: 1)
+    }
+    /// Dark warm charcoal, so a black cat does not vanish, and a lighter back panel inside the wheel.
+    static let background = rgb(0x17130F)
+    static let panel = rgb(0x392F27)
+    /// The cat art's own outline brown and wood tones around it.
+    static let outline = rgb(0x4E3020)
+    static let wood = rgb(0xC8925E)
+    static let woodLight = rgb(0xE4BE8C)
+    static let track = rgb(0x6E4A31)
+    /// Battery colors a little softer than system green and red, next to the wood.
+    static let green = rgb(0x7CC46A)
+    static let red = rgb(0xE2685A)
+    static let mono = rgb(0xF1DDBB)
 
     /// One picture as AI Face takes it: RGB565 little-endian, rows top to bottom, 115,200 bytes.
     static func frame(angle: Double, cell: Int, coat: Int, battery: WheelBattery) -> Data {
@@ -25,21 +47,85 @@ enum WheelScene {
             NSGraphicsContext.saveGraphicsState()
             NSGraphicsContext.current = NSGraphicsContext(cgContext: context, flipped: false)
             background.setFill(); NSRect(x: 0, y: 0, width: size, height: size).fill()
-            // The hub in the middle of the screen.
-            let transform = NSAffineTransform()
-            transform.translateX(by: CGFloat(size) / 2, yBy: CGFloat(size) / 2); transform.scale(by: scale)
-            transform.translateX(by: -TowerIcon.wheelCenter.x, yBy: -TowerIcon.wheelCenter.y); transform.concat()
-            wheel.set()
-            TowerIcon.drawWheel(angle: angle, battery: battery)
-            switch battery.ink {
-            case .template: break
-            case .green: green.setFill(); TowerIcon.drawShare(level: battery.share)
-            case .red: red.setFill(); TowerIcon.drawShare(level: battery.share)
-            }
-            WheelOverlayView.draw(cell: cell, coat: coat)
+            panel.setFill(); disc(inner).fill()
+            drawTeeth(angle: angle)
+            drawBand(battery)
+            drawShadow()
+            drawCat(cell: cell, coat: coat)
             NSGraphicsContext.restoreGraphicsState()
         }
         return pixels
+    }
+    private static func disc(_ r: CGFloat) -> NSBezierPath {
+        NSBezierPath(ovalIn: NSRect(x: center.x - r, y: center.y - r, width: r * 2, height: r * 2))
+    }
+    /// The ring between two radii from 12 o'clock clockwise over `share` of a turn (1 = all around).
+    private static func ring(_ r0: CGFloat, _ r1: CGFloat, share: Double = 1) {
+        let share = min(1, max(0, share))
+        guard share > 0 else { return }
+        let band = NSBezierPath()
+        band.windingRule = .evenOdd
+        if share >= 1 {
+            band.append(disc(r1)); band.append(disc(r0))
+        } else {
+            let start = CGFloat(TowerIcon.gaugeEnd(share: 0)), end = CGFloat(TowerIcon.gaugeEnd(share: share))
+            band.appendArc(withCenter: center, radius: r1, startAngle: start, endAngle: end, clockwise: true)
+            band.appendArc(withCenter: center, radius: r0, startAngle: end, endAngle: start, clockwise: false)
+            band.close()
+        }
+        band.fill()
+    }
+    /// 12 short rounded teeth 30° apart, outlined like the cat; their roots hide under the band.
+    private static func drawTeeth(angle: Double) {
+        let teeth = NSBezierPath()
+        for i in 0..<12 {
+            let tooth = NSBezierPath(roundedRect: NSRect(x: toothRoot, y: -toothWidth / 2, width: toothTip - toothRoot, height: toothWidth),
+                                     xRadius: 5, yRadius: 5)
+            let turn = AffineTransform(rotationByDegrees: angle + Double(i) * 30)
+            var place = AffineTransform(translationByX: center.x, byY: center.y); place.prepend(turn)
+            tooth.transform(using: place)
+            teeth.append(tooth)
+        }
+        outline.setStroke(); teeth.lineWidth = line * 2; teeth.stroke()
+        wood.setFill(); teeth.fill()
+    }
+    /// The band inside an outline: two light rims around a track, all wood without a battery gauge; with
+    /// one the track is dark and fills clockwise from the top.
+    private static func drawBand(_ battery: WheelBattery) {
+        outline.setFill(); ring(inner - line, outer + line)
+        woodLight.setFill(); ring(inner, inner + rim); ring(outer - rim, outer)
+        let r0 = inner + rim + line, r1 = outer - rim - line
+        guard battery.rims else { wood.setFill(); ring(r0, r1); return }
+        track.setFill(); ring(r0, r1)
+        switch battery.ink { case .template: mono.setFill(); case .green: green.setFill(); case .red: red.setFill() }
+        ring(r0, r1, share: battery.share)
+    }
+    /// A soft shadow where the paws meet the band.
+    private static func drawShadow() {
+        NSGraphicsContext.saveGraphicsState()
+        disc(inner).addClip()
+        let y = center.y - inner + groundLift
+        for (width, alpha) in [(92.0, 0.12), (70.0, 0.16), (48.0, 0.2)] as [(CGFloat, CGFloat)] {
+            NSColor(white: 0, alpha: alpha).setFill()
+            NSBezierPath(ovalIn: NSRect(x: center.x - width / 2, y: y - 5, width: width, height: 10)).fill()
+        }
+        NSGraphicsContext.restoreGraphicsState()
+    }
+    /// The cell with its paws just above the band and its body centered, placed on whole board pixels.
+    private static func drawCat(cell index: Int, coat: Int) {
+        guard let name = SpriteAtlas.artworkName(for: coat), let sheet = SpriteAtlas.sheet(name),
+              sheet.frames.indices.contains(index), let image = SpriteAtlas.cell(index, coat: coat) else { return }
+        // Center on the pose's first cell so the body does not jitter from cell to cell.
+        let pose = SpriteAtlas.pose(of: index, coat: coat)
+        let anchor = pose.map { SpriteAtlas.cell($0.pose, 0, coat: coat) } ?? index
+        let frame = sheet.frames[sheet.frames.indices.contains(anchor) ? anchor : index]
+        let middle = CGFloat(frame.left + frame.right) / 2
+        let ground = center.y - inner + groundLift
+        let rect = NSRect(x: (center.x - middle * catScale).rounded(),
+                          y: (ground + CGFloat(sheet.ground - Double(sheet.cellHeight) + sheet.frames[index].lift) * catScale).rounded(),
+                          width: CGFloat(sheet.cellWidth) * catScale, height: CGFloat(sheet.cellHeight) * catScale)
+        NSGraphicsContext.current?.imageInterpolation = .high
+        image.draw(in: rect, from: .zero, operation: .sourceOver, fraction: 1)
     }
     /// Opaque RGBA (the background fills every pixel) to RGB565, low byte first.
     static func rgb565(_ rgba: [UInt8]) -> Data {
