@@ -118,6 +118,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         colony.wheelChanged = { [weak self] in self?.wheelCatChanged() }
         colony.wheelTurnCompleted = { [weak self] in self?.wheelNextShift = nil }
         system.updated = { [weak self] stats in self?.systemUpdated(stats) }
+        FaceStream.shared.source = { [weak self] in self?.faceInput() }
         NotificationCenter.default.addObserver(self, selector: #selector(preferencesChanged), name: UserDefaults.didChangeNotification, object: nil)
         applyOptions()
         colony.startInTower()
@@ -178,6 +179,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         colony.toyColor = Toy.colors.indices.contains(toyColor) ? toyColor : nil
         if defaults.bool(forKey: Pref.cpuWheel) != wheelOn { setWheel(!wheelOn) }
         wheelLoaded = true
+        updateFaceStream()
         habitatView?.showLanes = model.debug
         system.wantsApps = defaults.integer(forKey: Pref.topApps) > 0 && (defaults.bool(forKey: Pref.showCPU) || defaults.bool(forKey: Pref.showMemory))
         system.wantsWiFi = defaults.bool(forKey: Pref.showNetwork)
@@ -313,6 +315,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             shownHomeCount = -1; updateTowerIcon()
         }
         AppModel.log("CPU wheel: \(on ? "on" : "off")")
+        updateFaceStream()
         syncLineup()
         layoutChanged()
     }
@@ -488,10 +491,22 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         epoch += 1
         scan()
     }
-    @objc func willSleep() { suspended = true; habitatView?.endDrag(); overlay?.orderOut(nil); wheelTimer?.invalidate(); wheelTimer = nil }
+    @objc func willSleep() { suspended = true; habitatView?.endDrag(); overlay?.orderOut(nil); wheelTimer?.invalidate(); wheelTimer = nil; updateFaceStream() }
     @objc func didWake() {
         suspended = false; lastTick = ProcessInfo.processInfo.systemUptime; layoutChanged()
-        wheelLast = lastTick; stepWheel()
+        wheelLast = lastTick; stepWheel(); updateFaceStream()
+    }
+    /// The wheel on the AI Face board, while the setting and the wheel are on and the Mac is awake.
+    func updateFaceStream() {
+        FaceStream.shared.update(enabled: defaults.bool(forKey: Pref.faceStream), available: wheelOn && !suspended)
+    }
+    /// What the board's wheel shows: the same cat, gait and battery as the menu bar, at the board's pace.
+    func faceInput() -> FaceStream.Input? {
+        guard wheelOn else { return nil }
+        let waiting = paused || colony.wheelWaiting || wheelDropShown
+        return FaceStream.Input(gait: waiting ? .rest : wheelPace.gait,
+                                motion: waiting ? WheelPace.Motion(frameRate: 0, degreesPerSecond: 0) : wheelPace.motion(maxFrameRate: FaceStream.maxFPS),
+                                coat: colony.wheel?.coat ?? 0, battery: wheelBattery)
     }
     func tick() {
         let now = ProcessInfo.processInfo.systemUptime
@@ -614,5 +629,5 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool { showSettings(); return true }
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { false }
-    func applicationWillTerminate(_ notification: Notification) { MenuBarTidy.shared.stop(); animationTimer?.invalidate(); layoutTimer?.invalidate(); wheelTimer?.invalidate(); overlay?.close() }
+    func applicationWillTerminate(_ notification: Notification) { MenuBarTidy.shared.stop(); animationTimer?.invalidate(); layoutTimer?.invalidate(); wheelTimer?.invalidate(); overlay?.close(); FaceStream.shared.stopNow() }
 }

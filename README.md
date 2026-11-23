@@ -16,6 +16,7 @@ Free and open source. Native Swift, AppKit and SwiftUI. macOS 14 or later.
 - Choose which display the cats live on; pause them, call them home, or set quiet hours.
 - A compact dashboard for CPU, memory, storage, battery and network activity.
 - Optional CPU wheel next to the tower: a cat runs faster as the Mac gets busier and naps when it is idle; cats take turns in it every 15 minutes, or carry a cat onto the wheel icon to hand it the turn (Settings > Monitor, off by default).
+- Optional AI Face streaming: the wheel cat also runs on an [AI Face](https://github.com/jason401/ai-face) round LCD board, drawn here and sent through the AI Face app's streaming API (Settings > Monitor > AI Face, off by default; needs AI Face with streaming and its board firmware). A swipe on the board hands the screen back until you switch streaming off and on.
 - Optional menu bar tidy on macOS 27 (Settings > Menu Bar, off by default): picked apps leave the menu bar and show as icons at the top right of the panel; click one to open its own menu. The cats get the freed space, and the tower can keep itself left of other icons so new ones appear away from the cats.
 - Optional scroll direction controls for individual scrolling sources, off by default.
 - Adaptive animation rates for system load, temperature and Low Power Mode; optional launch at login.

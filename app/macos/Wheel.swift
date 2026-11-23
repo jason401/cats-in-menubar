@@ -24,7 +24,10 @@ struct WheelPace {
     /// Low Power Mode caps the frame rate at 12 fps and slows the wheel with it, so each frame turns
     /// the same angle and the teeth never seem to spin backwards.
     struct Motion: Equatable { var frameRate: Double; var degreesPerSecond: Double }
-    func motion(lowPower: Bool = false) -> Motion {
+    func motion(lowPower: Bool = false) -> Motion { motion(maxFrameRate: lowPower ? Self.lowPowerFPS : .infinity) }
+    /// The same motion at no more than `maxFrameRate` cells a second, the wheel slowed with it
+    /// (Low Power Mode, or the AI Face board, which shows only so many pictures a second).
+    func motion(maxFrameRate: Double) -> Motion {
         let full: Motion
         switch gait {
         case .rest: full = Motion(frameRate: 0, degreesPerSecond: 0)
@@ -36,9 +39,9 @@ struct WheelPace {
             let t = min(1, max(0, (cpu - 0.2) / 0.8))
             full = Motion(frameRate: 8 * (1 + 2 * t), degreesPerSecond: 60 + 120 * t)
         }
-        guard lowPower, full.frameRate > Self.lowPowerFPS else { return full }
-        let slow = Self.lowPowerFPS / full.frameRate
-        return Motion(frameRate: Self.lowPowerFPS, degreesPerSecond: full.degreesPerSecond * slow)
+        guard full.frameRate > maxFrameRate else { return full }
+        let slow = maxFrameRate / full.frameRate
+        return Motion(frameRate: maxFrameRate, degreesPerSecond: full.degreesPerSecond * slow)
     }
     static let lowPowerFPS = 12.0
 }

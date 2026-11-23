@@ -799,6 +799,7 @@ func runSelfTests() {
     testUpdateChannels(expect)
     testBatteryTone(expect)
     testWheel(expect)
+    testFaceStream(expect)
     testWheelBaton(expect)
     testWheelDrop(expect)
     testMenuBarTidy(expect)
@@ -1389,6 +1390,154 @@ func renderWheel(to path: String) {
     try! bitmap.representation(using: .png, properties: [:])!.write(to: URL(fileURLWithPath: path))
     print("Wheel preview: \(path)")
     renderWheelBattery(to: (path as NSString).deletingPathExtension + "-battery.png")
+    renderFaceWheel(to: (path as NSString).deletingPathExtension + "-face.png")
+}
+
+/// The wheel streamed to the AI Face board: real streamed pictures decoded back from RGB565 and cut to the
+/// round screen, for resting, walking and running cats and battery states.
+func renderFaceWheel(to path: String) {
+    let states: [(String, WheelPace.Gait, Int, Double, Int, WheelBattery)] = [
+        ("nap", .rest, 0, 0, 0, .plain), ("walk", .walk, 3, -20, 1, .gauge(hasBattery: true, level: 0.65, enabled: true, mono: false)),
+        ("run", .run, 1, -45, 5, .gauge(hasBattery: true, level: 0.15, enabled: true, mono: false)),
+        ("run · Mono", .run, 5, -75, 7, .gauge(hasBattery: true, level: 0.5, enabled: true, mono: true))]
+    let size = WheelScene.size, gap = 20, width = states.count * (size + gap) + gap, height = size + 60
+    let bitmap = NSBitmapImageRep(bitmapDataPlanes: nil, pixelsWide: width, pixelsHigh: height, bitsPerSample: 8, samplesPerPixel: 4, hasAlpha: true, isPlanar: false, colorSpaceName: .deviceRGB, bytesPerRow: 0, bitsPerPixel: 0)!
+    NSGraphicsContext.saveGraphicsState()
+    NSGraphicsContext.current = NSGraphicsContext(bitmapImageRep: bitmap)
+    NSColor(calibratedWhite: 0.55, alpha: 1).setFill(); NSRect(x: 0, y: 0, width: width, height: height).fill()
+    let label: [NSAttributedString.Key: Any] = [.font: NSFont.systemFont(ofSize: 13), .foregroundColor: NSColor.white]
+    for (i, (name, gait, step, angle, coat, battery)) in states.enumerated() {
+        let data = WheelScene.frame(angle: angle, cell: WheelOverlayView.cell(gait, step: step, coat: coat), coat: coat, battery: battery)
+        var rgba = [UInt8](repeating: 255, count: size * size * 4)
+        for p in 0..<size * size {
+            let v = UInt16(data[p * 2]) | UInt16(data[p * 2 + 1]) << 8
+            rgba[p * 4] = UInt8((v >> 11) << 3); rgba[p * 4 + 1] = UInt8(((v >> 5) & 63) << 2); rgba[p * 4 + 2] = UInt8((v & 31) << 3)
+        }
+        let image = CGImage(width: size, height: size, bitsPerComponent: 8, bitsPerPixel: 32, bytesPerRow: size * 4, space: CGColorSpace(name: CGColorSpace.sRGB)!,
+                            bitmapInfo: CGBitmapInfo(rawValue: CGImageAlphaInfo.noneSkipLast.rawValue), provider: CGDataProvider(data: Data(rgba) as CFData)!,
+                            decode: nil, shouldInterpolate: false, intent: .defaultIntent)!
+        let rect = NSRect(x: gap + i * (size + gap), y: 40, width: size, height: size)
+        NSGraphicsContext.saveGraphicsState()
+        NSBezierPath(ovalIn: rect).addClip()
+        NSImage(cgImage: image, size: rect.size).draw(in: rect)
+        NSGraphicsContext.restoreGraphicsState()
+        (name as NSString).draw(at: NSPoint(x: rect.minX + 6, y: 12), withAttributes: label)
+    }
+    NSGraphicsContext.restoreGraphicsState()
+    try! bitmap.representation(using: .png, properties: [:])!.write(to: URL(fileURLWithPath: path))
+    print("AI Face wheel preview: \(path)")
+}
+
+/// The board picture's format and the AI Face client, against a stand-in for AI Face (no network, no real
+/// controller.json).
+func testFaceStream(_ expect: (@autoclosure () -> Bool, String) -> Void) {
+    _ = NSApplication.shared
+    // Pixel format: RGB565 little-endian, low byte first.
+    expect(WheelScene.rgb565([255, 0, 0, 255, 0, 255, 0, 255, 0, 0, 255, 255, 255, 255, 255, 255]) == Data([0x00, 0xF8, 0xE0, 0x07, 0x1F, 0x00, 0xFF, 0xFF]),
+           "red, green, blue and white pack as RGB565 little-endian")
+    let rest = WheelScene.frame(angle: 0, cell: WheelOverlayView.cell(.rest, step: 0, coat: 0), coat: 0, battery: .plain)
+    expect(rest.count == 115_200, "a board picture is 240 x 240 x 2 bytes")
+    expect(rest == WheelScene.frame(angle: 0, cell: WheelOverlayView.cell(.rest, step: 0, coat: 0), coat: 0, battery: .plain), "the same wheel draws the same picture")
+    func pixel(_ data: Data, _ x: Int, _ y: Int) -> UInt16 { UInt16(data[(y * 240 + x) * 2]) | UInt16(data[(y * 240 + x) * 2 + 1]) << 8 }
+    let rgba = WheelScene.rgba(angle: 0, cell: 0, coat: 0, battery: .plain)
+    let background = WheelScene.rgb565(Array(rgba[0..<4]))
+    expect(pixel(rest, 0, 0) == UInt16(background[0]) | UInt16(background[1]) << 8, "corners show the background")
+    // Rows go top to bottom: the stand is at the bottom of the screen, nothing above the teeth at the top.
+    expect(pixel(rest, 120, 6) == pixel(rest, 0, 0), "the top edge above the teeth is background")
+    expect(pixel(rest, 120, 234) != pixel(rest, 0, 0), "the wheel's stand is at the bottom (rows top to bottom)")
+    expect(pixel(rest, 120, 120 - 92) != pixel(rest, 0, 0), "the band crosses the top of the wheel")
+    expect(WheelScene.frame(angle: -15, cell: WheelOverlayView.cell(.rest, step: 0, coat: 0), coat: 0, battery: .plain) != rest, "turned teeth change the picture")
+    let low = WheelScene.frame(angle: 0, cell: 0, coat: 0, battery: .gauge(hasBattery: true, level: 0.1, enabled: true, mono: false))
+    let full = WheelScene.frame(angle: 0, cell: 0, coat: 0, battery: .gauge(hasBattery: true, level: 1, enabled: true, mono: false))
+    expect(pixel(low, 120 + 92, 120) != pixel(full, 120 + 92, 120), "a low battery shows red where a full one is green")
+    // Board pace: never more than 12 pictures a second, and never a turn that looks backwards.
+    for i in 0...100 {
+        var pace = WheelPace()
+        for _ in 0..<6 { pace.update(cpu: Double(i) / 100) }
+        let m = pace.motion(maxFrameRate: FaceStream.maxFPS)
+        expect(m.frameRate <= FaceStream.maxFPS, "board frames stay at 12 a second or fewer")
+        expect(m.frameRate == 0 ? m.degreesPerSecond == 0 : m.degreesPerSecond / m.frameRate < 15, "a board frame turns the teeth under half a tooth gap")
+        expect(pace.motion(lowPower: true) == pace.motion(maxFrameRate: WheelPace.lowPowerFPS), "Low Power Mode keeps its 12 fps cap")
+        expect(pace.motion() == pace.motion(maxFrameRate: .infinity), "uncapped motion is unchanged")
+    }
+    expect(FaceStream.maxTurn < 15, "a slow board's frame turns at most \(FaceStream.maxTurn)°")
+
+    // The client against a stand-in AI Face.
+    struct Call { var method: String; var path: String; var bytes: Int; var session: String? }
+    var calls: [Call] = [], replies: [String: (Int, [String: Any])] = [:]
+    var now = 100.0, pending: [() -> Void] = []
+    let face = FaceStream()
+    var input = FaceStream.Input(gait: .run, motion: WheelPace.Motion(frameRate: 12, degreesPerSecond: 90), coat: 0, battery: .plain)
+    face.source = { input }
+    face.clock = { now }
+    face.schedule = { _, work in pending.append(work); return nil }
+    var endpoint: FaceStream.Endpoint? = nil
+    face.locate = { endpoint }
+    face.transport = { _, method, path, body, session, _, done in
+        calls.append(Call(method: method, path: path, bytes: body.count, session: session))
+        let reply = replies[path] ?? (200, ["streaming": true])
+        done(reply.0, reply.1)
+    }
+    func runPending() { let work = pending; pending = []; work.forEach { $0() } }
+
+    face.update(enabled: true, available: true)
+    expect(face.state == .waiting("AI Face isn't running.") && calls.isEmpty, "no controller.json: waits for AI Face without a request")
+    endpoint = FaceStream.Endpoint(port: 5000, token: "t")
+    replies["stream/start"] = (409, ["busy_by": "Movie app"])
+    runPending()
+    expect(face.state == .waiting("Movie app is using the board."), "a busy board names the app using it")
+    replies["stream/start"] = (200, ["session": "s1", "streaming": true])
+    runPending()
+    expect(face.state == .streaming, "a free board streams")
+    expect(calls.last?.path == "stream/frame" && calls.last?.bytes == 115_200 && calls.last?.session == "s1", "the first picture goes whole with the session")
+    let framesBefore = face.framesSent
+    for _ in 0..<5 { now += 1 / 12; runPending() }
+    expect(face.framesSent == framesBefore + 5, "a running wheel sends a picture each step")
+    // A resting cat: the same picture is not sent again, only a keepalive about once a second.
+    input = FaceStream.Input(gait: .rest, motion: WheelPace.Motion(frameRate: 0, degreesPerSecond: 0), coat: 0, battery: .plain)
+    now += 0.25; runPending()
+    let resting = face.framesSent
+    let callsBefore = calls.count
+    for _ in 0..<3 { now += 0.25; runPending() }
+    expect(face.framesSent == resting && calls.count == callsBefore, "a still picture is not sent again")
+    now += 0.5; runPending()
+    expect(calls.last?.path == "stream/keepalive" && face.framesSent == resting, "a resting wheel renews the lease with a keepalive")
+    // A swipe on the board: the stream ends and stays off.
+    input.gait = .walk; input.motion = WheelPace.Motion(frameRate: 8, degreesPerSecond: 30)
+    replies["stream/frame"] = (200, ["streaming": false]); replies["stream/info"] = (200, ["board": true])
+    now += 0.1; runPending()
+    expect(face.state == .left, "a swipe on the board ends the stream")
+    let afterSwipe = calls.count
+    face.update(enabled: true, available: true); runPending()
+    expect(face.state == .left && calls.count == afterSwipe, "after a swipe the wheel does not take the board back by itself")
+    face.update(enabled: false, available: true)
+    expect(face.state == .off, "switching off clears it")
+    replies["stream/frame"] = nil
+    face.update(enabled: true, available: true)
+    expect(face.state == .streaming, "switching on again streams again")
+    // An unplugged board comes back by itself.
+    replies["stream/frame"] = (200, ["streaming": false]); replies["stream/info"] = (200, ["board": false])
+    now += 0.2; runPending()
+    expect(face.state == .waiting("Connect the AI Face board."), "an unplugged board is waited for")
+    replies["stream/frame"] = nil; replies["stream/info"] = nil
+    runPending()
+    expect(face.state == .streaming, "the board plugged in again streams again")
+    // Sleep or the wheel turned off gives the board back.
+    face.update(enabled: true, available: false)
+    expect(face.state == .off && calls.last?.path == "stream/stop" && calls.last?.session != nil, "stopping hands the board back to AI Face")
+    let stopped = calls.count
+    runPending()
+    expect(calls.count == stopped, "nothing more is sent after stopping")
+    // AI Face restarted (new token): read controller.json again.
+    var located = 0
+    face.locate = { located += 1; return endpoint }
+    replies["stream/start"] = (403, [:])
+    face.update(enabled: true, available: true)
+    expect(face.state == .waiting("AI Face restarted.") && located == 0, "a refused token waits for AI Face's new one")
+    replies["stream/start"] = (200, ["session": "s2", "streaming": true])
+    runPending()
+    expect(face.state == .streaming && located == 1 && calls.last?.session == "s2", "the new port and token are read again")
+    face.update(enabled: false, available: true)
 }
 
 /// The battery ring at 100/50/20/10/5 % in color and Mono on dark and light menu bars, enlarged, and a

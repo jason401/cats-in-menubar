@@ -21,6 +21,7 @@ enum Pref {
     static let wheelSwap = "wheelSwap"           // old fixed minutes, migrated once to wheelSwapRange
     static let wheelBattery = "wheelBattery"         // the wheel's band shows the battery charge
     static let wheelBatteryMono = "wheelBatteryMono" // that gauge in the menu bar's color instead of green
+    static let faceStream = "aiFaceStream"           // the wheel also shows on the AI Face board (FaceStream)
     static let showCPU = "showCPU", showMemory = "showMemory", showDisk = "showDisk", showBattery = "showBattery", showNetwork = "showNetwork"
     static let tidy = "menuBarTidy"                 // picked apps leave the menu bar and show in the panel (macOS 27)
     static let tidyApps = "menuBarTidyApps"         // their bundle ids, in panel order
@@ -28,7 +29,7 @@ enum Pref {
     static let defaults: [String: Any] = [
         count: 3, fixedLineup: false, rotate: false, rotatePace: 1, paused: false, quiet: false, activity: 1, adaptivePower: true, allowDrag: true,
         nightQuiet: false, nightFrom: 23, nightTo: 7, interval: 2.0, topApps: 2, toyColor: -1, laser: true, scrollReverse: false, display: "",
-        showCPU: true, showMemory: true, showDisk: true, showBattery: true, showNetwork: true, cpuWheel: false, wheelSwapRange: WheelShift.defaultRange, wheelBattery: true, wheelBatteryMono: false,
+        showCPU: true, showMemory: true, showDisk: true, showBattery: true, showNetwork: true, cpuWheel: false, wheelSwapRange: WheelShift.defaultRange, wheelBattery: true, wheelBatteryMono: false, faceStream: false,
         tidy: false, tidyLeftmost: true,
     ]
 }
@@ -1063,6 +1064,8 @@ struct MonitorTab: View {
     @AppStorage(Pref.wheelSwapRange) private var wheelSwapRange = WheelShift.defaultRange
     @AppStorage(Pref.wheelBattery) private var wheelBattery = true
     @AppStorage(Pref.wheelBatteryMono) private var wheelBatteryMono = false
+    @AppStorage(Pref.faceStream) private var faceStream = false
+    @ObservedObject var face = FaceStream.shared
     /// Read once: a Mac either has an internal battery or it does not.
     private let hasBattery = SystemMonitor.hasInternalBattery()
     var body: some View {
@@ -1078,6 +1081,10 @@ struct MonitorTab: View {
                         : "No battery: the ring stays plain.")
                 }
                 SettingsNote(text: "A cat runs in a wheel next to the tower: the busier the Mac, the faster it runs. Under 5 % it naps. Cats take turns at random times, preferring one not out playing.")
+            }
+            SettingsCard(title: "AI Face") {
+                SettingsRow(title: "Stream wheel") { SettingsSwitch(title: "Stream wheel", isOn: $faceStream) }.disabled(!cpuWheel)
+                SettingsNote(text: cpuWheel ? face.note : "Turn on the CPU wheel to stream it to the AI Face board.")
             }
             SettingsCard(title: "Update") {
                 SettingsRow(title: "Every") { SettingsSegments(options: [("1 s", 1.0), ("2 s", 2.0), ("5 s", 5.0)], selection: $interval) }
