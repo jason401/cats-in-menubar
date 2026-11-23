@@ -63,6 +63,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     var wheelLoaded = false     // the saved wheel cat comes back at launch only with Keep my cats
     // The CPU wheel: a template tower + wheel image, and the colored cat as its own layer on top.
     var wheelOn = false
+    /// The wheel runs on the AI Face board instead: the menu bar shows only the tower, turns happen offstage.
+    var wheelAway = false
+    var wheelShown: Bool { wheelOn && !wheelAway }
     var wheelPace = WheelPace()
     var wheelCat: WheelOverlayView?
     var wheelBattery = WheelBattery.plain
@@ -119,6 +122,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         colony.wheelTurnCompleted = { [weak self] in self?.wheelNextShift = nil }
         system.updated = { [weak self] stats in self?.systemUpdated(stats) }
         FaceStream.shared.source = { [weak self] in self?.faceInput() }
+        FaceStream.shared.changed = { [weak self] in self?.faceStreamChanged() }
         NotificationCenter.default.addObserver(self, selector: #selector(preferencesChanged), name: UserDefaults.didChangeNotification, object: nil)
         applyOptions()
         colony.startInTower()
@@ -306,12 +310,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             let saved = defaults.data(forKey: Pref.wheelCat).flatMap { try? JSONDecoder().decode(CatAppearance.self, from: $0) }
             colony.enableWheel(saved, fresh: saved != nil && !wheelLoaded && !defaults.bool(forKey: Pref.fixedLineup))
             let view = WheelOverlayView(frame: NSRect(x: 0, y: 0, width: 20, height: TowerIcon.wheelSize.height))
+            view.isHidden = wheelAway
             button.addSubview(view); wheelCat = view
             wheelLast = ProcessInfo.processInfo.systemUptime; wheelNextShift = nil
             stepWheel()
         } else {
             colony.wheel = nil; colony.wheelX = nil   // a cat on its way to the wheel carries on as itself
-            wheelCat?.removeFromSuperview(); wheelCat = nil
+            wheelCat?.removeFromSuperview(); wheelCat = nil; wheelAway = false
             shownHomeCount = -1; updateTowerIcon()
         }
         AppModel.log("CPU wheel: \(on ? "on" : "off")")
@@ -350,6 +355,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // Turning clockwise: the cat runs right, so the tread under its paws moves left.
         wheelAngle = (wheelAngle - dt * motion.degreesPerSecond).truncatingRemainder(dividingBy: 360)
         shownHomeCount = colony.homeCount
+        if wheelAway {
+            // On the board: only the tower here, and a slow tick is enough to count down to the next turn.
+            button.image = TowerIcon.menuBar(cats: shownHomeCount, open: towerDropShown)
+            let timer = Timer(timeInterval: 1, repeats: false) { [weak self] _ in self?.stepWheel() }
+            RunLoop.main.add(timer, forMode: .common); wheelTimer = timer
+            return
+        }
         button.image = TowerIcon.menuBar(cats: shownHomeCount, wheel: wheelAngle, battery: wheelBattery, open: towerDropShown)
         // The image is centered in the button; the cat layer covers its left 20 pt.
         let size = TowerIcon.wheelSize
@@ -370,7 +382,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// Keep my cats keeps the lineup: a cat from outside it takes the wheel. False: try again in a moment.
     func takeWheelTurn() -> Bool {
         let keep = defaults.bool(forKey: Pref.fixedLineup)
-        let seen = !paused && !suspended && !barHidden && !model.catsAway && !model.shuffling && moveTarget == nil && overlay?.isVisible == true
+        let seen = wheelShown && !paused && !suspended && !barHidden && !model.catsAway && !model.shuffling && moveTarget == nil && overlay?.isVisible == true
         if !keep && seen {
             switch colony.beginBaton() {
             case .started:
@@ -423,11 +435,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// Overlay x of the tower icon's center (with the wheel on, the tower is the image's right 18 pt).
     var towerX: Double? {
         guard let rect = towerRect, let overlay else { return nil }
-        return TowerIcon.towerCenterX(in: rect, wheel: wheelOn) - overlay.frame.minX
+        return TowerIcon.towerCenterX(in: rect, wheel: wheelShown) - overlay.frame.minX
     }
-    /// Overlay x of the wheel's center, while the wheel is on.
+    /// Overlay x of the wheel's center, while the wheel shows in the menu bar.
     var wheelX: Double? {
-        guard wheelOn, let rect = towerRect, let overlay else { return nil }
+        guard wheelShown, let rect = towerRect, let overlay else { return nil }
         return TowerIcon.wheelCenterX(in: rect) - overlay.frame.minX
     }
     /// The screen the cats are on now (mid-move, still the old one).
@@ -500,6 +512,22 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     func updateFaceStream() {
         FaceStream.shared.update(enabled: defaults.bool(forKey: Pref.faceStream), available: wheelOn && !suspended)
     }
+    /// While the board shows the wheel, the menu bar does not; when the stream ends it comes back.
+    /// The status item gets narrower or wider, so free space is measured again.
+    func faceStreamChanged() {
+        let away = wheelOn && FaceStream.shared.state == .streaming
+        guard away != wheelAway else { return }
+        wheelAway = away
+        if away {
+            colony.cancelBaton(); colony.wheelX = nil   // a cat on its way to the wheel carries on as itself
+            wheelDropShown = false
+        }
+        wheelCat?.isHidden = away
+        shownHomeCount = -1
+        AppModel.log("CPU wheel: \(away ? "on the AI Face board" : "back in the menu bar")")
+        stepWheel()
+        layoutChanged()
+    }
     /// What the board's wheel shows: the same cat, gait and battery as the menu bar, at the board's pace.
     func faceInput() -> FaceStream.Input? {
         guard wheelOn else { return nil }
@@ -522,9 +550,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // The tower slides whenever menu bar items to its right change width or come and go; auto rotation
         // walks cats in and out without a fresh callHome/letOut, so follow the icon every frame.
         if let x = towerX, colony.homeX == nil || (0...(overlay?.frame.width ?? 0)).contains(x) { colony.homeX = x }
-        if !wheelOn { colony.wheelX = nil } else if let x = wheelX, colony.wheelX == nil || (0...(overlay?.frame.width ?? 0)).contains(x) { colony.wheelX = x }
+        if !wheelShown { colony.wheelX = nil } else if let x = wheelX, colony.wheelX == nil || (0...(overlay?.frame.width ?? 0)).contains(x) { colony.wheelX = x }
         if let rect = towerRect, let overlay { colony.ownItem = Lane(lower: rect.minX - overlay.frame.minX, upper: rect.maxX - overlay.frame.minX) }
-        let dropReady = wheelOn && colony.wheelDropReady && habitatView?.wheelDropAllowed?() == true
+        let dropReady = wheelShown && colony.wheelDropReady && habitatView?.wheelDropAllowed?() == true
         if dropReady != wheelDropShown { wheelDropShown = dropReady; stepWheel() }
         // Over the tower, ready to go in: the tower's door opens wide.
         let towerReady = colony.towerDropReady && habitatView?.towerDropAllowed?() == true
@@ -582,7 +610,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             view.interactionEnded = { Updater.shared.resumeWhenIdle() }
             view.wheelDropAllowed = { [weak self] in
                 guard let self else { return false }
-                return self.wheelOn && !self.defaults.bool(forKey: Pref.fixedLineup)
+                return self.wheelShown && !self.defaults.bool(forKey: Pref.fixedLineup)
                     && !self.paused && !self.suspended && !self.barHidden && !self.model.catsAway
                     && !self.model.shuffling && self.moveTarget == nil && self.overlay?.isVisible == true
             }

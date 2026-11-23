@@ -33,8 +33,8 @@ enum WheelScene {
             TowerIcon.drawWheel(angle: angle, battery: battery)
             switch battery.ink {
             case .template: break
-            case .green: green.setFill(); TowerIcon.drawBand(level: battery.share)
-            case .red: red.setFill(); TowerIcon.drawBand(level: battery.share)
+            case .green: green.setFill(); TowerIcon.drawShare(level: battery.share)
+            case .red: red.setFill(); TowerIcon.drawShare(level: battery.share)
             }
             WheelOverlayView.draw(cell: cell, coat: coat)
             NSGraphicsContext.restoreGraphicsState()
@@ -75,7 +75,9 @@ final class FaceStream: ObservableObject {
     struct Input: Equatable { var gait: WheelPace.Gait; var motion: WheelPace.Motion; var coat: Int; var battery: WheelBattery }
     struct Endpoint: Equatable { var port: Int; var token: String }
     enum State: Equatable { case off, connecting, waiting(String), streaming, left }
-    @Published private(set) var state = State.off
+    @Published private(set) var state = State.off { didSet { if state != oldValue { changed?() } } }
+    /// Called when `state` changes (the menu bar hides its wheel while the board shows it).
+    var changed: (() -> Void)?
     @Published private(set) var fps = 0.0
 
     /// The wheel to show now; nil while there is none.
@@ -264,10 +266,10 @@ final class FaceStream: ObservableObject {
     /// The line under the switch in Settings → Monitor.
     var note: String {
         switch state {
-        case .off: return "Shows the wheel cat on the AI Face board. Needs the AI Face app with a board that has the streaming firmware."
+        case .off: return "Shows the wheel cat on the AI Face board instead of the menu bar. Needs the AI Face app with a board that has the streaming firmware."
         case .connecting: return "Connecting to AI Face…"
         case .waiting(let why): return "\(why) Trying again…"
-        case .streaming: return fps > 0 ? String(format: "On the AI Face board · %.0f fps", fps) : "On the AI Face board"
+        case .streaming: return fps > 0 ? String(format: "On the AI Face board · %.0f fps. The menu bar shows only the tower.", fps) : "On the AI Face board. The menu bar shows only the tower."
         case .left: return "The board went back to its own screen. Switch this off and on to show the wheel again."
         }
     }

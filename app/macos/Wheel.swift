@@ -46,8 +46,8 @@ struct WheelPace {
     static let lowPowerFPS = 12.0
 }
 
-/// The wheel's band as a battery gauge. It does not turn, so it stays readable: the charge fills the band
-/// clockwise from 12 o'clock and the rest shows only thin rims. Color follows the charge alone, also while
+/// The wheel's band as a battery gauge. It does not turn, so it stays readable: two thin rims run all the way
+/// around and the charge fills the track between them clockwise from 12 o'clock. Color follows the charge alone, also while
 /// charging: green above 20 %, red at 20 % or less. Mono draws the green share in the menu bar's own color
 /// (template tint) but keeps red as a warning. Off, or a Mac without a battery: the plain solid band.
 struct WheelBattery: Equatable {
@@ -64,7 +64,7 @@ struct WheelBattery: Equatable {
         let level = min(1, max(0, level)), percent = Int((level * 100).rounded())
         // Color from the real charge, so 20.4 % is still green even though its arc shows 20 %.
         let ink: Ink = level <= Double(lowPercent) / 100 ? .red : mono ? .template : .green
-        return WheelBattery(percent: percent, ink: ink, rims: percent < 100)
+        return WheelBattery(percent: percent, ink: ink, rims: true)
     }
     /// Arc length of the filled share in degrees.
     var degrees: Double { share * 360 }
@@ -86,15 +86,15 @@ extension TowerIcon {
     static let wheelOuter: CGFloat = 9.0
     /// Height of the 12 teeth outside the band. Only the teeth turn, so the band can later show a level.
     static let wheelTooth: CGFloat = 0.75
-    /// Width of the thin rims that outline the empty part of a battery gauge.
+    /// Width of the thin rims that outline a battery gauge's track.
     static let wheelRim: CGFloat = 0.5
     /// The wheel: a fixed band, teeth turned by `angle` degrees, and a low stand. With a battery gauge the
-    /// template keeps only the Mono share of the band plus thin rims around the rest; a green or red share is
-    /// drawn in color by `WheelOverlayView`.
+    /// template keeps the two rims all around plus the Mono share between them; a green or red share is drawn
+    /// between the rims in color by `WheelOverlayView`.
     static func drawWheel(angle: Double, tooth: CGFloat = wheelTooth, battery: WheelBattery = .plain) {
         let c = wheelCenter
-        if battery.ink == .template { drawBand(level: battery.share) }
-        if battery.rims { drawRims(after: battery.share) }
+        if battery.ink == .template { battery.rims ? drawShare(level: battery.share) : drawBand(level: battery.share) }
+        if battery.rims { drawRims() }
         // Teeth about 10° wide, 30° apart, a little narrower at the tip. They start just inside the
         // band so no seam shows where they join it.
         let teeth = NSBezierPath()
@@ -135,10 +135,12 @@ extension TowerIcon {
     /// The band between `wheelInner` and `wheelOuter`. `level` 0...1 fills that share clockwise from
     /// the top; 1 is the whole ring.
     static func drawBand(level: Double) { ring(inner: wheelInner, outer: wheelOuter, from: 0, to: level) }
-    /// Thin inner and outer rims over the empty part of the band, after the filled `share`.
-    static func drawRims(after share: Double) {
-        ring(inner: wheelOuter - wheelRim, outer: wheelOuter, from: share, to: 1)
-        ring(inner: wheelInner, outer: wheelInner + wheelRim, from: share, to: 1)
+    /// A gauge's filled `level` in the track between the rims, so the rims stay visible over it.
+    static func drawShare(level: Double) { ring(inner: wheelInner + wheelRim, outer: wheelOuter - wheelRim, from: 0, to: level) }
+    /// Thin inner and outer rims all the way around a battery gauge.
+    static func drawRims() {
+        ring(inner: wheelOuter - wheelRim, outer: wheelOuter, from: 0, to: 1)
+        ring(inner: wheelInner, outer: wheelInner + wheelRim, from: 0, to: 1)
     }
     /// Center x of the tower inside a status button `rect` that holds the image centered.
     static func towerCenterX(in rect: NSRect, wheel: Bool) -> Double {
@@ -228,10 +230,10 @@ final class WheelOverlayView: NSView {
         NSGraphicsContext.current?.imageInterpolation = .high
         image.draw(in: rect, from: .zero, operation: .sourceOver, fraction: 1)
     }
-    /// The colored battery share, drawn under the cat.
+    /// The colored battery share between the rims, drawn under the cat.
     static func draw(battery: WheelBattery) {
         guard let color = battery.color else { return }
-        color.setFill(); TowerIcon.drawBand(level: battery.share)
+        color.setFill(); TowerIcon.drawShare(level: battery.share)
     }
     override func draw(_ dirtyRect: NSRect) { Self.draw(battery: battery); Self.draw(cell: cell, coat: coat) }
 }

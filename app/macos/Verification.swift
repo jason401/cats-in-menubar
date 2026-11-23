@@ -1300,7 +1300,7 @@ func testWheelBattery(_ expect: (@autoclosure () -> Bool, String) -> Void) {
            "battery ring: green above 20 %, red at 20 % or less")
     expect(gauge(0.8, mono: true).ink == .template && gauge(0.2, mono: true).ink == .red && gauge(0.204, mono: true).ink == .template && gauge(0.1, mono: true).ink == .red, "battery ring: Mono replaces green only")
     expect(gauge(0.8).color == .systemGreen && gauge(0.1).color == .systemRed && gauge(0.8, mono: true).color == nil, "battery ring: overlay colors")
-    expect(gauge(0.5).rims && !gauge(1).rims, "battery ring: rims only where the band is empty")
+    expect(gauge(0.5).rims && gauge(1).rims && gauge(0).rims, "battery ring: every gauge has rims all around")
     expect(WheelBattery.gauge(hasBattery: false, level: 0.1, enabled: true, mono: false) == .plain
            && WheelBattery.gauge(hasBattery: true, level: 0.1, enabled: false, mono: true) == .plain, "battery ring: off or no battery is the plain band")
     expect(WheelBattery.plain.share == 1 && WheelBattery.plain.ink == .template && !WheelBattery.plain.rims, "battery ring: plain is the whole template band")
@@ -1332,9 +1332,15 @@ func testWheelBattery(_ expect: (@autoclosure () -> Bool, String) -> Void) {
     let green = template(gauge(0.5))
     expect(color(green, right.0, right.1) == nil && color(green, left.0, left.1) == nil && color(green, leftRim.0, leftRim.1) != nil,
            "battery ring: a colored share leaves the template with rims only")
+    let rightRim = (c.x + 8.8, c.y), rightInner = (c.x + 7.2, c.y)
+    expect(color(green, rightRim.0, rightRim.1) != nil && color(green, rightInner.0, rightInner.1) != nil, "battery ring: rims also run past the filled share")
+    expect(color(mono, rightRim.0, rightRim.1) != nil && color(mono, right.0, right.1) != nil, "battery ring: Mono share fills between its rims")
+    let full = template(gauge(1))
+    expect(color(full, leftRim.0, leftRim.1) != nil && color(full, left.0, left.1) == nil, "battery ring: a full colored gauge keeps its rims")
     let colored = overlay(gauge(0.5))
     if let ink = color(colored, right.0, right.1)?.usingColorSpace(.deviceRGB) {
         expect(ink.greenComponent > ink.redComponent + 0.3 && color(colored, left.0, left.1) == nil, "battery ring: overlay paints green on the filled half only")
+        expect(color(colored, rightRim.0, rightRim.1) == nil && color(colored, rightInner.0, rightInner.1) == nil, "battery ring: green sits between the rims, not over them")
     } else { expect(false, "battery ring: overlay paints the filled half") }
     let low = overlay(gauge(0.15))
     let lowEdge = (c.x + 8 * cos(.pi / 2 - 0.25), c.y + 8 * sin(.pi / 2 - 0.25))   // ~14° past 12 o'clock, inside 15 %
@@ -1469,6 +1475,8 @@ func testFaceStream(_ expect: (@autoclosure () -> Bool, String) -> Void) {
     let face = FaceStream()
     var input = FaceStream.Input(gait: .run, motion: WheelPace.Motion(frameRate: 12, degreesPerSecond: 90), coat: 0, battery: .plain)
     face.source = { input }
+    var changes: [FaceStream.State] = []
+    face.changed = { changes.append(face.state) }
     face.clock = { now }
     face.schedule = { _, work in pending.append(work); return nil }
     var endpoint: FaceStream.Endpoint? = nil
@@ -1489,6 +1497,7 @@ func testFaceStream(_ expect: (@autoclosure () -> Bool, String) -> Void) {
     replies["stream/start"] = (200, ["session": "s1", "streaming": true])
     runPending()
     expect(face.state == .streaming, "a free board streams")
+    expect(changes == [.connecting, .waiting("AI Face isn't running."), .waiting("Movie app is using the board."), .streaming], "each state change is reported once (the menu bar follows it)")
     expect(calls.last?.path == "stream/frame" && calls.last?.bytes == 115_200 && calls.last?.session == "s1", "the first picture goes whole with the session")
     let framesBefore = face.framesSent
     for _ in 0..<5 { now += 1 / 12; runPending() }
