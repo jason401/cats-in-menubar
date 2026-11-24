@@ -10,16 +10,16 @@ import SwiftUI
 //   landed before or after the rest delay. A click on the icon while it is open does nothing.
 // - With Open on hover off, a click opens it until a click elsewhere, another click on the icon, or Esc.
 // Both are non-activating panels, like the cats' overlay, so showing them never takes the keyboard from the
-// app in front. A tracking area on the icon starts a 20 Hz check of the pointer, which runs only while the
+// app in front. A tracking area on the icon starts a 30 Hz check of the pointer, which runs only while the
 // pointer is on the icon or a panel is open.
 
 enum PanelHoverRules {
     /// Resting this long on the icon opens the panel; passing over it on the way across the menu bar does not.
-    static let openDelay: TimeInterval = 0.3
+    static let openDelay: TimeInterval = 0.15
     /// Away from the icon and the panels this long closes a panel opened by resting.
-    static let closeDelay: TimeInterval = 0.5
+    static let closeDelay: TimeInterval = 0.35
     /// On another row this long changes the side panel, so crossing rows on the way to it does not.
-    static let switchDelay: TimeInterval = 0.1
+    static let switchDelay: TimeInterval = 0.06
     /// How far around the icon and the panels still counts as being on them (as AI Face's folder panel does).
     static let iconSlack: CGFloat = 2, panelSlack: CGFloat = 12
     /// The summary hangs this far below the icon, the side panel this far from the summary, both this far from screen edges.
@@ -164,7 +164,7 @@ final class DashboardPanel: NSResponder {
 
     private func startTimer() {
         guard timer == nil else { return }
-        let timer = Timer(timeInterval: 0.05, repeats: true) { [weak self] _ in self?.tick() }
+        let timer = Timer(timeInterval: 1.0 / 30, repeats: true) { [weak self] _ in self?.tick() }
         timer.tolerance = 0.01
         RunLoop.main.add(timer, forMode: .common)
         self.timer = timer
@@ -259,7 +259,7 @@ final class DashboardPanel: NSResponder {
         place(under: icon)
         summary.alphaValue = 0
         summary.orderFrontRegardless()
-        NSAnimationContext.runAnimationGroup { $0.duration = 0.15; summary.animator().alphaValue = 1 }
+        NSAnimationContext.runAnimationGroup { $0.duration = 0.08; summary.animator().alphaValue = 1 }
         summary.keyable = mode == .click
         if mode == .click { summary.makeKey() }
         watchClicks()
@@ -275,7 +275,7 @@ final class DashboardPanel: NSResponder {
         hover.detail = nil
         detail.orderOut(nil)
         summary.keyable = false
-        NSAnimationContext.runAnimationGroup({ $0.duration = 0.12; summary.animator().alphaValue = 0 }) { [weak self] in
+        NSAnimationContext.runAnimationGroup({ $0.duration = 0.08; summary.animator().alphaValue = 0 }) { [weak self] in
             guard let self, self.mode == nil else { return }
             self.summary.orderOut(nil)
         }

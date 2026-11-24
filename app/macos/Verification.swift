@@ -919,8 +919,8 @@ func testPanelHover(_ expect: (@autoclosure () -> Bool, String) -> Void) {
                             (R.Blockers(towerMoving: true), "the tidy moves the tower")] {
         expect(!R.mayOpen(blocker), "no panel from resting while \(name)")
     }
-    expect(R.openDelay == 0.3 && R.closeDelay == 0.5 && R.switchDelay == 0.1, "open after 0.3 s, close after 0.5 s, change rows after 0.1 s")
-    expect(!R.due(nil, 10, R.openDelay) && !R.due(10, 10.29, R.openDelay) && R.due(10, 10.3, R.openDelay), "the wait counts from when it began")
+    expect(R.openDelay == 0.15 && R.closeDelay == 0.35 && R.switchDelay == 0.06, "open after 0.15 s, close after 0.35 s, change rows after 0.06 s")
+    expect(!R.due(nil, 10, R.openDelay) && !R.due(10, 10.14, R.openDelay) && R.due(10, 10.15, R.openDelay), "the wait counts from when it began")
     // A 30 pt icon at the top right of a 1512 x 982 screen with a 37 pt menu bar.
     let screen = NSRect(x: 0, y: 0, width: 1512, height: 945)
     let icon = NSRect(x: 1300, y: 945, width: 30, height: 37)

@@ -80,7 +80,7 @@ private struct RowFrames: PreferenceKey {
 }
 
 struct DashboardView: View {
-    static let width: CGFloat = 300
+    static let width: CGFloat = 256
     static let space = "dashboard"
     @ObservedObject var model: AppModel
     @ObservedObject var system: SystemMonitor
@@ -144,7 +144,7 @@ struct DashboardView: View {
                             .onTapGesture { hover.close(); DashboardDetailView.opener(stat, s)() }
                     }
                 }
-                .padding(4)
+                .padding(3)
                 .background(RoundedRectangle(cornerRadius: 10).fill(Color.primary.opacity(0.05)))
                 .overlay(RoundedRectangle(cornerRadius: 10).stroke(Color.primary.opacity(0.08)))
             }
@@ -152,16 +152,21 @@ struct DashboardView: View {
                 Label("Your Mac is running hot", systemImage: "thermometer.high").font(.caption).foregroundStyle(.orange)
             }
             UpdateBanner(updater: Updater.shared)
-            HStack(spacing: 6) {
-                PanelButton(icon: model.catsAway ? "door.left.hand.open" : "house.fill", label: model.catsAway ? "Let out" : "Call home") { model.home?() }
-                    .disabled(paused || !model.access)
-                PanelButton(icon: "circle.fill", label: "Ball", action: play).disabled(paused || !model.access || model.catsAway)
-                PanelButton(icon: paused ? "play.fill" : "pause.fill", label: paused ? "Resume" : "Pause") { paused.toggle() }
-                PanelButton(icon: "gearshape", label: "Settings", action: openSettings)
-                PanelButton(icon: "power", label: "Quit") { NSApp.terminate(nil) }
+            // The cats on one line, the app on the other.
+            VStack(spacing: 4) {
+                HStack(spacing: 4) {
+                    PanelButton(icon: model.catsAway ? "door.left.hand.open" : "house.fill", label: model.catsAway ? "Let out" : "Call home") { model.home?() }
+                        .disabled(paused || !model.access)
+                    PanelButton(icon: "circle.fill", label: "Ball", action: play).disabled(paused || !model.access || model.catsAway)
+                    PanelButton(icon: paused ? "play.fill" : "pause.fill", label: paused ? "Resume" : "Pause") { paused.toggle() }
+                }
+                HStack(spacing: 4) {
+                    PanelButton(icon: "gearshape", label: "Settings", action: openSettings)
+                    PanelButton(icon: "power", label: "Quit") { NSApp.terminate(nil) }
+                }
             }
         }
-        .padding(14)
+        .padding(12)
         .frame(width: Self.width)
         .coordinateSpace(.named(Self.space))
         .onPreferenceChange(RowFrames.self) { hover.rows = $0 }
@@ -191,7 +196,7 @@ struct DashboardView: View {
         case .network:
             SummaryRow(icon: s.wifi != nil ? "wifi" : (s.networkName == "Offline" ? "wifi.slash" : "cable.connector"),
                        title: s.wifi != nil ? "Wi-Fi" : "Network",
-                       value: s.networkName == "Offline" && s.wifi == nil ? "Offline" : "↓ \(rate(s.download))  ↑ \(rate(s.upload))", selected: shown)
+                       value: s.networkName == "Offline" && s.wifi == nil ? "Offline" : "↓\(rate(s.download)) ↑\(rate(s.upload))", valueSize: 11, selected: shown)
         }
     }
 }
@@ -202,19 +207,21 @@ private struct SummaryRow: View {
     let title: String
     let value: String
     var valueColor = Color.primary
+    /// Network's two rates take a smaller size to fit beside the name.
+    var valueSize: CGFloat = 12
     var meter: Double? = nil
     var tint: Color? = nil
     let selected: Bool
     var body: some View {
-        HStack(spacing: 10) {
+        HStack(spacing: 8) {
             Image(systemName: icon).font(.system(size: 11, weight: .semibold)).foregroundStyle(.primary)
                 .frame(width: 24, height: 24).padding(.top, 4)
                 .background(CatTile().fill(Color.primary.opacity(selected ? 0.2 : 0.12)))
             VStack(alignment: .leading, spacing: 0) {
                 HStack(spacing: 6) {
-                    Text(title).font(.system(size: 13, weight: .semibold)).lineLimit(1)
-                    Spacer(minLength: 6)
-                    Text(value).font(.system(size: 12)).monospacedDigit().foregroundStyle(valueColor).lineLimit(1)
+                    Text(title).font(.system(size: 13, weight: .semibold)).lineLimit(1).fixedSize()
+                    Spacer(minLength: 4)
+                    Text(value).font(.system(size: valueSize)).monospacedDigit().foregroundStyle(valueColor).lineLimit(1).fixedSize()
                 }
                 if let meter { Meter(value: meter, tint: tint) }
             }
@@ -225,9 +232,11 @@ private struct SummaryRow: View {
     }
 }
 
-/// The side panel: the row's full section, as the panel used to show every one of them.
+/// The side panel: what the summary row does not show (its number and meter are already there).
 struct DashboardDetailView: View {
-    static let width: CGFloat = 360
+    static let width: CGFloat = 320
+    /// The details' column; the top apps take the rest.
+    private static let column: CGFloat = 124
     @ObservedObject var system: SystemMonitor
     let stat: DashboardStat
     @AppStorage(Pref.topApps) private var topApps = 2
@@ -240,38 +249,55 @@ struct DashboardDetailView: View {
         let open = Self.opener(stat, s)
         switch stat {
         case .cpu:
-            StatSection(icon: "gauge.with.dots.needle.67percent", title: "CPU: \(percent(s.cpu))", open: open, divider: false) {
-                // Details on the left, the heaviest apps beside them.
+            StatSection(icon: "gauge.with.dots.needle.67percent", title: "CPU", open: open, divider: false) {
+                // Details on the left, the heaviest apps beside them, and the last minute under them.
                 HStack(alignment: .top, spacing: 10) {
                     VStack(alignment: .leading, spacing: 2) {
                         Detail("System", percent(s.cpuSystem)); Detail("User", percent(s.cpuUser))
-                    }.frame(width: detailColumn, alignment: .leading)
+                    }.frame(width: Self.column, alignment: .leading)
                     TopApps(title: "Most CPU, 1 min", apps: s.topCPU, count: topApps, value: percent)
                 }
-                Sparkline(values: system.cpuHistory).frame(height: 30).padding(.top, 2)
+                Sparkline(values: system.cpuHistory).frame(height: 30).padding(.top, 4)
             }
         case .gpu:
-            if let gpu = s.gpu { GPUSection(gpu: gpu, divider: false) }
-            else { StatSection(icon: "cube.transparent", title: "GPU", divider: false) { Detail(nil, "Not reported right now") } }
+            StatSection(icon: "cube.transparent", title: "GPU", open: open, divider: false) {
+                if let gpu = s.gpu, gpu.renderer != nil || gpu.tiler != nil {
+                    HStack(spacing: 10) {
+                        if let renderer = gpu.renderer { Detail("Renderer", percent(renderer)).frame(width: Self.column, alignment: .leading) }
+                        if let tiler = gpu.tiler { Detail("Tiler", percent(tiler)) }
+                    }
+                } else {
+                    Detail(nil, "The driver reports only the total.")
+                }
+            }
         case .memory:
-            StatSection(icon: "square.stack.3d.up.fill", title: "Memory: \(percent(s.memoryUsed / max(1, s.memoryTotal)))", open: open, divider: false) {
+            StatSection(icon: "square.stack.3d.up.fill", title: "Memory", open: open, divider: false) {
                 Pressure(level: s.pressureLevel, value: s.memoryPressure)
                 HStack(alignment: .top, spacing: 10) {
                     VStack(alignment: .leading, spacing: 2) {
                         Detail("App", bytes(s.memoryApp))
                         Detail("Wired", bytes(s.memoryWired)); Detail("Compressed", bytes(s.memoryCompressed))
-                    }.frame(width: detailColumn, alignment: .leading)
+                    }.frame(width: Self.column, alignment: .leading)
                     TopApps(title: "Most memory", apps: s.topMemory, count: topApps, value: bytes)
                 }
-                Meter(value: s.memoryUsed / max(1, s.memoryTotal))
             }
         case .disk:
-            StatSection(icon: "externaldrive.fill", title: "Storage: \(percent(s.diskUsed / max(1, s.diskTotal))) used", open: open, help: "Open Storage settings", divider: false) {
-                Detail(nil, "\(bytes(s.diskUsed)) / \(bytes(s.diskTotal))")
-                Meter(value: s.diskUsed / max(1, s.diskTotal))
+            StatSection(icon: "externaldrive.fill", title: "Storage", open: open, help: "Open Storage settings", divider: false) {
+                Detail("Used", "\(bytes(s.diskUsed)) of \(bytes(s.diskTotal))")
+                Detail("Free", bytes(max(0, s.diskTotal - s.diskUsed)))
             }
         case .battery:
-            BatterySection(stats: s, divider: false)
+            if s.hasBattery {
+                StatSection(icon: BatteryTone.icon(s), title: "Battery", open: open, help: "Open Battery settings", divider: false) {
+                    Detail(nil, s.charging ? "Charging" : (s.onAC ? "On power adapter" : (s.lowPowerMode ? "On battery · Low Power Mode" : "On battery")))
+                    if let power = s.power { Detail("Using", watts(power)) }
+                }
+            } else {
+                StatSection(icon: "bolt.fill", title: "Power", open: open, help: "Open Energy settings", divider: false) {
+                    Detail(nil, "On power adapter")
+                    if let power = s.power { Detail("Using", watts(power)) }
+                }
+            }
         case .network:
             if let wifi = s.wifi {
                 StatSection(icon: "wifi", title: wifi.name.map { "Wi-Fi: \($0)" } ?? "Wi-Fi", open: open, help: "Open Wi-Fi settings", divider: false) {
@@ -285,15 +311,15 @@ struct DashboardDetailView: View {
                             Detail("Signal", "\(wifi.signal) (\(wifi.rssi) dBm)")
                             Detail("Band", wifi.rate > 0 ? "\(wifi.band) · \(Int(wifi.rate)) Mbps" : wifi.band)
                             Detail("Local IP", s.localIP)
-                        }.frame(width: detailColumn, alignment: .leading)
-                        Traffic(up: s.upload, down: s.download, test: SpeedTest.shared, network: wifi.name ?? s.networkName)
+                        }.fixedSize()
+                        Traffic(up: s.upload, down: s.download, test: SpeedTest.shared, network: wifi.name ?? s.networkName, showsTraffic: false)
                     }
                 }
             } else {
                 StatSection(icon: s.networkName == "Offline" ? "wifi.slash" : "cable.connector", title: "Network: \(s.networkName)", open: open, help: "Open Network settings", divider: false) {
                     HStack(alignment: .top, spacing: 10) {
-                        Detail("Local IP", s.localIP).frame(width: detailColumn, alignment: .leading)
-                        Traffic(up: s.upload, down: s.download, test: SpeedTest.shared, network: s.networkName)
+                        Detail("Local IP", s.localIP).fixedSize()
+                        Traffic(up: s.upload, down: s.download, test: SpeedTest.shared, network: s.networkName, showsTraffic: false)
                     }
                 }
             }
@@ -415,6 +441,8 @@ private struct Traffic: View {
     let down: Double
     @ObservedObject var test: SpeedTest
     let network: String?
+    /// Up and down are in the summary row already; the side panel leaves them out.
+    var showsTraffic = true
     var body: some View {
         VStack(alignment: .leading, spacing: 2) {
             if test.running {
@@ -435,9 +463,11 @@ private struct Traffic: View {
                 Label { Text(SpeedTest.rate(r.upload)) } icon: { Image(systemName: "arrow.up").foregroundStyle(.orange) }
                 if let ms = r.latency { Text("Ping \(Int(ms.rounded())) ms").foregroundStyle(.secondary) }
             } else {
-                Text("Traffic").font(.system(size: 10)).foregroundStyle(.tertiary)
-                Label { Text("Up \(rate(up))") } icon: { Image(systemName: "arrow.up").foregroundStyle(.orange) }
-                Label { Text("Down \(rate(down))") } icon: { Image(systemName: "arrow.down").foregroundStyle(.blue) }
+                Text(showsTraffic ? "Traffic" : "Speed test").font(.system(size: 10)).foregroundStyle(.tertiary)
+                if showsTraffic {
+                    Label { Text("Up \(rate(up))") } icon: { Image(systemName: "arrow.up").foregroundStyle(.orange) }
+                    Label { Text("Down \(rate(down))") } icon: { Image(systemName: "arrow.down").foregroundStyle(.blue) }
+                }
                 // The line beside Local IP is free, so the button costs no height.
                 Button("Test speed") { test.run(network: network) }
                     .buttonStyle(.bordered).controlSize(.mini).padding(.top, 1)
@@ -688,19 +718,20 @@ private struct PanelAppCell: View {
     }
 }
 
+/// A small icon-and-word button; a row of them shares the width.
 private struct PanelButton: View {
     let icon: String
     let label: String
     let action: () -> Void
     var body: some View {
         Button(action: action) {
-            VStack(spacing: 3) {
-                Image(systemName: icon).font(.system(size: 14))
-                Text(label).font(.system(size: 10))
-            }.frame(maxWidth: .infinity).padding(.vertical, 6)
-            // A plain button only takes clicks on drawn pixels; the shape makes the whole square clickable.
-            .background(RoundedRectangle(cornerRadius: 8).fill(Color.primary.opacity(0.06)))
-            .contentShape(RoundedRectangle(cornerRadius: 8))
+            HStack(spacing: 4) {
+                Image(systemName: icon).font(.system(size: 10, weight: .medium))
+                Text(label).font(.system(size: 11)).lineLimit(1)
+            }.frame(maxWidth: .infinity).frame(height: 22)
+            // A plain button only takes clicks on drawn pixels; the shape makes the whole pill clickable.
+            .background(RoundedRectangle(cornerRadius: 6).fill(Color.primary.opacity(0.06)))
+            .contentShape(RoundedRectangle(cornerRadius: 6))
         }.buttonStyle(.plain)
     }
 }
