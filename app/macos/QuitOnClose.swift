@@ -1,8 +1,9 @@
 import Cocoa
 
-// Quit on close (Settings > Accessibility, off by default): a picked app quits once its last window closes.
-// Only apps the user picks are watched. Windows are read from the window server once a second, and only
-// while a picked app runs: no Accessibility observers, nothing asked of the watched apps themselves.
+// Quit on close (Settings > Accessibility, off by default): an app quits once its last window closes.
+// It covers every app with a Dock icon except a list kept running (players, messengers, calls), or only
+// picked apps. Windows are read from the window server once a second while a watched app runs: no
+// Accessibility observers, nothing asked of the watched apps themselves.
 //
 // What counts as an open window: a normal-sized, visible window that is on screen or belongs to a Space.
 // Minimized windows and windows on other desktops still belong to a Space; the invisible leftovers many apps
@@ -55,6 +56,21 @@ enum QuitOnCloseRules {
         return now.timeIntervalSince(emptySince) >= grace ? .quit : .wait
     }
 
+    /// Kept running in "All apps" until the user changes the list: they play, take calls or deliver
+    /// messages with no window open.
+    static let defaultExceptions = [
+        "com.apple.Music", "com.spotify.client", "com.apple.podcasts", "com.apple.mobilephone", "com.apple.FaceTime",
+        "com.apple.MobileSMS", "com.apple.mail", "com.kakao.KakaoTalkMac", "com.tinyspeck.slackmacgap", "com.hnc.Discord",
+        "us.zoom.xos", "com.microsoft.teams2", "com.microsoft.teams",
+        "local.aiilluminati", "local.aiface",   // the AI chats and the face board keep working with no window open
+    ]
+
+    /// Whether an app is watched: all pickable apps but the exceptions, or only the picked ones.
+    static func watched(bundle: String?, policy: NSApplication.ActivationPolicy, own: String?, all: Bool, picked: Set<String>, exceptions: Set<String>) -> Bool {
+        guard pickable(bundle: bundle, policy: policy, own: own), let bundle else { return false }
+        return all ? !exceptions.contains(bundle) : picked.contains(bundle)
+    }
+
     /// Apps that can never be picked: this app, Finder (it hosts the desktop) and anything without a Dock icon.
     static func pickable(bundle: String?, policy: NSApplication.ActivationPolicy, own: String?) -> Bool {
         guard let bundle, bundle != own, bundle != FinderShortcuts.finderID else { return false }
@@ -64,9 +80,11 @@ enum QuitOnCloseRules {
 
 final class QuitOnClose: ObservableObject {
     static let shared = QuitOnClose()
-    /// Picked bundle ids, in the order they were picked.
+    /// Picked bundle ids, in the order they were picked ("Picked apps").
     @Published private(set) var picked: [String] = UserDefaults.standard.stringArray(forKey: Pref.quitOnCloseApps) ?? []
-    /// Running apps that can be picked, then picked apps that are not running.
+    /// Bundle ids kept running ("All apps").
+    @Published private(set) var exceptions: [String] = UserDefaults.standard.stringArray(forKey: Pref.quitOnCloseExceptions) ?? QuitOnCloseRules.defaultExceptions
+    /// Running apps that can be picked, then listed apps that are installed but not running.
     @Published private(set) var apps: [TidyApp] = []
     @Published private(set) var running = false
 
@@ -83,6 +101,9 @@ final class QuitOnClose: ObservableObject {
     }
 
     var enabled: Bool { UserDefaults.standard.bool(forKey: Pref.quitOnClose) }
+    var allApps: Bool { UserDefaults.standard.bool(forKey: Pref.quitOnCloseAll) }
+    /// The list the picker edits: exceptions for all apps, picks otherwise.
+    var list: [String] { allApps ? exceptions : picked }
 
     /// Starts or stops the once-a-second check from the setting and the picked apps that run.
     func apply() {
@@ -104,10 +125,10 @@ final class QuitOnClose: ObservableObject {
     }
 
     private func watchedApps() -> [NSRunningApplication] {
-        let set = Set(picked)
+        let all = allApps, picks = Set(picked), kept = Set(exceptions), own = Bundle.main.bundleIdentifier
         return NSWorkspace.shared.runningApplications.filter { app in
-            guard let bundle = app.bundleIdentifier, set.contains(bundle), !app.isTerminated else { return false }
-            return QuitOnCloseRules.pickable(bundle: bundle, policy: app.activationPolicy, own: Bundle.main.bundleIdentifier)
+            !app.isTerminated && QuitOnCloseRules.watched(bundle: app.bundleIdentifier, policy: app.activationPolicy, own: own,
+                                                          all: all, picked: picks, exceptions: kept)
         }
     }
 
@@ -115,9 +136,15 @@ final class QuitOnClose: ObservableObject {
         guard enabled else { apply(); return }
         let list = CGWindowListCopyWindowInfo([.optionAll], kCGNullWindowID) as? [[String: Any]] ?? []
         var counts: [pid_t: Int] = [:]
+        var offscreen: [WindowSample] = []
         for info in list {
             guard let window = WindowSample(info), watches[window.pid] != nil else { continue }
-            if QuitOnCloseRules.counts(window, inSpace: { inSpace(window.id) }) { counts[window.pid, default: 0] += 1 }
+            if QuitOnCloseRules.counts(window, inSpace: { false }) { counts[window.pid, default: 0] += 1 }
+            else if !window.onscreen { offscreen.append(window) }
+        }
+        // Only an app with nothing on screen needs the Space lookup, and only until one window is found.
+        for window in offscreen where counts[window.pid] == nil {
+            if QuitOnCloseRules.counts(window, inSpace: { inSpace(window.id) }) { counts[window.pid] = 1 }
         }
         let now = Date()
         for app in watchedApps() {
@@ -154,14 +181,27 @@ final class QuitOnClose: ObservableObject {
             list.append(TidyApp(bundle: bundle, running: app))
         }
         list.sort { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
-        let missing = picked.filter { !seen.contains($0) }.map { TidyApp(bundle: $0) }
+        let missing = self.list.filter { !seen.contains($0) && NSWorkspace.shared.urlForApplication(withBundleIdentifier: $0) != nil }
+            .map { TidyApp(bundle: $0) }
         apps = list + missing
     }
 
-    func setPicked(_ bundle: String, _ on: Bool) {
-        picked.removeAll { $0 == bundle }
-        if on { picked.append(bundle) }
-        UserDefaults.standard.set(picked, forKey: Pref.quitOnCloseApps)
+    /// Turns an app on in the current list: picked to quit, or kept running.
+    func setListed(_ bundle: String, _ on: Bool) {
+        if allApps {
+            exceptions.removeAll { $0 == bundle }
+            if on { exceptions.append(bundle) }
+            UserDefaults.standard.set(exceptions, forKey: Pref.quitOnCloseExceptions)
+        } else {
+            picked.removeAll { $0 == bundle }
+            if on { picked.append(bundle) }
+            UserDefaults.standard.set(picked, forKey: Pref.quitOnCloseApps)
+        }
         apply()
+    }
+
+    /// Installed apps in the current list, for the settings row.
+    var listedCount: Int {
+        list.filter { NSWorkspace.shared.urlForApplication(withBundleIdentifier: $0) != nil }.count
     }
 }

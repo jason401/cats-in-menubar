@@ -940,6 +940,20 @@ func testQuitOnClose(_ expect: (@autoclosure () -> Bool, String) -> Void) {
     expect(!R.pickable(bundle: FinderShortcuts.finderID, policy: .regular, own: "me") && !R.pickable(bundle: "me", policy: .regular, own: "me")
            && !R.pickable(bundle: "x", policy: .accessory, own: "me") && !R.pickable(bundle: nil, policy: .regular, own: "me")
            && R.pickable(bundle: "com.apple.TextEdit", policy: .regular, own: "me"), "only regular apps, never Finder or this app")
+    let kept: Set<String> = ["com.apple.Music"], picks: Set<String> = ["com.apple.Preview"]
+    expect(R.watched(bundle: "com.apple.TextEdit", policy: .regular, own: "me", all: true, picked: picks, exceptions: kept)
+           && !R.watched(bundle: "com.apple.Music", policy: .regular, own: "me", all: true, picked: picks, exceptions: kept),
+           "all apps: everything but the ones kept running")
+    expect(R.watched(bundle: "com.apple.Preview", policy: .regular, own: "me", all: false, picked: picks, exceptions: kept)
+           && !R.watched(bundle: "com.apple.TextEdit", policy: .regular, own: "me", all: false, picked: picks, exceptions: kept),
+           "picked: only the picked apps")
+    expect(!R.watched(bundle: FinderShortcuts.finderID, policy: .regular, own: "me", all: true, picked: [], exceptions: [])
+           && !R.watched(bundle: "x", policy: .accessory, own: "me", all: true, picked: [], exceptions: []),
+           "all apps still never covers Finder or apps without a Dock icon")
+    expect(Pref.defaults[Pref.quitOnCloseAll] as? Bool == true
+           && (Pref.defaults[Pref.quitOnCloseExceptions] as? [String])?.contains("com.apple.Music") == true
+           && R.defaultExceptions.contains("com.apple.mobilephone") && R.defaultExceptions.contains("com.kakao.KakaoTalkMac") && R.defaultExceptions.contains("local.aiilluminati"),
+           "quit on close covers all apps, keeping players, calls and messengers running")
     expect(Pref.defaults[Pref.finderCutPaste] as? Bool == false && Pref.defaults[Pref.finderPasteImages] as? Bool == false
            && Pref.defaults[Pref.quitOnClose] as? Bool == false, "Finder shortcuts and quit on close start off")
     expect(SettingsWindowController.tabs.map(\.0) == ["General", "Cats", "Accessibility", "Monitor"], "scroll and menu bar settings live in the Accessibility tab")

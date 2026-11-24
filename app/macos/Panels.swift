@@ -29,12 +29,15 @@ enum Pref {
     static let finderCutPaste = "finderCutPaste"       // ⌘X then ⌘V moves files in Finder (FinderShortcuts)
     static let finderPasteImages = "finderPasteImages" // ⌘V in Finder saves a copied image as a PNG file
     static let quitOnClose = "quitOnClose"             // picked apps quit when their last window closes (QuitOnClose)
-    static let quitOnCloseApps = "quitOnCloseApps"     // their bundle ids
+    static let quitOnCloseApps = "quitOnCloseApps"     // picked bundle ids ("Picked apps")
+    static let quitOnCloseAll = "quitOnCloseAll"       // every app but the exceptions, or only picked apps
+    static let quitOnCloseExceptions = "quitOnCloseExceptions" // bundle ids kept running in "All apps"
     static let defaults: [String: Any] = [
         count: 3, fixedLineup: false, rotate: false, rotatePace: 1, paused: false, quiet: false, activity: 1, adaptivePower: true, allowDrag: true,
         nightQuiet: false, nightFrom: 23, nightTo: 7, interval: 2.0, topApps: 2, toyColor: -1, laser: true, scrollReverse: false, display: "",
         showCPU: true, showGPU: true, showMemory: true, showDisk: true, showBattery: true, showNetwork: true, cpuWheel: false, wheelSwapRange: WheelShift.defaultRange, wheelBattery: true, wheelBatteryMono: false, faceStream: false,
         tidy: false, tidyLeftmost: true, finderCutPaste: false, finderPasteImages: false, quitOnClose: false,
+        quitOnCloseAll: true, quitOnCloseExceptions: QuitOnCloseRules.defaultExceptions,
     ]
 }
 
@@ -1241,6 +1244,7 @@ struct AccessibilityTab: View {
     @AppStorage(Pref.finderCutPaste) private var cutPaste = false
     @AppStorage(Pref.finderPasteImages) private var pasteImages = false
     @AppStorage(Pref.quitOnClose) private var quitOnClose = false
+    @AppStorage(Pref.quitOnCloseAll) private var quitAll = true
     var body: some View {
         SettingsPage {
             SettingsCard(title: "Accessibility") {
@@ -1259,12 +1263,16 @@ struct AccessibilityTab: View {
                 }
             }
             SettingsCard(title: "Quit on close") {
-                SettingsRow(title: "Quit on close", titleWidth: 118, info: "A picked app quits when you close its last window. Unsaved documents still ask first. Minimized windows, windows on other desktops and hidden apps (⌘H) keep it open.") {
-                    SettingsSwitch(title: "Quit picked apps when their last window closes", isOn: $quitOnClose)
+                SettingsRow(title: "Quit on close", titleWidth: 118, info: "An app quits when you close its last window. Unsaved documents still ask first. Minimized windows, windows on other desktops and hidden apps (⌘H) keep it open. An app that never showed a window is left alone.") {
+                    SettingsSwitch(title: "Quit apps when their last window closes", isOn: $quitOnClose)
                 }
                 Divider()
-                SettingsRow(title: "Apps", titleWidth: 118) {
-                    SettingsStatus(text: AppPicker.summary(quitter.picked.count))
+                SettingsRow(title: "Apps", titleWidth: 118, info: "All apps: every app with a Dock icon, except the ones kept running (music, calls and messengers to start with). Picked: only the apps you choose. Finder is never quit.") {
+                    SettingsSegments(options: [("All apps", true), ("Picked", false)], selection: $quitAll)
+                }
+                Divider()
+                SettingsRow(title: quitAll ? "Keep running" : "Quit these", titleWidth: 118) {
+                    SettingsStatus(text: AppPicker.summary(quitter.listedCount))
                     SettingsAction(title: "Choose…") { AppPicker.show(.quitOnClose) }.frame(width: 76)
                 }
             }
@@ -1282,7 +1290,7 @@ enum AppPicker: String {
 
     var title: String {
         switch self {
-        case .quitOnClose: "Apps to quit on close"
+        case .quitOnClose: "Quit on close apps"
         case .tidy: "Apps in the panel"
         case .scrollSources: "Scroll sources"
         }
@@ -1376,10 +1384,14 @@ struct ScrollSourcesList: View {
 
 struct QuitAppsPicker: View {
     @ObservedObject var quitter: QuitOnClose
+    @AppStorage(Pref.quitOnCloseAll) private var quitAll = true
     var body: some View {
-        AppPickerList(apps: quitter.apps, picked: quitter.picked, empty: "Open the apps you want here, then pick them.",
-                      footer: "Only open apps with a Dock icon are listed. Finder is never quit.", setPicked: quitter.setPicked)
+        AppPickerList(apps: quitter.apps, picked: quitter.list, empty: "Open the apps you want here, then pick them.",
+                      footer: quitAll ? "Switched on: the app keeps running when its last window closes. Open apps with a Dock icon are listed. Finder is never quit."
+                                      : "Switched on: the app quits when its last window closes. Open apps with a Dock icon are listed. Finder is never quit.",
+                      setPicked: quitter.setListed)
             .onAppear { quitter.refreshApps() }
+            .onChange(of: quitAll) { quitter.refreshApps() }
     }
 }
 
