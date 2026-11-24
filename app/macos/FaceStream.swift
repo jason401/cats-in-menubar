@@ -350,9 +350,12 @@ final class FaceStream: ObservableObject {
     }
 
     /// The line under the switch in Settings → Monitor.
+    /// What streaming does, for the setting's info badge.
+    static let about = "Shows the wheel cat on the AI Face board instead of the menu bar. Needs the AI Face app with a board that has the streaming firmware."
+    /// The current state in a line; empty while off (the info badge explains the setting).
     var note: String {
         switch state {
-        case .off: return "Shows the wheel cat on the AI Face board instead of the menu bar. Needs the AI Face app with a board that has the streaming firmware."
+        case .off: return ""
         case .connecting: return "Connecting to AI Face…"
         case .waiting(let why): return "\(why) Trying again…"
         case .streaming: return fps > 0 ? String(format: "On the AI Face board · %.0f fps. The menu bar shows only the tower.", fps) : "On the AI Face board. The menu bar shows only the tower."

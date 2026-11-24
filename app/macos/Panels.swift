@@ -325,7 +325,7 @@ private struct Traffic: View {
 struct SpeedHistoryCard: View {
     @ObservedObject var test: SpeedTest
     var body: some View {
-        SettingsCard(title: "Speed tests") {
+        SettingsCard(title: "Speed tests", info: SpeedTest.scale + "\n\n" + SpeedTest.scaleRule) {
             if test.history.isEmpty {
                 SettingsNote(text: "Run a test from the panel's network section. The last \(SpeedTest.keep) results stay on this Mac.")
             } else {
@@ -353,8 +353,6 @@ struct SpeedHistoryCard: View {
                     }.font(.system(size: 10)).monospacedDigit().padding(.horizontal, 10).padding(.vertical, 3)
                 }
                 Divider()
-                SettingsNote(text: SpeedTest.scale)
-                SettingsNote(text: SpeedTest.scaleRule)
                 SettingsRow(title: "History") { SettingsAction(title: "Clear") { test.clear() } }
             }
         }
@@ -586,10 +584,15 @@ struct SettingsPage<Content: View>: View {
 
 struct SettingsCard<Content: View>: View {
     let title: String
+    /// What the whole card is about, behind an ⓘ-style badge beside the title.
+    var info: String? = nil
     @ViewBuilder var content: Content
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
-            Text(title).font(.system(size: 11, weight: .semibold)).foregroundStyle(.secondary).padding(.horizontal, 2)
+            HStack(spacing: 4) {
+                Text(title).font(.system(size: 11, weight: .semibold)).foregroundStyle(.secondary)
+                if let info { InfoBadge(text: info) }
+            }.padding(.horizontal, 2)
             VStack(spacing: 0) { content }
                 .background(Color(nsColor: .controlBackgroundColor))
                 .clipShape(RoundedRectangle(cornerRadius: 8))
@@ -601,10 +604,15 @@ struct SettingsCard<Content: View>: View {
 struct SettingsRow<Content: View>: View {
     let title: String
     var titleWidth: CGFloat = 96
+    /// The setting's explanation, shown when the pointer rests on the badge beside the title.
+    var info: String? = nil
     @ViewBuilder var content: Content
     var body: some View {
         HStack(spacing: 10) {
-            Text(title).frame(width: titleWidth, alignment: .leading)
+            HStack(spacing: 4) {
+                Text(title).fixedSize(horizontal: false, vertical: true)
+                if let info { InfoBadge(text: info) }
+            }.frame(width: titleWidth, alignment: .leading)
             HStack(spacing: 6) { content }.frame(maxWidth: .infinity, alignment: .leading)
         }
         .padding(.horizontal, 10).padding(.vertical, 6)
@@ -612,7 +620,39 @@ struct SettingsRow<Content: View>: View {
     }
 }
 
-/// A short gray line under a row; the long version goes in `help`.
+/// Hover state for an info badge: the popover waits a moment, so passing over it shows nothing.
+private final class InfoHover: ObservableObject {
+    @Published var shown = false
+    private var pending: DispatchWorkItem?
+    func hover(_ inside: Bool) {
+        pending?.cancel()
+        guard inside else { shown = false; return }
+        let show = DispatchWorkItem { [weak self] in self?.shown = true }
+        pending = show
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.15, execute: show)
+    }
+}
+
+/// A small circled exclamation mark beside a title; resting the pointer on it shows the explanation.
+struct InfoBadge: View {
+    let text: String
+    @StateObject private var hover = InfoHover()
+    var body: some View {
+        Image(systemName: "exclamationmark.circle")
+            .font(.system(size: 10, weight: .medium))
+            .foregroundStyle(hover.shown ? Color.primary : Color.secondary)
+            .contentShape(Rectangle())
+            .onHover { hover.hover($0) }
+            .popover(isPresented: Binding(get: { hover.shown }, set: { hover.shown = $0 }), arrowEdge: .bottom) {
+                Text(text).font(.system(size: 11)).fixedSize(horizontal: false, vertical: true)
+                    .frame(width: 240, alignment: .leading).padding(10)
+            }
+            .accessibilityLabel(text)
+    }
+}
+
+/// A short gray line under a row for status that changes (a permission, a running check); fixed
+/// explanations live in an `info` badge instead.
 struct SettingsNote: View {
     let text: String
     var body: some View {
@@ -757,10 +797,9 @@ struct GeneralTab: View {
                 }
             }
             SettingsCard(title: "About") {
-                SettingsRow(title: "Version", titleWidth: 118) {
+                SettingsRow(title: "Version", titleWidth: 118, info: "No analytics. GitHub updates; Apple tests on request.") {
                     Text(version).foregroundStyle(.secondary).help(versionDetails)
                 }
-                SettingsNote(text: "No analytics. GitHub updates; Apple tests on request.")
                 Divider()
                 SettingsRow(title: "Licenses", titleWidth: 118) {
                     SettingsAction(title: "Show") {
@@ -775,8 +814,9 @@ struct GeneralTab: View {
 /// Shared Accessibility permission controls for the cats and scroll features.
 private struct AccessibilityPermissionRow: View {
     @ObservedObject var model: AppModel
+    var info: String? = nil
     var body: some View {
-        SettingsRow(title: "Accessibility") {
+        SettingsRow(title: "Accessibility", info: info) {
             SettingsStatus(text: model.access ? "Allowed" : "Not allowed", ok: model.access)
             if !model.access {
                 SettingsAction(title: "Allow…") {
@@ -820,15 +860,14 @@ struct UpdatesCard: View {
     var body: some View {
         SettingsCard(title: "Updates") {
             if updater.installed {
-                SettingsRow(title: "Check automatically", titleWidth: 118) {
-                    SettingsSwitch(title: "Check automatically", isOn: $updater.enabled).help("Checks the chosen channel 60 seconds after launch and every 3 hours. Never installs on its own.")
+                SettingsRow(title: "Check automatically", titleWidth: 118, info: "Checks the chosen channel 60 seconds after launch and every 3 hours. Never installs on its own.") {
+                    SettingsSwitch(title: "Check automatically", isOn: $updater.enabled)
                 }
                 Divider()
-                SettingsRow(title: "Channel", titleWidth: 118) {
+                SettingsRow(title: "Channel", titleWidth: 118, info: "Stable gets versions that were published after testing. Beta follows main, where new changes arrive first; it may be broken. Going back to Stable updates once stable catches up with the version you run.") {
                     SettingsMenu(options: [("Stable", "stable"), ("Beta (main, for testing)", "main")],
                                  selection: Binding(get: { updater.channel }, set: { updater.setChannel($0) }))
                         .disabled(updater.checking || updater.installing)
-                        .help("Stable gets versions that were published after testing. Beta follows main, where new changes arrive first; it may be broken. Going back to Stable updates once stable catches up with the version you run.")
                 }
                 Divider()
                 if let progress = updater.progress, !progress.failed {
@@ -932,12 +971,13 @@ struct CatsTab: View {
     var body: some View {
         SettingsPage {
             SettingsCard(title: "Menu bar access") {
-                AccessibilityPermissionRow(model: model)
-                SettingsNote(text: "Required for cats to find available menu bar space. Only reads where menus and icons are. No screen capture, no menu text.")
+                AccessibilityPermissionRow(model: model, info: "Required for cats to find available menu bar space. Only reads where menus and icons are. No screen capture, no menu text.")
             }
             SettingsCard(title: "Cats") {
-                SettingsRow(title: "Display") { SettingsMenu(options: displayOptions, selection: displayChoice) }
-                SettingsNote(text: model.moveStatus ?? "Changing the display: the cats run home, then come out on the new menu bar.")
+                SettingsRow(title: "Display", info: "Changing the display: the cats run home, then come out on the new menu bar.") {
+                    SettingsMenu(options: displayOptions, selection: displayChoice)
+                }
+                if let move = model.moveStatus { SettingsNote(text: move) }
                 Divider()
                 SettingsRow(title: "Cats") { SettingsSegments(options: [("1", 1), ("2", 2), ("3", 3)], selection: $count) }
                 Divider()
@@ -947,19 +987,19 @@ struct CatsTab: View {
                 Divider()
                 SettingsRow(title: "Pause") { SettingsSwitch(title: "Pause", isOn: $paused) }
                 Divider()
-                SettingsRow(title: "Pick up") {
-                    SettingsSwitch(title: "Pick up", isOn: $allowDrag).help("Drag a cat with the mouse. It stays inside its own empty space.")
+                SettingsRow(title: "Pick up", info: "Drag a cat with the mouse. It stays inside its own empty space.") {
+                    SettingsSwitch(title: "Pick up", isOn: $allowDrag)
                 }
                 Divider()
-                SettingsRow(title: "Laser pointer") {
-                    SettingsSwitch(title: "Laser pointer", isOn: $laser).help("Press and hold on empty menu bar space: a red dot follows the pointer and the cats chase it.")
+                SettingsRow(title: "Laser pointer", info: "Press and hold on empty menu bar space: a red dot follows the pointer and the cats chase it.") {
+                    SettingsSwitch(title: "Laser pointer", isOn: $laser)
                 }
                 Divider()
                 SettingsRow(title: "Ball color") {
                     SettingsMenu(options: [("Mix it up", -1)] + Toy.colors.enumerated().map { ($0.element, $0.offset) }, selection: $toyColor)
                 }
             }
-            SettingsCard(title: "Your cats") {
+            SettingsCard(title: "Your cats", info: "With the CPU wheel on, one more cat runs in the wheel (up to 4). Picking a color another cat wears swaps the two.") {
                 // Bindings read the lineup by row, and the lineup can shrink before SwiftUI drops the row:
                 // every access is bounds-checked (an out-of-range read crashed the app).
                 ForEach(model.lineup.indices, id: \.self) { i in
@@ -1017,20 +1057,17 @@ struct CatsTab: View {
                         }.disabled(model.shuffling)
                     }.padding(.horizontal, 10).padding(.vertical, 5)
                 }
-                SettingsNote(text: "With the CPU wheel on, one more cat runs in the wheel (up to 4). Picking a color another cat wears swaps the two.")
                 Divider()
-                SettingsRow(title: "Keep my cats") {
+                SettingsRow(title: "Keep my cats", info: "Off: new colors and sizes each launch. On: keep this lineup. Positions are always random.") {
                     SettingsSwitch(title: "Keep my cats at launch", isOn: Binding(get: { model.keepLineup }, set: { model.rememberCats?($0) }))
                 }
-                SettingsNote(text: "Off: new colors and sizes each launch. On: keep this lineup. Positions are always random.")
                 SettingsRow(title: "New lineup") {
                     SettingsAction(title: model.shuffling ? "Shuffling…" : "Shuffle cats") { model.shuffleCats?() }.disabled(model.shuffling)
                         .help("Everyone goes into the tower and comes back out as new cats.")
                 }
                 Divider()
-                SettingsRow(title: "Take turns") {
+                SettingsRow(title: "Take turns", info: "Now and then one cat goes into the tower and a different cat comes out. One cat at a time swaps, never while you play with it. Changing a cat above stops taking turns.") {
                     SettingsSwitch(title: "Take turns", isOn: $rotate)
-                        .help("Now and then one cat goes into the tower and a different cat comes out.")
                 }
                 if rotate {
                     Divider()
@@ -1040,20 +1077,15 @@ struct CatsTab: View {
                     Divider()
                     SettingsRow(title: "This lineup") { SettingsAction(title: "Keep these cats") { model.keepCurrent?() } }
                 }
-                SettingsNote(text: rotate
-                    ? "One cat at a time swaps, never while you play with it. Changing a cat above stops taking turns."
-                    : "Off: the same cats stay out.")
             }
             SettingsCard(title: "Behavior") {
                 SettingsRow(title: "Activity") { SettingsSegments(options: [("Calm", 0), ("Normal", 1), ("Playful", 2)], selection: $activity) }
                 Divider()
-                SettingsRow(title: "Save power") {
+                SettingsRow(title: "Save power", info: "Plenty of CPU headroom: lively cats at full frame rate. As the Mac gets busy, hot or enters Low Power Mode, cats rest more and the app draws and checks less often.") {
                     SettingsSwitch(title: "Save power", isOn: $adaptivePower)
-                        .help("Plenty of CPU headroom: lively cats at full frame rate. As the Mac gets busy, hot or enters Low Power Mode, cats rest more and the app draws and checks less often.")
                 }
                 Divider()
                 SettingsRow(title: "Now") { SettingsStatus(text: model.power.label, ok: model.power == .full) }
-                SettingsNote(text: "When the Mac is busy, cats nap and the app draws less to stay out of the way.")
             }
             SettingsCard(title: "Quiet time") {
                 SettingsRow(title: "Sleep now") { SettingsSwitch(title: "Sleep now", isOn: $quiet) }
@@ -1067,9 +1099,8 @@ struct CatsTab: View {
                 }
             }
             SettingsCard(title: "Troubleshooting") {
-                SettingsRow(title: "Show available space") {
+                SettingsRow(title: "Show available space", info: "Tints the empty menu bar space the cats may use.") {
                     SettingsSwitch(title: "Show available space", isOn: $model.debug)
-                        .help("Tints the empty menu bar space the cats may use.")
                 }
                 Divider()
                 SettingsRow(title: "Log") {
@@ -1101,30 +1132,36 @@ struct MonitorTab: View {
     var body: some View {
         SettingsPage {
             SettingsCard(title: "Menu bar") {
-                SettingsRow(title: "CPU wheel") { SettingsSwitch(title: "CPU wheel", isOn: $cpuWheel) }
+                SettingsRow(title: "CPU wheel", info: "A cat runs in a wheel next to the tower: the busier the Mac, the faster it runs. Under 5 % it naps. Cats take turns at random times, preferring one not out playing.") {
+                    SettingsSwitch(title: "CPU wheel", isOn: $cpuWheel)
+                }
                 if cpuWheel {
                     SettingsRow(title: "Turns (min)") { SettingsSegments(options: [("Off", 0), ("2–6", 1), ("5–15", 2), ("15–30", 3)], selection: $wheelSwapRange) }
-                    SettingsRow(title: "Battery ring") { SettingsSwitch(title: "Battery ring", isOn: $wheelBattery) }.disabled(!hasBattery)
-                    SettingsRow(title: "Mono") { SettingsSwitch(title: "Mono", isOn: $wheelBatteryMono) }.disabled(!hasBattery || !wheelBattery)
-                    SettingsNote(text: hasBattery
+                    SettingsRow(title: "Battery ring", info: hasBattery
                         ? "The band fills clockwise with the charge: green, red at 20 % or less. Mono uses the menu bar's color instead of green and keeps red."
-                        : "No battery: the ring stays plain.")
+                        : "No battery: the ring stays plain.") {
+                        SettingsSwitch(title: "Battery ring", isOn: $wheelBattery).disabled(!hasBattery)
+                    }
+                    SettingsRow(title: "Mono") { SettingsSwitch(title: "Mono", isOn: $wheelBatteryMono) }.disabled(!hasBattery || !wheelBattery)
                 }
-                SettingsNote(text: "A cat runs in a wheel next to the tower: the busier the Mac, the faster it runs. Under 5 % it naps. Cats take turns at random times, preferring one not out playing.")
             }
             SettingsCard(title: "AI Face") {
-                SettingsRow(title: "Stream wheel") { SettingsSwitch(title: "Stream wheel", isOn: $faceStream) }.disabled(!cpuWheel)
-                SettingsNote(text: cpuWheel ? face.note : "Turn on the CPU wheel to stream it to the AI Face board.")
+                SettingsRow(title: "Stream wheel", info: FaceStream.about) {
+                    SettingsSwitch(title: "Stream wheel", isOn: $faceStream).disabled(!cpuWheel)
+                }
+                let note = cpuWheel ? face.note : "Turn on the CPU wheel to stream it to the AI Face board."
+                if !note.isEmpty { SettingsNote(text: note) }
             }
             SettingsCard(title: "Update") {
                 SettingsRow(title: "Every") { SettingsSegments(options: [("1 s", 1.0), ("2 s", 2.0), ("5 s", 5.0)], selection: $interval) }
             }
             SettingsCard(title: "Top apps") {
-                SettingsRow(title: "Show") { SettingsSegments(options: [("Off", 0), ("1", 1), ("2", 2), ("3", 3)], selection: $topApps) }
-                SettingsNote(text: "Apps using the most CPU over the last minute and the most memory now. Helpers count toward their app.")
+                SettingsRow(title: "Show", info: "Apps using the most CPU over the last minute and the most memory now. Helpers count toward their app.") {
+                    SettingsSegments(options: [("Off", 0), ("1", 1), ("2", 2), ("3", 3)], selection: $topApps)
+                }
             }
             SpeedHistoryCard(test: SpeedTest.shared)
-            SettingsCard(title: "Show in the panel") {
+            SettingsCard(title: "Show in the panel", info: "Power shows the battery and how many watts the whole Mac is using. The Wi-Fi name needs Location Services (a macOS rule). Your location is never read.") {
                 SettingsRow(title: "CPU") { SettingsSwitch(title: "CPU", isOn: $showCPU) }
                 Divider()
                 SettingsRow(title: "GPU") { SettingsSwitch(title: "GPU", isOn: $showGPU) }
@@ -1136,7 +1173,6 @@ struct MonitorTab: View {
                 SettingsRow(title: "Power") { SettingsSwitch(title: "Power", isOn: $showBattery) }
                 Divider()
                 SettingsRow(title: "Network") { SettingsSwitch(title: "Network", isOn: $showNetwork) }
-                SettingsNote(text: "Power shows the battery and how many watts the whole Mac is using. The Wi-Fi name needs Location Services (a macOS rule). Your location is never read.")
             }
         }
     }
@@ -1149,11 +1185,10 @@ struct ScrollCards: View {
     var body: some View {
         Group {
             SettingsCard(title: "Scroll direction") {
-                SettingsRow(title: "Reverse") {
-                    SettingsSwitch(title: "Reverse scrolling", isOn: $enabled).help("Sets the scrolling direction of each trackpad, mouse and app separately.")
+                SettingsRow(title: "Reverse", info: "Sets the scrolling direction of each trackpad, mouse and app separately. Based on Scroll Reverser by Nicholas Moore (Apache License 2.0). Details: General → About → Licenses.") {
+                    SettingsSwitch(title: "Reverse scrolling", isOn: $enabled)
                 }
                 SettingsNote(text: note)
-                SettingsNote(text: "Based on Scroll Reverser by Nicholas Moore (Apache License 2.0). Details: General → About → Licenses.")
             }
             SettingsCard(title: "Scroll sources") {
                 if reverser.rows.isEmpty {
@@ -1182,26 +1217,19 @@ struct MenuBarCards: View {
     var body: some View {
         Group {
             SettingsCard(title: "Tidy menu bar") {
-                SettingsRow(title: "Move to panel", titleWidth: 118) {
+                SettingsRow(title: "Move to panel", titleWidth: 118, info: "Picked apps leave the menu bar and show at the top right of the panel; click one there to open its menu. macOS hides whole apps: an app with two icons moves both. Its own icons (clock, Wi-Fi, battery) always stay. Everything shows again while a microphone or camera is in use, and when Cats in Menubar quits. Uses a private macOS 27 interface, as Hidden Bar does (MIT License); details in General → About → Licenses.") {
                     SettingsSwitch(title: "Move picked apps to the panel", isOn: $enabled)
-                        .help("Picked apps leave the menu bar and show at the top right of the panel. Click one there to open its menu.")
                 }
                 SettingsNote(text: tidy.status)
                 Divider()
-                SettingsRow(title: "Tower leftmost", titleWidth: 118) {
+                SettingsRow(title: "Tower leftmost", titleWidth: 118, info: "Other icons, also one opened from the panel, appear right of the tower, away from the cats. The tower is ⌘-dragged there, so the pointer moves for a moment.") {
                     SettingsSwitch(title: "Keep the tower left of other icons", isOn: $leftmost)
                 }
-                SettingsNote(text: "Other icons, also one opened from the panel, appear right of the tower, away from the cats. The tower is ⌘-dragged there, so the pointer moves for a moment.")
                 Divider()
                 SettingsRow(title: "Apps", titleWidth: 118) {
                     SettingsStatus(text: AppPicker.summary(tidy.picked.count))
                     SettingsAction(title: "Choose…") { AppPicker.show(.tidy) }.frame(width: 76)
                 }
-            }
-            SettingsCard(title: "How tidy works") {
-                SettingsNote(text: "macOS hides whole apps: an app with two icons moves both. Its own icons (clock, Wi-Fi, battery) always stay.").padding(.top, 7)
-                SettingsNote(text: "Everything shows again while a microphone or camera is in use, and when Cats in Menubar quits.")
-                SettingsNote(text: "Uses a private macOS 27 interface, as Hidden Bar does (MIT License). Details: General → About → Licenses.")
             }
         }
         .onAppear { tidy.refresh(list: true) }
@@ -1220,32 +1248,24 @@ struct AccessibilityTab: View {
     var body: some View {
         SettingsPage {
             SettingsCard(title: "Accessibility") {
-                AccessibilityPermissionRow(model: model)
-                SettingsNote(text: "Everything on this page needs it, as the cats do.")
+                AccessibilityPermissionRow(model: model, info: "Everything on this page needs it, as the cats do.")
             }
-            SettingsCard(title: "Finder") {
-                SettingsRow(title: "Cut & paste", titleWidth: 118) {
+            SettingsCard(title: "Finder", info: "Renaming and other text fields always get ⌘X and ⌘V unchanged.") {
+                SettingsRow(title: "Cut & paste", titleWidth: 118, info: "⌘X marks the selected files; ⌘V in another folder moves them with Finder's own Move Item Here, so Undo works. ⌘C or Esc cancels.") {
                     SettingsSwitch(title: "Cut and paste files in Finder", isOn: $cutPaste)
-                        .help("⌘X marks the selected files, ⌘V in another folder moves them there.")
                 }
-                SettingsNote(text: "⌘X, then ⌘V moves files with Finder's own Move Item Here, so Undo works. ⌘C or Esc cancels.")
                 Divider()
-                SettingsRow(title: "Paste images", titleWidth: 118) {
+                SettingsRow(title: "Paste images", titleWidth: 118, info: "⌘V in a Finder folder saves a copied image (a screenshot, a picture from a browser) as a PNG file there. Copied files paste as usual.") {
                     SettingsSwitch(title: "Paste copied images as files", isOn: $pasteImages)
-                        .help("⌘V in a Finder folder saves a copied image as a PNG file there.")
                 }
-                SettingsNote(text: "⌘V in a Finder folder saves a copied image as a PNG file. Copied files paste as usual.")
                 if (cutPaste || pasteImages) && !finder.running {
                     SettingsNote(text: "Needs Accessibility access. Check the permission above.")
                 }
-                SettingsNote(text: "Renaming and other text fields always get ⌘X and ⌘V unchanged.")
             }
             SettingsCard(title: "Quit on close") {
-                SettingsRow(title: "Quit on close", titleWidth: 118) {
+                SettingsRow(title: "Quit on close", titleWidth: 118, info: "A picked app quits when you close its last window. Unsaved documents still ask first. Minimized windows, windows on other desktops and hidden apps (⌘H) keep it open.") {
                     SettingsSwitch(title: "Quit picked apps when their last window closes", isOn: $quitOnClose)
                 }
-                SettingsNote(text: "A picked app quits when you close its last window. Unsaved documents still ask first.")
-                SettingsNote(text: "Minimized windows, windows on other desktops and hidden apps (⌘H) keep it open.")
                 Divider()
                 SettingsRow(title: "Apps", titleWidth: 118) {
                     SettingsStatus(text: AppPicker.summary(quitter.picked.count))
@@ -1276,7 +1296,7 @@ enum AppPicker: String {
         case .tidy: AnyView(TidyAppsPicker(tidy: MenuBarTidy.shared))
         }
     }
-    static func summary(_ count: Int) -> String { count == 0 ? "None picked" : count == 1 ? "1 app" : "\(count) apps" }
+    static func summary(_ count: Int) -> String { count == 0 ? "None" : count == 1 ? "1 app" : "\(count) apps" }
 
     /// One window per list: a second click brings the open one forward. It opens beside the window clicked in.
     static func show(_ list: AppPicker) {

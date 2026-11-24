@@ -943,7 +943,7 @@ func testQuitOnClose(_ expect: (@autoclosure () -> Bool, String) -> Void) {
     expect(Pref.defaults[Pref.finderCutPaste] as? Bool == false && Pref.defaults[Pref.finderPasteImages] as? Bool == false
            && Pref.defaults[Pref.quitOnClose] as? Bool == false, "Finder shortcuts and quit on close start off")
     expect(SettingsWindowController.tabs.map(\.0) == ["General", "Cats", "Accessibility", "Monitor"], "scroll and menu bar settings live in the Accessibility tab")
-    expect(AppPicker.summary(0) == "None picked" && AppPicker.summary(1) == "1 app" && AppPicker.summary(4) == "4 apps", "app lists show how many are picked")
+    expect(AppPicker.summary(0) == "None" && AppPicker.summary(1) == "1 app" && AppPicker.summary(4) == "4 apps", "app lists show how many are picked")
 }
 
 /// Fixed GPU states for tests and previews.
