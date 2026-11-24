@@ -140,6 +140,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         updater.start()
         if CommandLine.arguments.contains("--install-self") { updater.installSelf() }
         ScrollDirection.shared.apply()
+        FinderShortcuts.shared.apply()
+        QuitOnClose.shared.apply()
         if !defaults.bool(forKey: "hasLaunched") || !MenuBarMonitor.trusted {
             showSettings(); defaults.set(true, forKey: "hasLaunched")
         }
@@ -194,6 +196,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         if interval != monitorInterval { monitorInterval = interval; system.start(interval: interval) }
         if paused { overlay?.orderOut(nil) } else { scan() }
         ScrollDirection.shared.apply()
+        FinderShortcuts.shared.apply()
+        QuitOnClose.shared.apply()
     }
     /// Minutes out before another cat takes a turn: often, normal, now and then.
     static let rotationPaces: [ClosedRange<Double>] = [300...600, 900...1800, 2700...5400]
@@ -581,8 +585,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         if overCatAllowed != hovering { hovering = overCatAllowed; if !overCatAllowed { NSCursor.arrow.set() } }
     }
     func scan() {
-        // A newly granted Accessibility permission also lets the scroll reverser start.
-        if model.access != MenuBarMonitor.trusted { model.access = MenuBarMonitor.trusted; ScrollDirection.shared.apply() }
+        // A newly granted Accessibility permission also lets the scroll reverser and Finder shortcuts start.
+        if model.access != MenuBarMonitor.trusted { model.access = MenuBarMonitor.trusted; ScrollDirection.shared.apply(); FinderShortcuts.shared.apply(); QuitOnClose.shared.apply() }
         updateDisplay()
         // Their screen was unplugged mid-walk: they finish the walk home on its last layout, unseen.
         if moveTarget != nil, let shown = shownDisplay, Displays.screen(id: shown) == nil { overlay?.orderOut(nil); return }

@@ -799,6 +799,8 @@ func runSelfTests() {
     testUpdateChannels(expect)
     testBatteryTone(expect)
     testSensors(expect)
+    testFinderKeys(expect)
+    testQuitOnClose(expect)
     testWheel(expect)
     testFaceStream(expect)
     testWheelBaton(expect)
@@ -872,6 +874,75 @@ func batteryPreviewStates() -> [(String, SystemStats)] {
     return [("charging-52", charging), ("battery-50", stats(0.50)), ("battery-15", stats(0.15)),
             ("battery-8", stats(0.08)), ("low-power-40", stats(0.40, lowPower: true)), ("adapter-full", stats(1.0, onAC: true)),
             ("adapter-low-power-8", stats(0.08, onAC: true, lowPower: true)), ("no-battery", desktop)]
+}
+
+func testFinderKeys(_ expect: (@autoclosure () -> Bool, String) -> Void) {
+    let cmd = CGEventFlags.maskCommand
+    var on = FinderKeyContext(cutPaste: true, pasteImages: true, finderFront: true)
+    func act(_ key: Int64, _ c: FinderKeyContext, _ flags: CGEventFlags = cmd) -> FinderKeyAction { FinderKeys.action(key: key, flags: flags, c) }
+    expect(act(FinderKeys.x, on) == .cutAsCopy, "⌘X in Finder becomes ⌘C and a cut")
+    expect(act(FinderKeys.v, on) == .pass, "⌘V with no cut and no image is Finder's own paste")
+    on.cutPending = true; on.clipboardHasFiles = true
+    expect(act(FinderKeys.v, on) == .moveHere, "⌘V after a cut moves the files")
+    expect(act(FinderKeys.c, on) == .forgetCut && act(FinderKeys.escape, on, []) == .forgetCut, "⌘C or Esc cancels a cut")
+    expect(act(FinderKeys.v, on, [.maskCommand, .maskAlternate]) == .pass, "⌥⌘V stays Finder's own move")
+    expect(act(FinderKeys.v, on, [.maskCommand, .maskShift]) == .pass, "⇧⌘V is left alone")
+    var editing = on; editing.editingText = true
+    expect(act(FinderKeys.x, editing) == .pass && act(FinderKeys.v, editing) == .pass && act(FinderKeys.escape, editing, []) == .pass,
+           "renaming and search fields keep ⌘X, ⌘V and Esc")
+    var other = on; other.finderFront = false
+    expect(act(FinderKeys.x, other) == .pass && act(FinderKeys.v, other) == .pass, "other apps are never touched")
+    var off = on; off.cutPaste = false; off.pasteImages = false
+    expect(act(FinderKeys.x, off) == .pass && act(FinderKeys.v, off) == .pass, "both settings off: nothing changes")
+    var image = FinderKeyContext(cutPaste: true, pasteImages: true, finderFront: true, clipboardHasImage: true)
+    expect(act(FinderKeys.v, image) == .pasteImage, "⌘V with a copied image saves it as a file")
+    image.clipboardHasFiles = true
+    expect(act(FinderKeys.v, image) == .pass, "copied files (which carry icons as images) paste as files")
+    image.clipboardHasFiles = false; image.pasteImages = false
+    expect(act(FinderKeys.v, image) == .pass, "paste images off: Finder's own paste")
+    var cutOnly = on; cutOnly.cutPaste = false
+    expect(act(FinderKeys.x, cutOnly) == .pass && act(FinderKeys.v, cutOnly) == .pass, "cut and paste off: ⌘X and ⌘V stay Finder's")
+    expect(act(FinderKeys.x, on, []) == .pass, "X without ⌘ is typing")
+    var stale = on; stale.cutPending = false
+    expect(act(FinderKeys.v, stale) == .pass, "a cut is gone once something else was copied")
+    var parts = DateComponents(); parts.year = 2026; parts.month = 11; parts.day = 23; parts.hour = 21; parts.minute = 30; parts.second = 5
+    let date = Calendar.current.date(from: parts)!
+    expect(FinderKeys.imageName(at: date) == "Pasted Image 2026-11-23 at 21.30.05.png", "pasted images are named like screenshots")
+}
+
+func testQuitOnClose(_ expect: (@autoclosure () -> Bool, String) -> Void) {
+    let window = WindowSample(id: 1, pid: 7, layer: 0, onscreen: true, alpha: 1, width: 600, height: 400)
+    expect(QuitOnCloseRules.counts(window, inSpace: { false }), "a visible window keeps its app open")
+    var off = window; off.onscreen = false
+    expect(QuitOnCloseRules.counts(off, inSpace: { true }), "minimized windows and other desktops still belong to a Space")
+    expect(!QuitOnCloseRules.counts(off, inSpace: { false }), "an invisible leftover with no Space does not count (TextEdit keeps one)")
+    var small = window; small.width = 40
+    expect(!QuitOnCloseRules.counts(small, inSpace: { true }), "tiny windows do not count")
+    var clear = window; clear.alpha = 0
+    expect(!QuitOnCloseRules.counts(clear, inSpace: { true }), "transparent windows do not count")
+    var palette = window; palette.layer = 3
+    expect(QuitOnCloseRules.counts(palette, inSpace: { false }), "a visible floating panel keeps its app open")
+    palette.onscreen = false
+    expect(!QuitOnCloseRules.counts(palette, inSpace: { true }), "a hidden floating panel does not")
+    var menu = window; menu.layer = Int(CGWindowLevelForKey(.mainMenuWindow))
+    expect(!QuitOnCloseRules.counts(menu, inSpace: { true }), "menu bar level windows do not count")
+    var asked = false
+    _ = QuitOnCloseRules.counts(window, inSpace: { asked = true; return true })
+    expect(!asked, "on-screen windows never need the Space lookup")
+    let now = Date()
+    typealias R = QuitOnCloseRules
+    expect(R.step(windows: 0, hadWindows: false, hidden: false, emptySince: nil, now: now) == .keep, "an app that never showed a window stays")
+    expect(R.step(windows: 2, hadWindows: true, hidden: false, emptySince: now, now: now) == .keep, "an app with windows stays")
+    expect(R.step(windows: 0, hadWindows: true, hidden: true, emptySince: now.addingTimeInterval(-10), now: now) == .keep, "a hidden app stays")
+    expect(R.step(windows: 0, hadWindows: true, hidden: false, emptySince: nil, now: now) == .wait, "the first empty check only starts the wait")
+    expect(R.step(windows: 0, hadWindows: true, hidden: false, emptySince: now.addingTimeInterval(-1), now: now) == .wait, "a short gap is not a close")
+    expect(R.step(windows: 0, hadWindows: true, hidden: false, emptySince: now.addingTimeInterval(-R.grace), now: now) == .quit, "empty for the grace period quits")
+    expect(!R.pickable(bundle: FinderShortcuts.finderID, policy: .regular, own: "me") && !R.pickable(bundle: "me", policy: .regular, own: "me")
+           && !R.pickable(bundle: "x", policy: .accessory, own: "me") && !R.pickable(bundle: nil, policy: .regular, own: "me")
+           && R.pickable(bundle: "com.apple.TextEdit", policy: .regular, own: "me"), "only regular apps, never Finder or this app")
+    expect(Pref.defaults[Pref.finderCutPaste] as? Bool == false && Pref.defaults[Pref.finderPasteImages] as? Bool == false
+           && Pref.defaults[Pref.quitOnClose] as? Bool == false, "Finder shortcuts and quit on close start off")
+    expect(SettingsWindowController.tabs.map(\.0) == ["General", "Cats", "Accessibility", "Monitor"], "scroll and menu bar settings live in the Accessibility tab")
 }
 
 /// Fixed GPU states for tests and previews.

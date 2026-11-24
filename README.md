@@ -17,8 +17,10 @@ Free and open source. Native Swift, AppKit and SwiftUI. macOS 14 or later.
 - A compact dashboard for CPU, GPU, memory, storage, battery, power use (watts) and network activity.
 - Optional CPU wheel next to the tower: a cat runs faster as the Mac gets busier and naps when it is idle; cats take turns in it every 15 minutes, or carry a cat onto the wheel icon to hand it the turn (Settings > Monitor, off by default).
 - Optional AI Face streaming: the wheel cat also runs on an [AI Face](https://github.com/jason401/ai-face) round LCD board, drawn here and sent through the AI Face app's streaming API (Settings > Monitor > AI Face, off by default; needs AI Face with streaming and its board firmware). A swipe on the board hands the screen back until you switch streaming off and on.
-- Optional menu bar tidy on macOS 27 (Settings > Menu Bar, off by default): picked apps leave the menu bar and show as icons at the top right of the panel; click one to open its own menu. The cats get the freed space, and the tower can keep itself left of other icons so new ones appear away from the cats.
-- Optional scroll direction controls for individual scrolling sources, off by default.
+- Optional menu bar tidy on macOS 27 (Settings > Accessibility, off by default): picked apps leave the menu bar and show as icons at the top right of the panel; click one to open its own menu. The cats get the freed space, and the tower can keep itself left of other icons so new ones appear away from the cats.
+- Optional scroll direction controls for individual scrolling sources, off by default (Settings > Accessibility).
+- Optional Finder shortcuts (Settings > Accessibility, off by default): ⌘X then ⌘V moves files using Finder's own Move Item Here, so Undo works; ⌘V in a folder can save a copied image as a PNG file.
+- Optional quit on close (Settings > Accessibility, off by default): apps you pick quit when their last window closes. Minimized windows, windows on other desktops and hidden apps keep them open.
 - Adaptive animation rates for system load, temperature and Low Power Mode; optional launch at login.
 
 ## Download and install
@@ -109,6 +111,8 @@ For development work, check out `main`. Build outputs and previews stay in ignor
 - The dashboard reads local system/process/network statistics. GPU load and power use are read-only IOKit lookups (the GPU driver's statistics and the SMC power sensor); nothing is written to the hardware. Optional Location permission is requested to display the Wi-Fi network name; the app does not request location coordinates.
 - The optional menu bar tidy asks macOS 27 to hide the picked apps through a private interface (the menu bar restriction behind assessment mode, as Hidden Bar does). It watches for clicks on the clock so Notification Center still opens, reads whether a microphone or camera is in use (not what it records) so the recording indicator is never hidden, and with "Tower leftmost" on it ⌘-drags its own tower icon, which moves the pointer for a moment. Everything shows again when the app quits. It needs the app in /Applications.
 - The optional scroll feature observes scrolling events to identify their source and change their direction. It is not a keystroke logger.
+- The optional Finder shortcuts watch for ⌘X, ⌘C, ⌘V and Esc only while Finder is in front, and ask Accessibility whether a text field is being edited. Other keys pass through untouched. A pasted image is saved to the app's cache folder before Finder copies it in, and the clipboard is put back afterwards.
+- The optional quit on close reads the window server's list of windows (positions, sizes, layers, not contents or titles) once a second while a picked app runs, and asks which desktop a window is on through a private macOS call.
 - The speed test in the panel (Wi-Fi → Test) runs macOS's `networkQuality`, which contacts Apple's test servers and fills the connection for about 20 seconds. It runs only when clicked.
 - The installed app's update checks contact GitHub and download repository data. Clicking **Update Now** runs the repository's build and test scripts locally. The previous README's claim of no network requests was inaccurate.
 - Preferences, diagnostics and update files remain on your Mac. Avoid posting raw dashboard screenshots or logs containing network names, local IPs, process names or local paths.

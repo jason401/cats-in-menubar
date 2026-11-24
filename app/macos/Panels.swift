@@ -26,11 +26,15 @@ enum Pref {
     static let tidy = "menuBarTidy"                 // picked apps leave the menu bar and show in the panel (macOS 27)
     static let tidyApps = "menuBarTidyApps"         // their bundle ids, in panel order
     static let tidyLeftmost = "menuBarTidyLeftmost" // keep the tower left of every other icon while tidying
+    static let finderCutPaste = "finderCutPaste"       // ⌘X then ⌘V moves files in Finder (FinderShortcuts)
+    static let finderPasteImages = "finderPasteImages" // ⌘V in Finder saves a copied image as a PNG file
+    static let quitOnClose = "quitOnClose"             // picked apps quit when their last window closes (QuitOnClose)
+    static let quitOnCloseApps = "quitOnCloseApps"     // their bundle ids
     static let defaults: [String: Any] = [
         count: 3, fixedLineup: false, rotate: false, rotatePace: 1, paused: false, quiet: false, activity: 1, adaptivePower: true, allowDrag: true,
         nightQuiet: false, nightFrom: 23, nightTo: 7, interval: 2.0, topApps: 2, toyColor: -1, laser: true, scrollReverse: false, display: "",
         showCPU: true, showGPU: true, showMemory: true, showDisk: true, showBattery: true, showNetwork: true, cpuWheel: false, wheelSwapRange: WheelShift.defaultRange, wheelBattery: true, wheelBatteryMono: false, faceStream: false,
-        tidy: false, tidyLeftmost: true,
+        tidy: false, tidyLeftmost: true, finderCutPaste: false, finderPasteImages: false, quitOnClose: false,
     ]
 }
 
@@ -1139,16 +1143,11 @@ struct MonitorTab: View {
 }
 
 /// Scroll Reverser's settings: one switch, then each scrolling source that has been used, with its direction.
-struct ScrollTab: View {
-    @ObservedObject var model: AppModel
+struct ScrollCards: View {
     @ObservedObject var reverser: ScrollDirection
     @AppStorage(Pref.scrollReverse) private var enabled = false
     var body: some View {
-        SettingsPage {
-            SettingsCard(title: "Accessibility") {
-                AccessibilityPermissionRow(model: model)
-                SettingsNote(text: "Required to change scrolling direction. This is the same permission used by the cats.")
-            }
+        Group {
             SettingsCard(title: "Scroll direction") {
                 SettingsRow(title: "Reverse") {
                     SettingsSwitch(title: "Reverse scrolling", isOn: $enabled).help("Sets the scrolling direction of each trackpad, mouse and app separately.")
@@ -1156,7 +1155,7 @@ struct ScrollTab: View {
                 SettingsNote(text: note)
                 SettingsNote(text: "Based on Scroll Reverser by Nicholas Moore (Apache License 2.0). Details: General → About → Licenses.")
             }
-            SettingsCard(title: "Sources") {
+            SettingsCard(title: "Scroll sources") {
                 if reverser.rows.isEmpty {
                     SettingsNote(text: "Scroll with each trackpad or mouse and it appears here. New trackpads start Natural, mice Classic.")
                 }
@@ -1175,17 +1174,13 @@ struct ScrollTab: View {
     }
 }
 
-struct MenuBarTab: View {
-    @ObservedObject var model: AppModel
+/// Menu bar tidy (macOS 27): picked apps leave the menu bar and show in the panel.
+struct MenuBarCards: View {
     @ObservedObject var tidy: MenuBarTidy
     @AppStorage(Pref.tidy) private var enabled = false
     @AppStorage(Pref.tidyLeftmost) private var leftmost = true
     var body: some View {
-        SettingsPage {
-            SettingsCard(title: "Accessibility") {
-                AccessibilityPermissionRow(model: model)
-                SettingsNote(text: "Needed to find menu bar apps and open a hidden app's menu from the panel.")
-            }
+        Group {
             SettingsCard(title: "Tidy menu bar") {
                 SettingsRow(title: "Move to panel", titleWidth: 118) {
                     SettingsSwitch(title: "Move picked apps to the panel", isOn: $enabled)
@@ -1217,13 +1212,76 @@ struct MenuBarTab: View {
                     SettingsNote(text: "macOS may hide these too while apps are hidden, as they run from outside Applications: \(tidy.unknownToMacOS.joined(separator: ", ")).")
                 }
             }
-            SettingsCard(title: "How it works") {
+            SettingsCard(title: "How tidy works") {
                 SettingsNote(text: "macOS hides whole apps: an app with two icons moves both. Its own icons (clock, Wi-Fi, battery) always stay.").padding(.top, 7)
                 SettingsNote(text: "Everything shows again while a microphone or camera is in use, and when Cats in Menubar quits.")
                 SettingsNote(text: "Uses a private macOS 27 interface, as Hidden Bar does (MIT License). Details: General → About → Licenses.")
             }
         }
         .onAppear { tidy.refresh(list: true) }
+    }
+}
+
+/// Everything that works through the Accessibility permission: Finder shortcuts, quitting on close,
+/// scroll direction and the menu bar tidy.
+struct AccessibilityTab: View {
+    @ObservedObject var model: AppModel
+    @ObservedObject var finder: FinderShortcuts
+    @ObservedObject var quitter: QuitOnClose
+    @AppStorage(Pref.finderCutPaste) private var cutPaste = false
+    @AppStorage(Pref.finderPasteImages) private var pasteImages = false
+    @AppStorage(Pref.quitOnClose) private var quitOnClose = false
+    var body: some View {
+        SettingsPage {
+            SettingsCard(title: "Accessibility") {
+                AccessibilityPermissionRow(model: model)
+                SettingsNote(text: "Everything on this page needs it, as the cats do.")
+            }
+            SettingsCard(title: "Finder") {
+                SettingsRow(title: "Cut & paste", titleWidth: 118) {
+                    SettingsSwitch(title: "Cut and paste files in Finder", isOn: $cutPaste)
+                        .help("⌘X marks the selected files, ⌘V in another folder moves them there.")
+                }
+                SettingsNote(text: "⌘X, then ⌘V moves files with Finder's own Move Item Here, so Undo works. ⌘C or Esc cancels.")
+                Divider()
+                SettingsRow(title: "Paste images", titleWidth: 118) {
+                    SettingsSwitch(title: "Paste copied images as files", isOn: $pasteImages)
+                        .help("⌘V in a Finder folder saves a copied image as a PNG file there.")
+                }
+                SettingsNote(text: "⌘V in a Finder folder saves a copied image as a PNG file. Copied files paste as usual.")
+                if (cutPaste || pasteImages) && !finder.running {
+                    SettingsNote(text: "Needs Accessibility access. Check the permission above.")
+                }
+                SettingsNote(text: "Renaming and other text fields always get ⌘X and ⌘V unchanged.")
+            }
+            SettingsCard(title: "Quit on close") {
+                SettingsRow(title: "Quit on close", titleWidth: 118) {
+                    SettingsSwitch(title: "Quit picked apps when their last window closes", isOn: $quitOnClose)
+                }
+                SettingsNote(text: "A picked app quits when you close its last window. Unsaved documents still ask first.")
+                SettingsNote(text: "Minimized windows, windows on other desktops and hidden apps (⌘H) keep it open.")
+            }
+            SettingsCard(title: "Apps to quit on close") {
+                if quitter.apps.isEmpty {
+                    SettingsNote(text: "Open the apps you want here, then pick them.").padding(.top, 7)
+                }
+                ForEach(quitter.apps) { app in
+                    if app.id != quitter.apps.first?.id { Divider() }
+                    HStack(spacing: 8) {
+                        Image(nsImage: app.icon).resizable().frame(width: 16, height: 16)
+                        Text(app.name).lineLimit(1)
+                        if !app.running { Text("not running").font(.system(size: 10)).foregroundStyle(.secondary) }
+                        Spacer(minLength: 0)
+                        Toggle(app.name, isOn: Binding(get: { quitter.picked.contains(app.id) }, set: { quitter.setPicked(app.id, $0) }))
+                            .labelsHidden().toggleStyle(.switch)
+                    }.padding(.horizontal, 10).padding(.vertical, 4)
+                }
+            }
+            .disabled(!quitOnClose)
+            .onAppear { quitter.refreshApps() }
+            ScrollCards(reverser: ScrollDirection.shared)
+            MenuBarCards(tidy: MenuBarTidy.shared)
+        }
     }
 }
 
@@ -1268,7 +1326,7 @@ private struct ScrollSourceView: View {
 /// Toolbar tabs in a fixed-size settings window.
 final class SettingsWindowController: NSObject {
     static let size = NSSize(width: 334, height: 460)
-    static let tabs: [(String, String)] = [("General", "gearshape"), ("Cats", "pawprint"), ("Menu Bar", "menubar.rectangle"), ("Scroll", "arrow.up.arrow.down"), ("Monitor", "gauge.with.dots.needle.33percent")]
+    static let tabs: [(String, String)] = [("General", "gearshape"), ("Cats", "pawprint"), ("Accessibility", "accessibility"), ("Monitor", "gauge.with.dots.needle.33percent")]
     let model: AppModel
     let state = SettingsState()
     private(set) var window: NSWindow?
@@ -1278,8 +1336,7 @@ final class SettingsWindowController: NSObject {
         switch index {
         case 0: AnyView(GeneralTab(model: model, state: state))
         case 1: AnyView(CatsTab(model: model))
-        case 2: AnyView(MenuBarTab(model: model, tidy: MenuBarTidy.shared))
-        case 3: AnyView(ScrollTab(model: model, reverser: ScrollDirection.shared))
+        case 2: AnyView(AccessibilityTab(model: model, finder: FinderShortcuts.shared, quitter: QuitOnClose.shared))
         default: AnyView(MonitorTab())
         }
     }
