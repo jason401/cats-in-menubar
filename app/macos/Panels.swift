@@ -1192,24 +1192,10 @@ struct MenuBarCards: View {
                     SettingsSwitch(title: "Keep the tower left of other icons", isOn: $leftmost)
                 }
                 SettingsNote(text: "Other icons, also one opened from the panel, appear right of the tower, away from the cats. The tower is ⌘-dragged there, so the pointer moves for a moment.")
-            }
-            SettingsCard(title: "Apps in the panel") {
-                if tidy.menuBarApps.isEmpty {
-                    SettingsNote(text: "No menu bar apps found yet.").padding(.top, 7)
-                }
-                ForEach(tidy.menuBarApps) { app in
-                    if app.id != tidy.menuBarApps.first?.id { Divider() }
-                    HStack(spacing: 8) {
-                        Image(nsImage: app.icon).resizable().frame(width: 16, height: 16)
-                        Text(app.name).lineLimit(1)
-                        if !app.running { Text("not running").font(.system(size: 10)).foregroundStyle(.secondary) }
-                        Spacer(minLength: 0)
-                        Toggle(app.name, isOn: Binding(get: { tidy.picked.contains(app.id) }, set: { tidy.setPicked(app.id, $0) }))
-                            .labelsHidden().toggleStyle(.switch)
-                    }.padding(.horizontal, 10).padding(.vertical, 4)
-                }
-                if !tidy.unknownToMacOS.isEmpty {
-                    SettingsNote(text: "macOS may hide these too while apps are hidden, as they run from outside Applications: \(tidy.unknownToMacOS.joined(separator: ", ")).")
+                Divider()
+                SettingsRow(title: "Apps", titleWidth: 118) {
+                    SettingsStatus(text: AppPicker.summary(tidy.picked.count))
+                    SettingsAction(title: "Choose…") { AppPicker.show(.tidy) }.frame(width: 76)
                 }
             }
             SettingsCard(title: "How tidy works") {
@@ -1260,28 +1246,114 @@ struct AccessibilityTab: View {
                 }
                 SettingsNote(text: "A picked app quits when you close its last window. Unsaved documents still ask first.")
                 SettingsNote(text: "Minimized windows, windows on other desktops and hidden apps (⌘H) keep it open.")
-            }
-            SettingsCard(title: "Apps to quit on close") {
-                if quitter.apps.isEmpty {
-                    SettingsNote(text: "Open the apps you want here, then pick them.").padding(.top, 7)
+                Divider()
+                SettingsRow(title: "Apps", titleWidth: 118) {
+                    SettingsStatus(text: AppPicker.summary(quitter.picked.count))
+                    SettingsAction(title: "Choose…") { AppPicker.show(.quitOnClose) }.frame(width: 76)
                 }
-                ForEach(quitter.apps) { app in
-                    if app.id != quitter.apps.first?.id { Divider() }
+            }
+            ScrollCards(reverser: ScrollDirection.shared)
+            MenuBarCards(tidy: MenuBarTidy.shared)
+        }
+    }
+}
+
+/// App lists open in their own small window from a Choose… button, so the settings page stays short.
+enum AppPicker: String {
+    case quitOnClose, tidy
+    static let size = NSSize(width: 320, height: 440)
+    private static var windows: [AppPicker: NSWindow] = [:]
+
+    var title: String {
+        switch self {
+        case .quitOnClose: "Apps to quit on close"
+        case .tidy: "Apps in the panel"
+        }
+    }
+    var view: AnyView {
+        switch self {
+        case .quitOnClose: AnyView(QuitAppsPicker(quitter: QuitOnClose.shared))
+        case .tidy: AnyView(TidyAppsPicker(tidy: MenuBarTidy.shared))
+        }
+    }
+    static func summary(_ count: Int) -> String { count == 0 ? "None picked" : count == 1 ? "1 app" : "\(count) apps" }
+
+    /// One window per list: a second click brings the open one forward. It opens beside the window clicked in.
+    static func show(_ list: AppPicker) {
+        NSApp.activate(ignoringOtherApps: true)
+        if let window = windows[list] { window.makeKeyAndOrderFront(nil); return }
+        let host = NSHostingController(rootView: list.view.frame(width: size.width, height: size.height))
+        host.sizingOptions = []
+        host.view.frame = NSRect(origin: .zero, size: size)
+        let window = NSWindow(contentViewController: host)
+        window.title = list.title
+        window.styleMask = [.titled, .closable]
+        window.setContentSize(size)
+        window.isReleasedWhenClosed = false
+        window.center()
+        if let parent = NSApp.keyWindow, let screen = parent.screen?.visibleFrame {
+            let origin = NSPoint(x: parent.frame.maxX + 12, y: parent.frame.maxY - window.frame.height)
+            if origin.x + window.frame.width <= screen.maxX && origin.y >= screen.minY { window.setFrameOrigin(origin) }
+        }
+        windows[list] = window
+        window.makeKeyAndOrderFront(nil)
+    }
+}
+
+/// The search text lives in a class: the Command Line Tools toolchain lacks the macro plugin behind @State.
+private final class PickerSearch: ObservableObject { @Published var text = "" }
+
+/// A searchable list of apps with a switch each.
+struct AppPickerList: View {
+    let apps: [TidyApp]
+    let picked: [String]
+    let empty: String
+    var footer: String? = nil
+    let setPicked: (String, Bool) -> Void
+    @StateObject private var search = PickerSearch()
+    var body: some View {
+        let query = search.text.trimmingCharacters(in: .whitespaces)
+        let shown = query.isEmpty ? apps : apps.filter { $0.name.localizedCaseInsensitiveContains(query) }
+        SettingsPage {
+            TextField("Search apps", text: $search.text).textFieldStyle(.roundedBorder)
+            SettingsCard(title: AppPicker.summary(apps.filter { picked.contains($0.id) }.count)) {
+                if shown.isEmpty {
+                    SettingsNote(text: apps.isEmpty ? empty : "No app matches “\(query)”.").padding(.top, 7)
+                }
+                ForEach(shown) { app in
+                    if app.id != shown.first?.id { Divider() }
                     HStack(spacing: 8) {
                         Image(nsImage: app.icon).resizable().frame(width: 16, height: 16)
                         Text(app.name).lineLimit(1)
                         if !app.running { Text("not running").font(.system(size: 10)).foregroundStyle(.secondary) }
                         Spacer(minLength: 0)
-                        Toggle(app.name, isOn: Binding(get: { quitter.picked.contains(app.id) }, set: { quitter.setPicked(app.id, $0) }))
+                        Toggle(app.name, isOn: Binding(get: { picked.contains(app.id) }, set: { setPicked(app.id, $0) }))
                             .labelsHidden().toggleStyle(.switch)
                     }.padding(.horizontal, 10).padding(.vertical, 4)
                 }
             }
-            .disabled(!quitOnClose)
-            .onAppear { quitter.refreshApps() }
-            ScrollCards(reverser: ScrollDirection.shared)
-            MenuBarCards(tidy: MenuBarTidy.shared)
+            if let footer { SettingsNote(text: footer).padding(.horizontal, -10) }
         }
+    }
+}
+
+struct QuitAppsPicker: View {
+    @ObservedObject var quitter: QuitOnClose
+    var body: some View {
+        AppPickerList(apps: quitter.apps, picked: quitter.picked, empty: "Open the apps you want here, then pick them.",
+                      footer: "Only open apps with a Dock icon are listed. Finder is never quit.", setPicked: quitter.setPicked)
+            .onAppear { quitter.refreshApps() }
+    }
+}
+
+struct TidyAppsPicker: View {
+    @ObservedObject var tidy: MenuBarTidy
+    var body: some View {
+        AppPickerList(apps: tidy.menuBarApps, picked: tidy.picked, empty: "No menu bar apps found yet.",
+                      footer: tidy.unknownToMacOS.isEmpty ? nil
+                        : "macOS may hide these too while apps are hidden, as they run from outside Applications: \(tidy.unknownToMacOS.joined(separator: ", ")).",
+                      setPicked: tidy.setPicked)
+            .onAppear { tidy.refresh(list: true) }
     }
 }
 

@@ -943,6 +943,7 @@ func testQuitOnClose(_ expect: (@autoclosure () -> Bool, String) -> Void) {
     expect(Pref.defaults[Pref.finderCutPaste] as? Bool == false && Pref.defaults[Pref.finderPasteImages] as? Bool == false
            && Pref.defaults[Pref.quitOnClose] as? Bool == false, "Finder shortcuts and quit on close start off")
     expect(SettingsWindowController.tabs.map(\.0) == ["General", "Cats", "Accessibility", "Monitor"], "scroll and menu bar settings live in the Accessibility tab")
+    expect(AppPicker.summary(0) == "None picked" && AppPicker.summary(1) == "1 app" && AppPicker.summary(4) == "4 apps", "app lists show how many are picked")
 }
 
 /// Fixed GPU states for tests and previews.
@@ -1044,6 +1045,11 @@ func renderPanels(to directory: String) {
         let view = NSHostingView(rootView: controller.view(for: index))
         view.frame = NSRect(origin: .zero, size: SettingsWindowController.size)
         save(view, "settings-\(tab.0)")
+    }
+    for list in [AppPicker.quitOnClose, .tidy] {
+        let view = NSHostingView(rootView: list.view.frame(width: AppPicker.size.width, height: AppPicker.size.height))
+        view.frame = NSRect(origin: .zero, size: AppPicker.size)
+        save(view, "settings-apps-\(list.rawValue)")
     }
     // With the CPU wheel on, Your cats shows the wheel cat as a fourth row.
     model.wheelCat = CatAppearance(coat: 3, size: .young)
