@@ -22,14 +22,14 @@ enum Pref {
     static let wheelBattery = "wheelBattery"         // the wheel's band shows the battery charge
     static let wheelBatteryMono = "wheelBatteryMono" // that gauge in the menu bar's color instead of green
     static let faceStream = "aiFaceStream"           // the wheel also shows on the AI Face board (FaceStream)
-    static let showCPU = "showCPU", showMemory = "showMemory", showDisk = "showDisk", showBattery = "showBattery", showNetwork = "showNetwork"
+    static let showCPU = "showCPU", showGPU = "showGPU", showMemory = "showMemory", showDisk = "showDisk", showBattery = "showBattery", showNetwork = "showNetwork"
     static let tidy = "menuBarTidy"                 // picked apps leave the menu bar and show in the panel (macOS 27)
     static let tidyApps = "menuBarTidyApps"         // their bundle ids, in panel order
     static let tidyLeftmost = "menuBarTidyLeftmost" // keep the tower left of every other icon while tidying
     static let defaults: [String: Any] = [
         count: 3, fixedLineup: false, rotate: false, rotatePace: 1, paused: false, quiet: false, activity: 1, adaptivePower: true, allowDrag: true,
         nightQuiet: false, nightFrom: 23, nightTo: 7, interval: 2.0, topApps: 2, toyColor: -1, laser: true, scrollReverse: false, display: "",
-        showCPU: true, showMemory: true, showDisk: true, showBattery: true, showNetwork: true, cpuWheel: false, wheelSwapRange: WheelShift.defaultRange, wheelBattery: true, wheelBatteryMono: false, faceStream: false,
+        showCPU: true, showGPU: true, showMemory: true, showDisk: true, showBattery: true, showNetwork: true, cpuWheel: false, wheelSwapRange: WheelShift.defaultRange, wheelBattery: true, wheelBatteryMono: false, faceStream: false,
         tidy: false, tidyLeftmost: true,
     ]
 }
@@ -46,6 +46,8 @@ private func rate(_ value: Double) -> String {
     return "\(number) \(units[unit])/s"
 }
 private func percent(_ value: Double) -> String { String(format: "%.1f%%", value * 100) }
+/// "7.4 W", "112 W": one decimal while it still reads at a glance.
+func watts(_ value: Double) -> String { value < 100 ? String(format: "%.1f W", value) : String(format: "%.0f W", value) }
 
 // MARK: Dashboard (opens from the menu bar icon)
 
@@ -54,6 +56,7 @@ struct DashboardView: View {
     @ObservedObject var system: SystemMonitor
     @AppStorage(Pref.paused) private var paused = false
     @AppStorage(Pref.showCPU) private var showCPU = true
+    @AppStorage(Pref.showGPU) private var showGPU = true
     @AppStorage(Pref.showMemory) private var showMemory = true
     @AppStorage(Pref.showDisk) private var showDisk = true
     @AppStorage(Pref.showBattery) private var showBattery = true
@@ -98,6 +101,9 @@ struct DashboardView: View {
                         }
                         Sparkline(values: system.cpuHistory).frame(height: 22).padding(.top, 2)
                     }
+                }
+                if showGPU, let gpu = s.gpu {
+                    GPUSection(gpu: gpu)
                 }
                 if showMemory {
                     StatSection(icon: "square.stack.3d.up.fill", title: "Memory: \(percent(s.memoryUsed / max(1, s.memoryTotal)))", open: openActivityMonitor) {
@@ -444,6 +450,22 @@ enum BatteryTone: Equatable {
     }
 }
 
+/// GPU load: the device total in the title and meter, the renderer and tiler beside it when reported.
+struct GPUSection: View {
+    let gpu: GPULoad
+    var body: some View {
+        StatSection(icon: "cube.transparent", title: "GPU: \(percent(gpu.device))", open: openActivityMonitor) {
+            if gpu.renderer != nil || gpu.tiler != nil {
+                HStack(spacing: 10) {
+                    if let renderer = gpu.renderer { Detail("Renderer", percent(renderer)).frame(width: detailColumn, alignment: .leading) }
+                    if let tiler = gpu.tiler { Detail("Tiler", percent(tiler)) }
+                }
+            }
+            Meter(value: gpu.device)
+        }
+    }
+}
+
 struct BatterySection: View {
     let stats: SystemStats
     var body: some View {
@@ -453,10 +475,13 @@ struct BatterySection: View {
             StatSection(icon: BatteryTone.icon(s), title: "Battery: \(BatteryTone.percent(s))%", open: { openSystemSettings("com.apple.Battery-Settings.extension") }, help: "Open Battery settings",
                         titleColor: tone == .red ? .red : .primary) {
                 Detail(nil, s.charging ? "Charging" : (s.onAC ? "On power adapter" : (s.lowPowerMode ? "On battery · Low Power Mode" : "On battery")))
+                if let power = s.power { Detail("Using", watts(power)) }
                 Meter(value: s.batteryLevel, tint: tone.color)
             }
         } else {
-            StatSection(icon: "bolt.fill", title: "Power: Adapter", open: { openSystemSettings("com.apple.Battery-Settings.extension") }, help: "Open Energy settings") { EmptyView() }
+            StatSection(icon: "bolt.fill", title: "Power: Adapter", open: { openSystemSettings("com.apple.Battery-Settings.extension") }, help: "Open Energy settings") {
+                if let power = s.power { Detail("Using", watts(power)) }
+            }
         }
     }
 }
@@ -1056,6 +1081,7 @@ struct MonitorTab: View {
     @AppStorage(Pref.interval) private var interval = 2.0
     @AppStorage(Pref.topApps) private var topApps = 2
     @AppStorage(Pref.showCPU) private var showCPU = true
+    @AppStorage(Pref.showGPU) private var showGPU = true
     @AppStorage(Pref.showMemory) private var showMemory = true
     @AppStorage(Pref.showDisk) private var showDisk = true
     @AppStorage(Pref.showBattery) private var showBattery = true
@@ -1097,6 +1123,8 @@ struct MonitorTab: View {
             SettingsCard(title: "Show in the panel") {
                 SettingsRow(title: "CPU") { SettingsSwitch(title: "CPU", isOn: $showCPU) }
                 Divider()
+                SettingsRow(title: "GPU") { SettingsSwitch(title: "GPU", isOn: $showGPU) }
+                Divider()
                 SettingsRow(title: "Memory") { SettingsSwitch(title: "Memory", isOn: $showMemory) }
                 Divider()
                 SettingsRow(title: "Storage") { SettingsSwitch(title: "Storage", isOn: $showDisk) }
@@ -1104,7 +1132,7 @@ struct MonitorTab: View {
                 SettingsRow(title: "Power") { SettingsSwitch(title: "Power", isOn: $showBattery) }
                 Divider()
                 SettingsRow(title: "Network") { SettingsSwitch(title: "Network", isOn: $showNetwork) }
-                SettingsNote(text: "The Wi-Fi name needs Location Services (a macOS rule). Your location is never read.")
+                SettingsNote(text: "Power shows the battery and how many watts the whole Mac is using. The Wi-Fi name needs Location Services (a macOS rule). Your location is never read.")
             }
         }
     }

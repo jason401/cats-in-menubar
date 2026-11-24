@@ -187,6 +187,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         habitatView?.showLanes = model.debug
         system.wantsApps = defaults.integer(forKey: Pref.topApps) > 0 && (defaults.bool(forKey: Pref.showCPU) || defaults.bool(forKey: Pref.showMemory))
         system.wantsWiFi = defaults.bool(forKey: Pref.showNetwork)
+        system.wantsGPU = defaults.bool(forKey: Pref.showGPU)
+        system.wantsPower = defaults.bool(forKey: Pref.showBattery)
         systemUpdated(system.stats)
         let interval = max(defaults.double(forKey: Pref.interval), model.power.sampleFloor)
         if interval != monitorInterval { monitorInterval = interval; system.start(interval: interval) }

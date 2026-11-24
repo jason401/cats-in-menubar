@@ -2,8 +2,8 @@ import Foundation
 import IOKit.ps
 import SystemConfiguration
 
-// Local system readings from public macOS APIs. Nothing is sent anywhere. Only the Wi-Fi name needs a
-// permission (Location Services); everything else works without one.
+// Local system readings from macOS APIs (GPU and power through read-only IOKit, see Sensors). Nothing is
+// sent anywhere. Only the Wi-Fi name needs a permission (Location Services); everything else works without one.
 struct SystemStats {
     var cpuUser = 0.0, cpuSystem = 0.0, cpuIdle = 1.0
     var cpu: Double { cpuUser + cpuSystem }
@@ -19,6 +19,8 @@ struct SystemStats {
     var networkName = "—", localIP = "—"
     var upload = 0.0, download = 0.0          // bytes per second
     var thermal = ProcessInfo.ThermalState.nominal
+    var gpu: GPULoad?                         // nil when no GPU reports statistics
+    var power: Double?                        // whole-Mac power use in watts, nil without a sensor
 }
 
 final class SystemMonitor: ObservableObject {
@@ -39,7 +41,7 @@ final class SystemMonitor: ObservableObject {
     /// read every 5 s (so the one-minute average is ready when the panel opens) and Wi-Fi every 10 s
     /// (so the panel opens at its final size).
     var detailed = false
-    var wantsApps = true, wantsWiFi = true
+    var wantsApps = true, wantsWiFi = true, wantsGPU = true, wantsPower = true
 
     func start(interval: Double) {
         timer?.invalidate()
@@ -67,6 +69,8 @@ final class SystemMonitor: ObservableObject {
         if !wantsWiFi { next.wifi = nil }
         else if detailed || now.timeIntervalSince(lastWiFi) >= 10 { next.wifi = WiFiInfo.read(); lastWiFi = now }
         next.thermal = ProcessInfo.processInfo.thermalState
+        if wantsGPU { next.gpu = Sensors.gpu() } else { next.gpu = nil }
+        if wantsPower { next.power = Sensors.power() } else { next.power = nil }
         stats = next
         cpuHistory.append(next.cpu)
         if cpuHistory.count > 60 { cpuHistory.removeFirst(cpuHistory.count - 60) }

@@ -798,6 +798,7 @@ func runSelfTests() {
     testUpdateProgress(expect)
     testUpdateChannels(expect)
     testBatteryTone(expect)
+    testSensors(expect)
     testWheel(expect)
     testFaceStream(expect)
     testWheelBaton(expect)
@@ -866,9 +867,35 @@ func batteryPreviewStates() -> [(String, SystemStats)] {
         s.hasBattery = battery; s.batteryLevel = level; s.charging = charging; s.onAC = onAC; s.lowPowerMode = lowPower
         return s
     }
-    return [("charging-52", stats(0.52, charging: true, onAC: true)), ("battery-50", stats(0.50)), ("battery-15", stats(0.15)),
+    var charging = stats(0.52, charging: true, onAC: true); charging.power = 18.4
+    var desktop = stats(0, onAC: true, battery: false); desktop.power = 7.2
+    return [("charging-52", charging), ("battery-50", stats(0.50)), ("battery-15", stats(0.15)),
             ("battery-8", stats(0.08)), ("low-power-40", stats(0.40, lowPower: true)), ("adapter-full", stats(1.0, onAC: true)),
-            ("adapter-low-power-8", stats(0.08, onAC: true, lowPower: true)), ("no-battery", stats(0, onAC: true, battery: false))]
+            ("adapter-low-power-8", stats(0.08, onAC: true, lowPower: true)), ("no-battery", desktop)]
+}
+
+/// Fixed GPU states for tests and previews.
+func gpuPreviewStates() -> [(String, GPULoad)] {
+    [("idle", GPULoad(device: 0.03, renderer: 0.02, tiler: 0.01)), ("busy", GPULoad(device: 0.95, renderer: 0.93, tiler: 0.4)),
+     ("device-only", GPULoad(device: 0.42, renderer: nil, tiler: nil))]
+}
+
+func testSensors(_ expect: (@autoclosure () -> Bool, String) -> Void) {
+    let load = Sensors.gpuLoad(from: ["Device Utilization %": 37, "Renderer Utilization %": 36, "Tiler Utilization %": 5])
+    expect(load == GPULoad(device: 0.37, renderer: 0.36, tiler: 0.05), "GPU percentages become shares")
+    expect(Sensors.gpuLoad(from: ["Renderer Utilization %": 50]) == nil, "no device share, no GPU reading")
+    expect(Sensors.gpuLoad(from: ["Device Utilization %": 140])?.device == 1, "GPU share is capped at 100 %")
+    expect(Sensors.gpuLoad(from: ["Device Utilization %": 12])?.renderer == nil, "renderer and tiler are optional")
+    expect(Sensors.plausibleWatts(15.7) == 15.7 && Sensors.plausibleWatts(0) == nil && Sensors.plausibleWatts(-3) == nil
+           && Sensors.plausibleWatts(.nan) == nil && Sensors.plausibleWatts(800) == nil && Sensors.plausibleWatts(nil) == nil,
+           "only 0–500 W counts as a power reading")
+    expect(Sensors.systemLoadWatts(["SystemLoad": 17421]) == 17.421 && Sensors.systemLoadWatts([:]) == nil, "battery gauge load is in milliwatts")
+    expect(SMC.code("PSTR") == 0x5053_5452 && SMC.floatType == 0x666C_7420, "SMC keys are big-endian four-character codes")
+    expect(MemoryLayout<SMC.Message>.stride == 80, "SMC message matches the 80-byte C struct")
+    let bits = UInt64(Float(15.5).bitPattern)
+    expect(SMC.float(type: SMC.floatType, size: 4, bytes: (bits, 0, 0, 0)) == 15.5, "SMC float values are little-endian")
+    expect(SMC.float(type: SMC.code("ui16"), size: 2, bytes: (bits, 0, 0, 0)) == nil, "other SMC types are not read as floats")
+    expect(watts(7.42) == "7.4 W" && watts(112.4) == "112 W", "watts read at a glance")
 }
 
 func testBatteryTone(_ expect: (@autoclosure () -> Bool, String) -> Void) {
@@ -931,6 +958,16 @@ func renderPanels(to directory: String) {
     }.padding(12).frame(width: 300).background(Color(nsColor: .windowBackgroundColor)))
     batteries.frame = NSRect(origin: .zero, size: batteries.fittingSize)
     save(batteries, "dashboard-battery-states")
+    let gpus = NSHostingView(rootView: VStack(alignment: .leading, spacing: 0) {
+        ForEach(gpuPreviewStates(), id: \.0) { name, load in
+            VStack(alignment: .leading, spacing: 0) {
+                Text(name).font(.caption2).foregroundStyle(.secondary)
+                GPUSection(gpu: load)
+            }.padding(.vertical, 4)
+        }
+    }.padding(12).frame(width: 380).background(Color(nsColor: .windowBackgroundColor)))
+    gpus.frame = NSRect(origin: .zero, size: gpus.fittingSize)
+    save(gpus, "dashboard-gpu-states")
     let controller = SettingsWindowController(model: model)
     for (index, tab) in SettingsWindowController.tabs.enumerated() {
         let view = NSHostingView(rootView: controller.view(for: index))

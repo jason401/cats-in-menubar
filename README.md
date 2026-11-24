@@ -14,7 +14,7 @@ Free and open source. Native Swift, AppKit and SwiftUI. macOS 14 or later.
 - Pick cats up, bring out a ball, or let them chase the laser pointer.
 - Cats use the available menu bar space, return to their tower, and can travel behind a MacBook notch.
 - Choose which display the cats live on; pause them, call them home, or set quiet hours.
-- A compact dashboard for CPU, memory, storage, battery and network activity.
+- A compact dashboard for CPU, GPU, memory, storage, battery, power use (watts) and network activity.
 - Optional CPU wheel next to the tower: a cat runs faster as the Mac gets busier and naps when it is idle; cats take turns in it every 15 minutes, or carry a cat onto the wheel icon to hand it the turn (Settings > Monitor, off by default).
 - Optional AI Face streaming: the wheel cat also runs on an [AI Face](https://github.com/jason401/ai-face) round LCD board, drawn here and sent through the AI Face app's streaming API (Settings > Monitor > AI Face, off by default; needs AI Face with streaming and its board firmware). A swipe on the board hands the screen back until you switch streaming off and on.
 - Optional menu bar tidy on macOS 27 (Settings > Menu Bar, off by default): picked apps leave the menu bar and show as icons at the top right of the panel; click one to open its own menu. The cats get the freed space, and the tower can keep itself left of other icons so new ones appear away from the cats.
@@ -106,7 +106,7 @@ For development work, check out `main`. Build outputs and previews stay in ignor
 
 - No AI service, API key, advertising or analytics is used by the running app.
 - Menu layout detection reads Accessibility roles, positions, sizes, visibility and structure, not menu text. It does not request Screen Recording or capture your screen.
-- The dashboard reads local system/process/network statistics. Optional Location permission is requested to display the Wi-Fi network name; the app does not request location coordinates.
+- The dashboard reads local system/process/network statistics. GPU load and power use are read-only IOKit lookups (the GPU driver's statistics and the SMC power sensor); nothing is written to the hardware. Optional Location permission is requested to display the Wi-Fi network name; the app does not request location coordinates.
 - The optional menu bar tidy asks macOS 27 to hide the picked apps through a private interface (the menu bar restriction behind assessment mode, as Hidden Bar does). It watches for clicks on the clock so Notification Center still opens, reads whether a microphone or camera is in use (not what it records) so the recording indicator is never hidden, and with "Tower leftmost" on it ⌘-drags its own tower icon, which moves the pointer for a moment. Everything shows again when the app quits. It needs the app in /Applications.
 - The optional scroll feature observes scrolling events to identify their source and change their direction. It is not a keystroke logger.
 - The speed test in the panel (Wi-Fi → Test) runs macOS's `networkQuality`, which contacts Apple's test servers and fills the connection for about 20 seconds. It runs only when clicked.
