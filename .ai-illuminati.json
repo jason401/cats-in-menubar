@@ -6,6 +6,13 @@
       "args": [
         "tools/test.sh"
       ]
+    },
+    "previews": {
+      "executable": "/bin/zsh",
+      "args": [
+        "tools/test.sh",
+        "--previews"
+      ]
     }
   }
 }

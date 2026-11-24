@@ -86,6 +86,8 @@ zsh tools/setup_signing.sh
 zsh tools/test.sh
 ```
 
+`tools/test.sh` builds the app and checks that it runs without errors (logic self-test, nothing opens on screen); updates run the same check. Add `--previews` to also render preview pictures into `build/previews` and drive the real panels on screen.
+
 The signing setup creates a dedicated key and certificate in your login keychain and adds user-level trust limited to code signing. It may prompt for keychain access. It does not use an Apple Developer account or change TLS trust. Read `tools/setup_signing.sh` before running it. Do not share your signing private key or export it into the repository.
 
 For a development preview:
