@@ -956,7 +956,7 @@ func testQuitOnClose(_ expect: (@autoclosure () -> Bool, String) -> Void) {
            "quit on close covers all apps, keeping players, calls and messengers running")
     expect(Pref.defaults[Pref.finderCutPaste] as? Bool == false && Pref.defaults[Pref.finderPasteImages] as? Bool == false
            && Pref.defaults[Pref.quitOnClose] as? Bool == false, "Finder shortcuts and quit on close start off")
-    expect(SettingsWindowController.tabs.map(\.0) == ["General", "Cats", "Accessibility", "Monitor"], "scroll and menu bar settings live in the Accessibility tab")
+    expect(SettingsWindowController.tabs.map(\.0) == ["General", "Cats", "Monitor", "Accessibility"], "tabs run General, Cats, Monitor, then Accessibility (scroll and menu bar settings live there)")
     expect(AppPicker.summary(0) == "None" && AppPicker.summary(1) == "1 app" && AppPicker.summary(4) == "4 apps", "app lists show how many are picked")
     expect(ScrollSourcesList.summary(0) == "None yet" && ScrollSourcesList.summary(1) == "1 source" && ScrollSourcesList.summary(3) == "3 sources", "the scroll row counts its sources")
 }

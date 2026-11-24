@@ -1447,17 +1447,18 @@ private struct ScrollSourceView: View {
 /// Toolbar tabs in a fixed-size settings window.
 final class SettingsWindowController: NSObject {
     static let size = NSSize(width: 334, height: 460)
-    static let tabs: [(String, String)] = [("General", "gearshape"), ("Cats", "pawprint"), ("Accessibility", "accessibility"), ("Monitor", "gauge.with.dots.needle.33percent")]
+    static let tabs: [(String, String)] = [("General", "gearshape"), ("Cats", "pawprint"), ("Monitor", "gauge.with.dots.needle.33percent"), ("Accessibility", "accessibility")]
     let model: AppModel
     let state = SettingsState()
     private(set) var window: NSWindow?
     init(model: AppModel) { self.model = model }
 
     func view(for index: Int) -> AnyView {
-        switch index {
-        case 0: AnyView(GeneralTab(model: model, state: state))
-        case 1: AnyView(CatsTab(model: model))
-        case 2: AnyView(AccessibilityTab(model: model, finder: FinderShortcuts.shared, quitter: QuitOnClose.shared))
+        // By title, so reordering the tabs never shows one tab's page under another's name.
+        switch SettingsWindowController.tabs[index].0 {
+        case "General": AnyView(GeneralTab(model: model, state: state))
+        case "Cats": AnyView(CatsTab(model: model))
+        case "Accessibility": AnyView(AccessibilityTab(model: model, finder: FinderShortcuts.shared, quitter: QuitOnClose.shared))
         default: AnyView(MonitorTab())
         }
     }
