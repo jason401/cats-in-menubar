@@ -1189,14 +1189,10 @@ struct ScrollCards: View {
                     SettingsSwitch(title: "Reverse scrolling", isOn: $enabled)
                 }
                 SettingsNote(text: note)
-            }
-            SettingsCard(title: "Scroll sources") {
-                if reverser.rows.isEmpty {
-                    SettingsNote(text: "Scroll with each trackpad or mouse and it appears here. New trackpads start Natural, mice Classic.")
-                }
-                ForEach(reverser.rows) { row in
-                    if row.id != reverser.rows.first?.id { Divider() }
-                    ScrollSourceView(row: row, reverser: reverser)
+                Divider()
+                SettingsRow(title: "Sources", info: "Each trackpad, mouse and app that scrolled appears there with its own direction and wheel step. New trackpads start Natural, mice Classic.") {
+                    SettingsStatus(text: ScrollSourcesList.summary(reverser.rows.count))
+                    SettingsAction(title: "Edit…") { AppPicker.show(.scrollSources) }.frame(width: 76)
                 }
             }
         }
@@ -1205,7 +1201,7 @@ struct ScrollCards: View {
         if !enabled { return "Off: macOS's own scrolling direction applies everywhere." }
         if reverser.otherAppRunning { return "Paused while Scroll Reverser is running, so scrolling is never reversed twice. Quit it to use this." }
         if !reverser.running { return "Needs Accessibility access. Check the permission above." }
-        return "On. Each source below follows its own setting."
+        return "On. Each source follows its own setting."
     }
 }
 
@@ -1280,7 +1276,7 @@ struct AccessibilityTab: View {
 
 /// App lists open in their own small window from a Choose… button, so the settings page stays short.
 enum AppPicker: String {
-    case quitOnClose, tidy
+    case quitOnClose, tidy, scrollSources
     static let size = NSSize(width: 320, height: 440)
     private static var windows: [AppPicker: NSWindow] = [:]
 
@@ -1288,12 +1284,14 @@ enum AppPicker: String {
         switch self {
         case .quitOnClose: "Apps to quit on close"
         case .tidy: "Apps in the panel"
+        case .scrollSources: "Scroll sources"
         }
     }
     var view: AnyView {
         switch self {
         case .quitOnClose: AnyView(QuitAppsPicker(quitter: QuitOnClose.shared))
         case .tidy: AnyView(TidyAppsPicker(tidy: MenuBarTidy.shared))
+        case .scrollSources: AnyView(ScrollSourcesList(reverser: ScrollDirection.shared))
         }
     }
     static func summary(_ count: Int) -> String { count == 0 ? "None" : count == 1 ? "1 app" : "\(count) apps" }
@@ -1353,6 +1351,25 @@ struct AppPickerList: View {
                 }
             }
             if let footer { SettingsNote(text: footer).padding(.horizontal, -10) }
+        }
+    }
+}
+
+/// Every scrolling source seen so far, each with its direction and wheel step.
+struct ScrollSourcesList: View {
+    @ObservedObject var reverser: ScrollDirection
+    static func summary(_ count: Int) -> String { count == 0 ? "None yet" : count == 1 ? "1 source" : "\(count) sources" }
+    var body: some View {
+        SettingsPage {
+            SettingsCard(title: Self.summary(reverser.rows.count)) {
+                if reverser.rows.isEmpty {
+                    SettingsNote(text: "Scroll with each trackpad or mouse and it appears here. New trackpads start Natural, mice Classic.").padding(.top, 7)
+                }
+                ForEach(reverser.rows) { row in
+                    if row.id != reverser.rows.first?.id { Divider() }
+                    ScrollSourceView(row: row, reverser: reverser)
+                }
+            }
         }
     }
 }

@@ -944,6 +944,7 @@ func testQuitOnClose(_ expect: (@autoclosure () -> Bool, String) -> Void) {
            && Pref.defaults[Pref.quitOnClose] as? Bool == false, "Finder shortcuts and quit on close start off")
     expect(SettingsWindowController.tabs.map(\.0) == ["General", "Cats", "Accessibility", "Monitor"], "scroll and menu bar settings live in the Accessibility tab")
     expect(AppPicker.summary(0) == "None" && AppPicker.summary(1) == "1 app" && AppPicker.summary(4) == "4 apps", "app lists show how many are picked")
+    expect(ScrollSourcesList.summary(0) == "None yet" && ScrollSourcesList.summary(1) == "1 source" && ScrollSourcesList.summary(3) == "3 sources", "the scroll row counts its sources")
 }
 
 /// Fixed GPU states for tests and previews.
@@ -1046,7 +1047,7 @@ func renderPanels(to directory: String) {
         view.frame = NSRect(origin: .zero, size: SettingsWindowController.size)
         save(view, "settings-\(tab.0)")
     }
-    for list in [AppPicker.quitOnClose, .tidy] {
+    for list in [AppPicker.quitOnClose, .tidy, .scrollSources] {
         let view = NSHostingView(rootView: list.view.frame(width: AppPicker.size.width, height: AppPicker.size.height))
         view.frame = NSRect(origin: .zero, size: AppPicker.size)
         save(view, "settings-apps-\(list.rawValue)")
