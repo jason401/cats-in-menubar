@@ -925,7 +925,7 @@ struct GeneralTab: View {
                 if let error = state.loginError { SettingsNote(text: error) }
                 Divider()
                 SettingsRow(title: "Open on hover", titleWidth: 118,
-                            info: "The panel opens when the pointer rests on the menu bar icon and closes when it moves away. Rest on a row for its details. A click on the icon keeps the panel open until you click elsewhere.") {
+                            info: "The panel opens when the pointer rests on the menu bar icon, or on a click, and closes when the pointer moves away. Rest on a row for its details. Off: a click opens the panel until you click elsewhere.") {
                     SettingsSwitch(title: "Open on hover", isOn: $panelOnHover)
                 }
             }

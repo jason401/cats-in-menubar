@@ -7,6 +7,7 @@ case "${1:-}" in
   *) echo "Usage: tools/test.sh [--skip-build]" >&2; exit 2 ;;
 esac
 "build/Cats in Menubar.app/Contents/MacOS/CatsInMenubar" --self-test
+"build/Cats in Menubar.app/Contents/MacOS/CatsInMenubar" --test-panel
 mkdir -p build/previews
 "build/Cats in Menubar.app/Contents/MacOS/CatsInMenubar" --render-preview "$PWD/build/previews/cats.png"
 "build/Cats in Menubar.app/Contents/MacOS/CatsInMenubar" --render-panels "$PWD/build/previews"

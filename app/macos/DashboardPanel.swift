@@ -6,8 +6,9 @@ import SwiftUI
 // - Resting on the icon opens it (Settings > General > Open on hover, on by default). It closes once the
 //   pointer has been away from the icon and both panels for a moment, or on a click elsewhere. A click
 //   inside does not keep it: most looks are a glance at a number.
-// - A click on the icon opens it, or keeps one opened by resting, until a click elsewhere, another click on
-//   the icon, or Esc.
+// - A click on the icon opens it at once and it closes the same way, so it never depends on whether the click
+//   landed before or after the rest delay. A click on the icon while it is open does nothing.
+// - With Open on hover off, a click opens it until a click elsewhere, another click on the icon, or Esc.
 // Both are non-activating panels, like the cats' overlay, so showing them never takes the keyboard from the
 // app in front. A tracking area on the icon starts a 20 Hz check of the pointer, which runs only while the
 // pointer is on the icon or a panel is open.
@@ -78,11 +79,16 @@ final class DashboardPanel: NSResponder {
     /// The icon on screen; nil while it has none.
     var icon: () -> NSRect? = { nil }
     var blockers: () -> PanelHoverRules.Blockers = { .init() }
+    /// Settings > General > Open on hover.
+    var hoverOn: () -> Bool = { true }
     /// About to show: time for fresh stats.
     var willShow: () -> Void = {}
     /// Opened or kept by a click.
     var clicked: () -> Void = {}
     var didHide: () -> Void = {}
+    /// The pointer and the clock; the self-test swaps in its own.
+    var pointer: () -> NSPoint = { NSEvent.mouseLocation }
+    var clock: () -> TimeInterval = { ProcessInfo.processInfo.systemUptime }
 
     let hover: DashboardHover
     private let system: SystemMonitor
@@ -97,7 +103,8 @@ final class DashboardPanel: NSResponder {
     private var pending: (row: DashboardStat?, since: TimeInterval)?
     /// Closed while the pointer was on the icon: it opens again only after leaving.
     private var waitForExit = false
-    private var menuOpen = false
+    private var menuOpen = false { didSet { if !menuOpen { menuLogged = false } } }
+    private var menuLogged = false
     private var monitors: [Any] = []
 
     init(model: AppModel, system: SystemMonitor, openSettings: @escaping () -> Void, play: @escaping () -> Void) {
@@ -169,8 +176,8 @@ final class DashboardPanel: NSResponder {
         restingSince = nil
     }
 
-    private func tick() {
-        let now = ProcessInfo.processInfo.systemUptime, mouse = NSEvent.mouseLocation
+    func tick() {
+        let now = clock(), mouse = pointer()
         guard let icon = icon() else { hide(); stopTimer(); return }
         guard let mode else {
             guard icon.contains(mouse) else { waitForExit = false; stopTimer(); return }
@@ -181,7 +188,12 @@ final class DashboardPanel: NSResponder {
         }
         follow(mouse, now)
         guard mode == .hover else { return }
-        if menuOpen || PanelHoverRules.near(mouse, icon: icon, panels: panelFrames) {
+        let near = PanelHoverRules.near(mouse, icon: icon, panels: panelFrames)
+        if menuOpen && !near && !menuLogged {
+            menuLogged = true
+            AppModel.log("Panel: a menu is open, so the panel waits with the pointer away")
+        }
+        if menuOpen || near {
             outsideSince = nil
         } else if outsideSince == nil {
             outsideSince = now
@@ -189,6 +201,11 @@ final class DashboardPanel: NSResponder {
             hide()
         }
     }
+
+    /// The section beside the summary, while it shows (for the self-test).
+    var detailShown: DashboardStat? { detail.isVisible ? hover.detail : nil }
+    var frames: (summary: NSRect, detail: NSRect?) { (summary.frame, detail.isVisible ? detail.frame : nil) }
+    func rowOnScreen(_ stat: DashboardStat) -> NSRect? { hover.rows[stat].map(screenRect(of:)) }
 
     private var panelFrames: [NSRect] { [summary.frame] + (detail.isVisible ? [detail.frame] : []) }
 
@@ -224,12 +241,10 @@ final class DashboardPanel: NSResponder {
     func click() {
         switch mode {
         case .click: hide()
-        case .hover:
-            mode = .click; outsideSince = nil
-            summary.keyable = true; summary.makeKey()
-            clicked()
+        // Often the click comes just after the rest opened it: leave it as it is.
+        case .hover: break
         case nil:
-            show(.click)
+            show(hoverOn() ? .hover : .click)
             clicked()
         }
     }
@@ -239,6 +254,7 @@ final class DashboardPanel: NSResponder {
         willShow()
         self.mode = mode
         restingSince = nil; outsideSince = nil; pending = nil
+        menuOpen = false   // no menu of ours can be open yet; a begin without its end must not keep the panel
         hover.detail = nil; detail.orderOut(nil)
         place(under: icon)
         summary.alphaValue = 0
@@ -255,7 +271,7 @@ final class DashboardPanel: NSResponder {
         mode = nil
         outsideSince = nil; pending = nil
         monitors.forEach(NSEvent.removeMonitor); monitors = []
-        if let icon = icon(), icon.contains(NSEvent.mouseLocation) { waitForExit = true }
+        if let icon = icon(), icon.contains(pointer()) { waitForExit = true }
         hover.detail = nil
         detail.orderOut(nil)
         summary.keyable = false
@@ -277,7 +293,7 @@ final class DashboardPanel: NSResponder {
                 if event.keyCode == 53, self.mode == .click { self.hide(); return nil }
                 return event
             }
-            if event.window === self.summary || event.window === self.detail || self.icon()?.contains(NSEvent.mouseLocation) == true { return event }
+            if event.window === self.summary || event.window === self.detail || self.icon()?.contains(self.pointer()) == true { return event }
             self.hide()
             return event
         }) { monitors.append(local) }

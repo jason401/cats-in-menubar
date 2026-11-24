@@ -23,6 +23,7 @@ if let index = CommandLine.arguments.firstIndex(of: "--render-held"), CommandLin
     renderHeld(to: CommandLine.arguments[index + 1]); exit(0)
 }
 if CommandLine.arguments.contains("--self-test") { runSelfTests(); exit(0) }
+if CommandLine.arguments.contains("--test-panel") { runPanelTests(); exit(0) }
 if let index = CommandLine.arguments.firstIndex(of: "--render-preview"), CommandLine.arguments.count > index + 1 {
     renderPreview(to: CommandLine.arguments[index + 1]); exit(0)
 }

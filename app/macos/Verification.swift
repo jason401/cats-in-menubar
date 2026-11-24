@@ -2238,3 +2238,136 @@ func testMenuBarTidy(_ expect: (@autoclosure () -> Bool, String) -> Void) {
     expect(left == [CGRect(x: 1000, y: 0, width: 24, height: 37)], "only a visible icon left of the tower on its menu bar counts")
     expect(MenuBarTidy.itemsLeft(of: own, extras: Array(extras.dropFirst()), skip: ["hidden"], ownPid: 9, band: band).isEmpty, "leftmost tower: nothing to move")
 }
+
+/// The panel's opening, details and closing with a stand-in pointer and clock, on real windows.
+func runPanelTests() {
+    let app = NSApplication.shared
+    app.setActivationPolicy(.accessory)
+    UserDefaults.standard.register(defaults: Pref.defaults)
+    var checks = 0
+    func expect(_ condition: Bool, _ message: String) {
+        checks += 1
+        if !condition { fputs("FAIL: \(message)\n", stderr); exit(1) }
+    }
+    guard let screen = NSScreen.main else { print("Panel tests: no screen"); return }
+    let model = AppModel()
+    model.catSummary = "3 cats · 840 pt of room"
+    let system = SystemMonitor()
+    system.sample()
+    let panel = DashboardPanel(model: model, system: system, openSettings: {}, play: {})
+    let bar = max(24, screen.frame.maxY - screen.visibleFrame.maxY)
+    let icon = NSRect(x: screen.frame.maxX - 320, y: screen.frame.maxY - bar, width: 30, height: bar)
+    var mouse = NSPoint(x: icon.midX, y: icon.midY), now = 1000.0
+    panel.icon = { icon }
+    panel.pointer = { mouse }
+    panel.clock = { now }
+    func step(_ seconds: Double, every: Double = 0.05) {
+        var left = seconds
+        while left > 0.0001 {
+            now += every; left -= every
+            panel.tick()
+            RunLoop.main.run(until: Date(timeIntervalSinceNow: 0.01))
+        }
+    }
+    func settle() { RunLoop.main.run(until: Date(timeIntervalSinceNow: 0.3)) }
+    func far() -> NSPoint { NSPoint(x: screen.visibleFrame.minX + 5, y: screen.visibleFrame.minY + 5) }
+    func center(_ r: NSRect) -> NSPoint { NSPoint(x: r.midX, y: r.midY) }
+    func open() {
+        mouse = center(icon)
+        step(0.4)
+        settle()
+        expect(panel.isShown && panel.mode == .hover, "resting on the icon opens the panel")
+    }
+    func showRow(_ stat: DashboardStat) {
+        guard let row = panel.rowOnScreen(stat) else { expect(false, "the summary reports where the \(stat) row is"); return }
+        mouse = center(row)
+        step(0.2)
+        settle()
+        expect(panel.detailShown == stat, "resting on the \(stat) row shows its details (shown: \(String(describing: panel.detailShown)))")
+    }
+
+    // Open, see a row's details, go away.
+    open()
+    step(0.3)
+    expect(panel.isShown, "the panel stays while the pointer is on the icon")
+    showRow(.cpu)
+    showRow(.memory)
+    if let detail = panel.frames.detail {
+        mouse = center(detail); step(1)
+        expect(panel.isShown && panel.detailShown == .memory, "the details stay while the pointer is on them")
+        mouse = NSPoint(x: detail.midX, y: detail.minY - 60); step(0.3)
+        expect(panel.isShown, "a moment away is forgiven")
+        step(0.4)
+        expect(!panel.isShown, "away from the details for half a second closes the panel")
+    } else { expect(false, "the details have a window") }
+    step(0.5)
+
+    // Back on the icon only after leaving it; then away straight from a row.
+    open()
+    showRow(.memory)
+    mouse = far(); step(0.7)
+    expect(!panel.isShown, "away from the summary closes the panel, details and all")
+    step(0.5)
+
+    // Crossing rows on the way to the details does not swap them.
+    open()
+    showRow(.cpu)
+    if let memory = panel.rowOnScreen(.memory), let detail = panel.frames.detail {
+        mouse = center(memory); step(0.05)
+        mouse = center(detail); step(0.3)
+        expect(panel.detailShown == .cpu, "passing over another row on the way keeps the details")
+    }
+    mouse = far(); step(0.7)
+    expect(!panel.isShown, "and the panel still closes after")
+    step(0.5)
+
+    // The header has no details; the pointer back on the icon keeps the panel.
+    open()
+    showRow(.memory)
+    mouse = NSPoint(x: panel.frames.summary.midX, y: panel.frames.summary.maxY - 20); step(0.3); settle()
+    expect(panel.isShown && panel.detailShown == nil, "the header hides the details")
+    mouse = center(icon); step(1)
+    expect(panel.isShown, "back on the icon keeps the panel")
+    mouse = far(); step(0.7)
+    expect(!panel.isShown, "then away closes it")
+    step(0.5)
+
+    // Many rows in a row, then away: never stuck open.
+    for round in 0..<20 {
+        open()
+        for stat in [DashboardStat.cpu, .memory, .disk, .network, .gpu, .memory] where panel.rowOnScreen(stat) != nil {
+            mouse = center(panel.rowOnScreen(stat)!); step(Double(round % 4) * 0.05 + 0.05)
+        }
+        if round % 2 == 0, let detail = panel.frames.detail { mouse = center(detail); step(0.2) }
+        mouse = far(); step(0.7)
+        expect(!panel.isShown, "round \(round): the panel closes once the pointer has left")
+        step(0.5)
+    }
+
+    // A click just after the rest opened it changes nothing: it still closes when the pointer leaves.
+    open()
+    panel.click()
+    expect(panel.mode == .hover, "a click on the icon of a panel opened by resting keeps it as it is")
+    showRow(.memory)
+    mouse = far(); step(0.7)
+    expect(!panel.isShown, "and it closes once the pointer has left")
+    step(0.5)
+    // A click before the rest delay opens it the same way.
+    mouse = center(icon)
+    panel.click(); settle()
+    expect(panel.mode == .hover, "with Open on hover, a click opens the same panel at once")
+    mouse = far(); step(0.7)
+    expect(!panel.isShown, "which also closes once the pointer has left")
+    step(0.5)
+    // With Open on hover off, a click opens it to stay.
+    panel.hoverOn = { false }
+    mouse = center(icon)
+    panel.click(); settle()
+    expect(panel.mode == .click, "with Open on hover off, a click opens the panel to stay")
+    mouse = far(); step(1)
+    expect(panel.isShown, "a clicked panel stays when the pointer leaves")
+    mouse = center(icon)
+    panel.click()
+    expect(!panel.isShown, "a second click closes it")
+    print("Panel tests: \(checks) checks")
+}

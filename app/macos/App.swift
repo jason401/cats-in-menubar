@@ -421,6 +421,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                          command: NSEvent.modifierFlags.contains(.command),
                          towerMoving: StatusItemDrag.moving)
         }
+        dashboard.hoverOn = { [weak self] in self?.defaults.bool(forKey: Pref.panelOnHover) ?? false }
         // Fresh app lists and Wi-Fi details while the panel is open.
         dashboard.willShow = { [weak self] in self?.system.detailed = true; self?.system.sample() }
         dashboard.didHide = { [weak self] in self?.system.detailed = false }
