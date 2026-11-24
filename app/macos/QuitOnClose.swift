@@ -12,6 +12,8 @@ import Cocoa
 
 @_silgen_name("CGSMainConnectionID") private func CGSMainConnectionID() -> Int32
 @_silgen_name("CGSCopySpacesForWindows") private func CGSCopySpacesForWindows(_ connection: Int32, _ mask: Int32, _ windows: CFArray) -> Unmanaged<CFArray>?
+/// The app a helper process works for: a sandboxed app's Open and Save panels run in a system service.
+@_silgen_name("responsibility_get_pid_responsible_for_pid") private func responsiblePID(_ pid: pid_t) -> pid_t
 
 /// One window as the window server lists it.
 struct WindowSample: Equatable {
@@ -39,6 +41,10 @@ enum QuitOnCloseRules {
     static let minimumSide = 80.0
     /// How long an app must have no windows: full-screen exits and window swaps leave short gaps.
     static let grace: TimeInterval = 1.5
+    /// Right after a click or ⌘W the gap is confirmed sooner: the user just closed something.
+    static let quickGrace: TimeInterval = 0.7
+    /// When the checks run after a click or ⌘W; the last one lands after the quick grace.
+    static let quickChecks: [TimeInterval] = [0.25, 0.6, 1.0]
 
     /// Whether a window keeps its app open. `inSpace` is asked only for off-screen normal windows.
     static func counts(_ window: WindowSample, inSpace: () -> Bool) -> Bool {
@@ -50,7 +56,7 @@ enum QuitOnCloseRules {
 
     enum Step: Equatable { case keep, wait, quit }
     /// One check of one app: quit only after it had a window, then had none for the whole grace period.
-    static func step(windows: Int, hadWindows: Bool, hidden: Bool, emptySince: Date?, now: Date) -> Step {
+    static func step(windows: Int, hadWindows: Bool, hidden: Bool, emptySince: Date?, now: Date, grace: TimeInterval = grace) -> Step {
         if windows > 0 || !hadWindows || hidden { return .keep }
         guard let emptySince else { return .wait }
         return now.timeIntervalSince(emptySince) >= grace ? .quit : .wait
@@ -91,6 +97,10 @@ final class QuitOnClose: ObservableObject {
     private struct Watch { var hadWindows = false; var emptySince: Date? }
     private var watches: [pid_t: Watch] = [:]
     private var timer: Timer?
+    /// Clicks and ⌘W, watched only to check sooner; nothing about them is kept.
+    private var closeMonitor: Any?
+    private var lastCloseAction = Date.distantPast
+    private var quickChecks: [DispatchWorkItem] = []
     private lazy var connection = CGSMainConnectionID()
 
     private init() {
@@ -121,6 +131,17 @@ final class QuitOnClose: ObservableObject {
         } else if !wanted, let timer {
             timer.invalidate(); self.timer = nil
         }
+        if wanted && closeMonitor == nil {
+            closeMonitor = NSEvent.addGlobalMonitorForEvents(matching: [.leftMouseUp, .keyDown]) { [weak self] event in
+                if event.type == .keyDown {
+                    let mods = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
+                    guard mods == .command, event.charactersIgnoringModifiers?.lowercased() == "w" else { return }
+                }
+                self?.closeActionSeen()
+            }
+        } else if !wanted, let monitor = closeMonitor {
+            NSEvent.removeMonitor(monitor); closeMonitor = nil
+        }
         running = wanted
     }
 
@@ -132,13 +153,35 @@ final class QuitOnClose: ObservableObject {
         }
     }
 
+    /// A click (maybe on a close button) or ⌘W: check a few times over the next second instead of
+    /// waiting for the once-a-second check, so an app quits about a second after its last window closes.
+    private func closeActionSeen() {
+        lastCloseAction = Date()
+        quickChecks.forEach { $0.cancel() }
+        quickChecks = QuitOnCloseRules.quickChecks.map { delay in
+            let work = DispatchWorkItem { [weak self] in self?.check() }
+            DispatchQueue.main.asyncAfter(deadline: .now() + delay, execute: work)
+            return work
+        }
+    }
+
     private func check() {
         guard enabled else { apply(); return }
         let list = CGWindowListCopyWindowInfo([.optionAll], kCGNullWindowID) as? [[String: Any]] ?? []
-        var counts: [pid_t: Int] = [:]
+        var counts: [pid_t: Int] = [:], helped: [pid_t: Int] = [:]
         var offscreen: [WindowSample] = []
+        var owners: [pid_t: pid_t] = [:]   // helper pid → the app it works for, looked up once per check
         for info in list {
-            guard let window = WindowSample(info), watches[window.pid] != nil else { continue }
+            guard let window = WindowSample(info) else { continue }
+            guard watches[window.pid] != nil else {
+                // A visible window of another process working for a watched app (an Open or Save panel)
+                // keeps that app open, but does not count as the app having shown a window of its own.
+                guard window.onscreen, QuitOnCloseRules.counts(window, inSpace: { false }) else { continue }
+                let owner = owners[window.pid] ?? responsiblePID(window.pid)
+                owners[window.pid] = owner
+                if owner != window.pid, watches[owner] != nil { helped[owner, default: 0] += 1 }
+                continue
+            }
             if QuitOnCloseRules.counts(window, inSpace: { false }) { counts[window.pid, default: 0] += 1 }
             else if !window.onscreen { offscreen.append(window) }
         }
@@ -150,9 +193,12 @@ final class QuitOnClose: ObservableObject {
         for app in watchedApps() {
             let pid = app.processIdentifier
             var watch = watches[pid] ?? Watch()
-            let windows = counts[pid] ?? 0
-            if windows > 0 { watch.hadWindows = true; watch.emptySince = nil }
-            switch QuitOnCloseRules.step(windows: windows, hadWindows: watch.hadWindows, hidden: app.isHidden, emptySince: watch.emptySince, now: now) {
+            let own = counts[pid] ?? 0, windows = own + (helped[pid] ?? 0)
+            if own > 0 { watch.hadWindows = true }
+            if windows > 0 { watch.emptySince = nil }
+            let quick = now.timeIntervalSince(lastCloseAction) < 2
+            switch QuitOnCloseRules.step(windows: windows, hadWindows: watch.hadWindows, hidden: app.isHidden, emptySince: watch.emptySince, now: now,
+                                         grace: quick ? QuitOnCloseRules.quickGrace : QuitOnCloseRules.grace) {
             case .keep: watch.emptySince = nil
             case .wait: if watch.emptySince == nil { watch.emptySince = now }
             case .quit:

@@ -937,6 +937,11 @@ func testQuitOnClose(_ expect: (@autoclosure () -> Bool, String) -> Void) {
     expect(R.step(windows: 0, hadWindows: true, hidden: false, emptySince: nil, now: now) == .wait, "the first empty check only starts the wait")
     expect(R.step(windows: 0, hadWindows: true, hidden: false, emptySince: now.addingTimeInterval(-1), now: now) == .wait, "a short gap is not a close")
     expect(R.step(windows: 0, hadWindows: true, hidden: false, emptySince: now.addingTimeInterval(-R.grace), now: now) == .quit, "empty for the grace period quits")
+    expect(R.step(windows: 0, hadWindows: true, hidden: false, emptySince: now.addingTimeInterval(-R.quickGrace), now: now, grace: R.quickGrace) == .quit
+           && R.step(windows: 0, hadWindows: true, hidden: false, emptySince: now.addingTimeInterval(-R.quickGrace), now: now) == .wait,
+           "right after a click or ⌘W a shorter gap is enough")
+    expect(R.quickGrace < R.grace && R.quickChecks.last! > R.quickGrace && R.quickChecks.last! - R.quickChecks.first! >= R.quickGrace,
+           "quick checks span the quick grace, so one of them can confirm it")
     expect(!R.pickable(bundle: FinderShortcuts.finderID, policy: .regular, own: "me") && !R.pickable(bundle: "me", policy: .regular, own: "me")
            && !R.pickable(bundle: "x", policy: .accessory, own: "me") && !R.pickable(bundle: nil, policy: .regular, own: "me")
            && R.pickable(bundle: "com.apple.TextEdit", policy: .regular, own: "me"), "only regular apps, never Finder or this app")
