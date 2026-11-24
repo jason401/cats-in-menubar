@@ -801,6 +801,7 @@ func runSelfTests() {
     testSensors(expect)
     testFinderKeys(expect)
     testQuitOnClose(expect)
+    testPanelHover(expect)
     testWheel(expect)
     testFaceStream(expect)
     testWheelBaton(expect)
@@ -908,6 +909,37 @@ func testFinderKeys(_ expect: (@autoclosure () -> Bool, String) -> Void) {
     var parts = DateComponents(); parts.year = 2026; parts.month = 11; parts.day = 23; parts.hour = 21; parts.minute = 30; parts.second = 5
     let date = Calendar.current.date(from: parts)!
     expect(FinderKeys.imageName(at: date) == "Pasted Image 2026-11-23 at 21.30.05.png", "pasted images are named like screenshots")
+}
+
+func testPanelHover(_ expect: (@autoclosure () -> Bool, String) -> Void) {
+    typealias R = PanelHoverRules
+    expect(R.mayOpen(.init()), "resting on the icon opens the panel")
+    for (blocker, name) in [(R.Blockers(enabled: false), "the setting is off"), (R.Blockers(catBusy: true), "a cat is held or under the pointer"),
+                            (R.Blockers(buttonDown: true), "a button is down"), (R.Blockers(command: true), "⌘ is down to move the icon"),
+                            (R.Blockers(towerMoving: true), "the tidy moves the tower")] {
+        expect(!R.mayOpen(blocker), "no panel from resting while \(name)")
+    }
+    expect(R.openDelay == 0.3 && R.closeDelay == 0.5 && R.switchDelay == 0.1, "open after 0.3 s, close after 0.5 s, change rows after 0.1 s")
+    expect(!R.due(nil, 10, R.openDelay) && !R.due(10, 10.29, R.openDelay) && R.due(10, 10.3, R.openDelay), "the wait counts from when it began")
+    // A 30 pt icon at the top right of a 1512 x 982 screen with a 37 pt menu bar.
+    let screen = NSRect(x: 0, y: 0, width: 1512, height: 945)
+    let icon = NSRect(x: 1300, y: 945, width: 30, height: 37)
+    let summary = R.summaryFrame(size: NSSize(width: 300, height: 420), icon: icon, screen: screen)
+    expect(summary.midX == icon.midX && summary.maxY == icon.minY - R.drop, "the summary hangs centered under the icon")
+    let edge = R.summaryFrame(size: NSSize(width: 300, height: 420), icon: NSRect(x: 1490, y: 945, width: 22, height: 37), screen: screen)
+    expect(edge.maxX == screen.maxX - R.margin, "near the screen edge the summary stays on screen")
+    expect(R.near(NSPoint(x: icon.midX, y: icon.minY - R.drop / 2), icon: icon, panels: [summary]), "the gap between the icon and the summary still counts as on them")
+    expect(R.near(NSPoint(x: summary.minX - 10, y: summary.midY), icon: icon, panels: [summary]), "slack around the panel forgives a small slip")
+    expect(!R.near(NSPoint(x: summary.minX - 20, y: summary.midY), icon: icon, panels: [summary]), "farther away is away")
+    let row = NSRect(x: summary.minX + 18, y: summary.maxY - 120, width: 264, height: 34)
+    let detail = R.detailFrame(size: NSSize(width: 340, height: 150), summary: summary, row: row, screen: screen)
+    expect(detail.maxX == summary.minX - R.gap && detail.maxY == row.maxY, "details open on the left, level with their row")
+    expect(R.near(NSPoint(x: summary.minX - R.gap / 2, y: row.midY), icon: icon, panels: [summary, detail]), "the gap to the side panel still counts as on them")
+    let low = NSRect(x: row.minX, y: 40, width: row.width, height: row.height)
+    expect(R.detailFrame(size: NSSize(width: 340, height: 150), summary: summary, row: low, screen: screen).minY == screen.minY + R.margin, "a low row's details stay on screen")
+    let leftSummary = R.summaryFrame(size: NSSize(width: 300, height: 420), icon: NSRect(x: 200, y: 945, width: 30, height: 37), screen: screen)
+    let rightDetail = R.detailFrame(size: NSSize(width: 340, height: 150), summary: leftSummary, row: row, screen: screen)
+    expect(rightDetail.minX == leftSummary.maxX + R.gap, "with no room on the left, details open on the right")
 }
 
 func testQuitOnClose(_ expect: (@autoclosure () -> Bool, String) -> Void) {
@@ -1027,15 +1059,22 @@ func renderPanels(to directory: String) {
         try? rep.representation(using: .png, properties: [:])?.write(to: URL(fileURLWithPath: "\(directory)/\(name).png"))
     }
     try? FileManager.default.createDirectory(atPath: directory, withIntermediateDirectories: true)
-    let dashboard = NSHostingView(rootView: DashboardView(model: model, system: system, openSettings: {}, play: {}).background(Color(nsColor: .windowBackgroundColor)))
-    dashboard.frame = NSRect(origin: .zero, size: dashboard.fittingSize)
-    save(dashboard, "dashboard")
+    // The summary with a row's section beside it, as when the pointer rests on that row.
+    for stat in DashboardStat.allCases {
+        let hover = DashboardHover(); hover.detail = stat
+        let view = NSHostingView(rootView: HStack(alignment: .top, spacing: PanelHoverRules.gap) {
+            DashboardDetailView(system: system, stat: stat).background(Color(nsColor: .windowBackgroundColor)).clipShape(RoundedRectangle(cornerRadius: 10))
+            DashboardView(model: model, system: system, hover: hover, openSettings: {}, play: {}).background(Color(nsColor: .windowBackgroundColor)).clipShape(RoundedRectangle(cornerRadius: 10))
+        }.padding(8))
+        view.frame = NSRect(origin: .zero, size: view.fittingSize)
+        save(view, stat == .cpu ? "dashboard" : "dashboard-\(stat.rawValue)")
+    }
     // Hidden menu bar apps in the header: two full rows and a "+N" menu.
     let apps = ["com.apple.Safari", "com.apple.mail", "com.apple.Notes", "com.apple.Music", "com.apple.Maps", "com.apple.Photos", "com.apple.iCal",
                 "com.apple.reminders", "com.apple.FaceTime", "com.apple.Preview", "com.apple.TextEdit", "com.apple.calculator", "com.apple.Terminal",
                 "com.apple.ActivityMonitor", "com.apple.systempreferences", "com.apple.AppStore"].map { TidyApp(bundle: $0) }
     for (name, count) in [("dashboard-tidy", 16), ("dashboard-tidy-few", 3)] {
-        let view = NSHostingView(rootView: DashboardView(model: model, system: system, openSettings: {}, play: {}, previewApps: Array(apps.prefix(count)))
+        let view = NSHostingView(rootView: DashboardView(model: model, system: system, hover: DashboardHover(), openSettings: {}, play: {}, previewApps: Array(apps.prefix(count)))
             .background(Color(nsColor: .windowBackgroundColor)))
         view.frame = NSRect(origin: .zero, size: view.fittingSize)
         save(view, name)

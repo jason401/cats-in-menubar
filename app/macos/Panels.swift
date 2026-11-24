@@ -32,12 +32,13 @@ enum Pref {
     static let quitOnCloseApps = "quitOnCloseApps"     // picked bundle ids ("Picked apps")
     static let quitOnCloseAll = "quitOnCloseAll"       // every app but the exceptions, or only picked apps
     static let quitOnCloseExceptions = "quitOnCloseExceptions" // bundle ids kept running in "All apps"
+    static let panelOnHover = "panelOnHover"           // resting the pointer on the icon opens the panel (DashboardPanel)
     static let defaults: [String: Any] = [
         count: 3, fixedLineup: false, rotate: false, rotatePace: 1, paused: false, quiet: false, activity: 1, adaptivePower: true, allowDrag: true,
         nightQuiet: false, nightFrom: 23, nightTo: 7, interval: 2.0, topApps: 2, toyColor: -1, laser: true, scrollReverse: false, display: "",
         showCPU: true, showGPU: true, showMemory: true, showDisk: true, showBattery: true, showNetwork: true, cpuWheel: false, wheelSwapRange: WheelShift.defaultRange, wheelBattery: true, wheelBatteryMono: false, faceStream: false,
         tidy: false, tidyLeftmost: true, finderCutPaste: false, finderPasteImages: false, quitOnClose: false,
-        quitOnCloseAll: true, quitOnCloseExceptions: QuitOnCloseRules.defaultExceptions,
+        quitOnCloseAll: true, quitOnCloseExceptions: QuitOnCloseRules.defaultExceptions, panelOnHover: true,
     ]
 }
 
@@ -57,10 +58,33 @@ private func percent(_ value: Double) -> String { String(format: "%.1f%%", value
 func watts(_ value: Double) -> String { value < 100 ? String(format: "%.1f W", value) : String(format: "%.0f W", value) }
 
 // MARK: Dashboard (opens from the menu bar icon)
+// Two parts: a short summary under the icon with one row per stat, and beside it the full section of the
+// row the pointer rests on (details, top apps, graphs). DashboardPanel puts them in windows and picks the row.
+
+/// The stats the panel can show, in panel order.
+enum DashboardStat: String, CaseIterable {
+    case cpu, gpu, memory, disk, battery, network
+}
+
+/// Which row's section shows beside the summary, and where the rows are (summary points, from the top left).
+final class DashboardHover: ObservableObject {
+    @Published var detail: DashboardStat?
+    var rows: [DashboardStat: CGRect] = [:]
+    /// A row or button that opens something else closes the panel first.
+    var close: () -> Void = {}
+}
+
+private struct RowFrames: PreferenceKey {
+    static let defaultValue: [DashboardStat: CGRect] = [:]
+    static func reduce(value: inout [DashboardStat: CGRect], nextValue: () -> [DashboardStat: CGRect]) { value.merge(nextValue()) { $1 } }
+}
 
 struct DashboardView: View {
+    static let width: CGFloat = 300
+    static let space = "dashboard"
     @ObservedObject var model: AppModel
     @ObservedObject var system: SystemMonitor
+    @ObservedObject var hover: DashboardHover
     @AppStorage(Pref.paused) private var paused = false
     @AppStorage(Pref.showCPU) private var showCPU = true
     @AppStorage(Pref.showGPU) private var showGPU = true
@@ -68,12 +92,25 @@ struct DashboardView: View {
     @AppStorage(Pref.showDisk) private var showDisk = true
     @AppStorage(Pref.showBattery) private var showBattery = true
     @AppStorage(Pref.showNetwork) private var showNetwork = true
-    @AppStorage(Pref.topApps) private var topApps = 2
     @AppStorage(Pref.tidy) private var tidyOn = false
     @ObservedObject var tidy = MenuBarTidy.shared
     var openSettings: () -> Void
     var play: () -> Void
     var previewApps: [TidyApp]? = nil   // rendered previews only, without touching the saved settings
+
+    /// The stats switched on under Settings → Monitor → Show in the panel (GPU only where the driver reports it).
+    private var stats: [DashboardStat] {
+        DashboardStat.allCases.filter { stat in
+            switch stat {
+            case .cpu: showCPU
+            case .gpu: showGPU && system.stats.gpu != nil
+            case .memory: showMemory
+            case .disk: showDisk
+            case .battery: showBattery
+            case .network: showNetwork
+            }
+        }
+    }
 
     var body: some View {
         let s = system.stats
@@ -87,82 +124,30 @@ struct DashboardView: View {
                     Text("Cats in Menubar").font(.headline).lineLimit(1).fixedSize()
                     Text(paused ? "Cats are paused" : model.catSummary).font(.caption).foregroundStyle(.secondary).lineLimit(2)
                 }
-                Spacer(minLength: 8)
-                // Menu bar apps moved into the panel: up to two rows in the header's free corner.
-                if let apps = previewApps ?? (tidyOn ? tidy.panelApps : nil), !apps.isEmpty {
-                    PanelAppsGrid(apps: apps) { model.openHiddenApp?($0) }
-                }
+                Spacer(minLength: 0)
+            }
+            // Menu bar apps moved into the panel: up to two rows under the header.
+            if let apps = previewApps ?? (tidyOn ? tidy.panelApps : nil), !apps.isEmpty {
+                PanelAppsGrid(apps: apps) { model.openHiddenApp?($0) }
             }
             if tidyOn, let notice = tidy.notice {
                 Label(notice, systemImage: "exclamationmark.circle").font(.caption).foregroundStyle(.secondary)
             }
-            VStack(spacing: 0) {
-                if showCPU {
-                    StatSection(icon: "gauge.with.dots.needle.67percent", title: "CPU: \(percent(s.cpu))", open: openActivityMonitor) {
-                        // Details on the left, the heaviest apps beside them, so the panel stays short.
-                        HStack(alignment: .top, spacing: 10) {
-                            VStack(alignment: .leading, spacing: 2) {
-                                Detail("System", percent(s.cpuSystem)); Detail("User", percent(s.cpuUser))
-                            }.frame(width: detailColumn, alignment: .leading)
-                            TopApps(title: "Most CPU, 1 min", apps: s.topCPU, count: topApps, value: percent)
-                        }
-                        Sparkline(values: system.cpuHistory).frame(height: 22).padding(.top, 2)
+            if !stats.isEmpty {
+                VStack(spacing: 2) {
+                    ForEach(stats, id: \.self) { stat in
+                        row(stat, s)
+                            .background(GeometryReader { geometry in
+                                Color.clear.preference(key: RowFrames.self, value: [stat: geometry.frame(in: .named(Self.space))])
+                            })
+                            // The row opens the same app or settings page as its section's badge.
+                            .onTapGesture { hover.close(); DashboardDetailView.opener(stat, s)() }
                     }
                 }
-                if showGPU, let gpu = s.gpu {
-                    GPUSection(gpu: gpu)
-                }
-                if showMemory {
-                    StatSection(icon: "square.stack.3d.up.fill", title: "Memory: \(percent(s.memoryUsed / max(1, s.memoryTotal)))", open: openActivityMonitor) {
-                        Pressure(level: s.pressureLevel, value: s.memoryPressure)
-                        HStack(alignment: .top, spacing: 10) {
-                            VStack(alignment: .leading, spacing: 2) {
-                                Detail("App", bytes(s.memoryApp))
-                                Detail("Wired", bytes(s.memoryWired)); Detail("Compressed", bytes(s.memoryCompressed))
-                            }.frame(width: detailColumn, alignment: .leading)
-                            TopApps(title: "Most memory", apps: s.topMemory, count: topApps, value: bytes)
-                        }
-                        Meter(value: s.memoryUsed / max(1, s.memoryTotal))
-                    }
-                }
-                if showDisk {
-                    StatSection(icon: "externaldrive.fill", title: "Storage: \(percent(s.diskUsed / max(1, s.diskTotal))) used", open: { openSystemSettings("com.apple.settings.Storage") }, help: "Open Storage settings") {
-                        Detail(nil, "\(bytes(s.diskUsed)) / \(bytes(s.diskTotal))")
-                        Meter(value: s.diskUsed / max(1, s.diskTotal))
-                    }
-                }
-                if showBattery {
-                    BatterySection(stats: s)
-                }
-                if showNetwork {
-                    if let wifi = s.wifi {
-                        StatSection(icon: "wifi", title: wifi.name.map { "Wi-Fi: \($0)" } ?? "Wi-Fi", open: { openSystemSettings("com.apple.wifi-settings-extension") }, help: "Open Wi-Fi settings") {
-                            HStack(alignment: .top, spacing: 10) {
-                                VStack(alignment: .leading, spacing: 2) {
-                                    HStack(spacing: 4) {
-                                        Text("Security:").foregroundStyle(.secondary)
-                                        Text(wifi.security).foregroundStyle(wifi.secure ? Color.primary : Color.orange)
-                                        if !wifi.secure { Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(.orange) }
-                                    }.font(.system(size: 11))
-                                    Detail("Signal", "\(wifi.signal) (\(wifi.rssi) dBm)")
-                                    Detail("Band", wifi.rate > 0 ? "\(wifi.band) · \(Int(wifi.rate)) Mbps" : wifi.band)
-                                    Detail("Local IP", s.localIP)
-                                }.frame(width: detailColumn, alignment: .leading)
-                                Traffic(up: s.upload, down: s.download, test: SpeedTest.shared, network: s.wifi.flatMap { $0.name } ?? s.networkName)
-                            }
-                        }
-                    } else {
-                        StatSection(icon: s.networkName == "Offline" ? "wifi.slash" : "cable.connector", title: "Network: \(s.networkName)", open: { openSystemSettings("com.apple.Network-Settings.extension") }, help: "Open Network settings") {
-                            HStack(alignment: .top, spacing: 10) {
-                                Detail("Local IP", s.localIP).frame(width: detailColumn, alignment: .leading)
-                                Traffic(up: s.upload, down: s.download, test: SpeedTest.shared, network: s.wifi.flatMap { $0.name } ?? s.networkName)
-                            }
-                        }
-                    }
-                }
+                .padding(4)
+                .background(RoundedRectangle(cornerRadius: 10).fill(Color.primary.opacity(0.05)))
+                .overlay(RoundedRectangle(cornerRadius: 10).stroke(Color.primary.opacity(0.08)))
             }
-            .background(RoundedRectangle(cornerRadius: 10).fill(Color.primary.opacity(0.05)))
-            .overlay(RoundedRectangle(cornerRadius: 10).stroke(Color.primary.opacity(0.08)))
             if s.thermal == .serious || s.thermal == .critical {
                 Label("Your Mac is running hot", systemImage: "thermometer.high").font(.caption).foregroundStyle(.orange)
             }
@@ -177,7 +162,154 @@ struct DashboardView: View {
             }
         }
         .padding(14)
-        .frame(width: 380)
+        .frame(width: Self.width)
+        .coordinateSpace(.named(Self.space))
+        .onPreferenceChange(RowFrames.self) { hover.rows = $0 }
+    }
+
+    @ViewBuilder private func row(_ stat: DashboardStat, _ s: SystemStats) -> some View {
+        let shown = hover.detail == stat
+        switch stat {
+        case .cpu:
+            SummaryRow(icon: "gauge.with.dots.needle.67percent", title: "CPU", value: percent(s.cpu), meter: s.cpu, selected: shown)
+        case .gpu:
+            SummaryRow(icon: "cube.transparent", title: "GPU", value: percent(s.gpu?.device ?? 0), meter: s.gpu?.device ?? 0, selected: shown)
+        case .memory:
+            let used = s.memoryUsed / max(1, s.memoryTotal)
+            SummaryRow(icon: "square.stack.3d.up.fill", title: "Memory", value: percent(used), meter: used, selected: shown)
+        case .disk:
+            let used = s.diskUsed / max(1, s.diskTotal)
+            SummaryRow(icon: "externaldrive.fill", title: "Storage", value: percent(used), meter: used, selected: shown)
+        case .battery:
+            if s.hasBattery {
+                let tone = BatteryTone(s)
+                SummaryRow(icon: BatteryTone.icon(s), title: "Battery", value: "\(BatteryTone.percent(s))%", valueColor: tone == .red ? .red : .primary,
+                           meter: s.batteryLevel, tint: tone.color, selected: shown)
+            } else {
+                SummaryRow(icon: "bolt.fill", title: "Power", value: s.power.map(watts) ?? "Adapter", selected: shown)
+            }
+        case .network:
+            SummaryRow(icon: s.wifi != nil ? "wifi" : (s.networkName == "Offline" ? "wifi.slash" : "cable.connector"),
+                       title: s.wifi != nil ? "Wi-Fi" : "Network",
+                       value: s.networkName == "Offline" && s.wifi == nil ? "Offline" : "↓ \(rate(s.download))  ↑ \(rate(s.upload))", selected: shown)
+        }
+    }
+}
+
+/// One stat in the summary: badge, name, the number that matters, and a meter where there is one.
+private struct SummaryRow: View {
+    let icon: String
+    let title: String
+    let value: String
+    var valueColor = Color.primary
+    var meter: Double? = nil
+    var tint: Color? = nil
+    let selected: Bool
+    var body: some View {
+        HStack(spacing: 10) {
+            Image(systemName: icon).font(.system(size: 11, weight: .semibold)).foregroundStyle(.primary)
+                .frame(width: 24, height: 24).padding(.top, 4)
+                .background(CatTile().fill(Color.primary.opacity(selected ? 0.2 : 0.12)))
+            VStack(alignment: .leading, spacing: 0) {
+                HStack(spacing: 6) {
+                    Text(title).font(.system(size: 13, weight: .semibold)).lineLimit(1)
+                    Spacer(minLength: 6)
+                    Text(value).font(.system(size: 12)).monospacedDigit().foregroundStyle(valueColor).lineLimit(1)
+                }
+                if let meter { Meter(value: meter, tint: tint) }
+            }
+        }
+        .padding(.horizontal, 8).padding(.vertical, 6)
+        .background(RoundedRectangle(cornerRadius: 7).fill(Color.primary.opacity(selected ? 0.09 : 0)))
+        .contentShape(Rectangle())
+    }
+}
+
+/// The side panel: the row's full section, as the panel used to show every one of them.
+struct DashboardDetailView: View {
+    static let width: CGFloat = 360
+    @ObservedObject var system: SystemMonitor
+    let stat: DashboardStat
+    @AppStorage(Pref.topApps) private var topApps = 2
+
+    var body: some View {
+        section(system.stats).frame(width: Self.width).padding(.vertical, 2)
+    }
+
+    @ViewBuilder private func section(_ s: SystemStats) -> some View {
+        let open = Self.opener(stat, s)
+        switch stat {
+        case .cpu:
+            StatSection(icon: "gauge.with.dots.needle.67percent", title: "CPU: \(percent(s.cpu))", open: open, divider: false) {
+                // Details on the left, the heaviest apps beside them.
+                HStack(alignment: .top, spacing: 10) {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Detail("System", percent(s.cpuSystem)); Detail("User", percent(s.cpuUser))
+                    }.frame(width: detailColumn, alignment: .leading)
+                    TopApps(title: "Most CPU, 1 min", apps: s.topCPU, count: topApps, value: percent)
+                }
+                Sparkline(values: system.cpuHistory).frame(height: 30).padding(.top, 2)
+            }
+        case .gpu:
+            if let gpu = s.gpu { GPUSection(gpu: gpu, divider: false) }
+            else { StatSection(icon: "cube.transparent", title: "GPU", divider: false) { Detail(nil, "Not reported right now") } }
+        case .memory:
+            StatSection(icon: "square.stack.3d.up.fill", title: "Memory: \(percent(s.memoryUsed / max(1, s.memoryTotal)))", open: open, divider: false) {
+                Pressure(level: s.pressureLevel, value: s.memoryPressure)
+                HStack(alignment: .top, spacing: 10) {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Detail("App", bytes(s.memoryApp))
+                        Detail("Wired", bytes(s.memoryWired)); Detail("Compressed", bytes(s.memoryCompressed))
+                    }.frame(width: detailColumn, alignment: .leading)
+                    TopApps(title: "Most memory", apps: s.topMemory, count: topApps, value: bytes)
+                }
+                Meter(value: s.memoryUsed / max(1, s.memoryTotal))
+            }
+        case .disk:
+            StatSection(icon: "externaldrive.fill", title: "Storage: \(percent(s.diskUsed / max(1, s.diskTotal))) used", open: open, help: "Open Storage settings", divider: false) {
+                Detail(nil, "\(bytes(s.diskUsed)) / \(bytes(s.diskTotal))")
+                Meter(value: s.diskUsed / max(1, s.diskTotal))
+            }
+        case .battery:
+            BatterySection(stats: s, divider: false)
+        case .network:
+            if let wifi = s.wifi {
+                StatSection(icon: "wifi", title: wifi.name.map { "Wi-Fi: \($0)" } ?? "Wi-Fi", open: open, help: "Open Wi-Fi settings", divider: false) {
+                    HStack(alignment: .top, spacing: 10) {
+                        VStack(alignment: .leading, spacing: 2) {
+                            HStack(spacing: 4) {
+                                Text("Security:").foregroundStyle(.secondary)
+                                Text(wifi.security).foregroundStyle(wifi.secure ? Color.primary : Color.orange)
+                                if !wifi.secure { Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(.orange) }
+                            }.font(.system(size: 11))
+                            Detail("Signal", "\(wifi.signal) (\(wifi.rssi) dBm)")
+                            Detail("Band", wifi.rate > 0 ? "\(wifi.band) · \(Int(wifi.rate)) Mbps" : wifi.band)
+                            Detail("Local IP", s.localIP)
+                        }.frame(width: detailColumn, alignment: .leading)
+                        Traffic(up: s.upload, down: s.download, test: SpeedTest.shared, network: wifi.name ?? s.networkName)
+                    }
+                }
+            } else {
+                StatSection(icon: s.networkName == "Offline" ? "wifi.slash" : "cable.connector", title: "Network: \(s.networkName)", open: open, help: "Open Network settings", divider: false) {
+                    HStack(alignment: .top, spacing: 10) {
+                        Detail("Local IP", s.localIP).frame(width: detailColumn, alignment: .leading)
+                        Traffic(up: s.upload, down: s.download, test: SpeedTest.shared, network: s.networkName)
+                    }
+                }
+            }
+        }
+    }
+
+    /// What a stat's badge (and its summary row) opens.
+    static func opener(_ stat: DashboardStat, _ s: SystemStats) -> () -> Void {
+        switch stat {
+        case .cpu, .gpu, .memory: return openActivityMonitor
+        case .disk: return { openSystemSettings("com.apple.settings.Storage") }
+        case .battery: return { openSystemSettings("com.apple.Battery-Settings.extension") }
+        case .network:
+            let pane = s.wifi != nil ? "com.apple.wifi-settings-extension" : "com.apple.Network-Settings.extension"
+            return { openSystemSettings(pane) }
+        }
     }
 }
 
@@ -231,6 +363,8 @@ private struct StatSection<Content: View>: View {
     var open: (() -> Void)? = nil
     var help = "Open Activity Monitor"
     var titleColor = Color.primary
+    /// A line under the section, between sections in a list; a section on its own leaves it out.
+    var divider = true
     @ViewBuilder var content: Content
     @StateObject private var hover = Hover()
     private var hovering: Bool { hover.on }
@@ -257,7 +391,7 @@ private struct StatSection<Content: View>: View {
             Spacer(minLength: 0)
         }
         .padding(.horizontal, 12).padding(.vertical, 9)
-        .overlay(alignment: .bottom) { Divider().opacity(0.6) }
+        .overlay(alignment: .bottom) { if divider { Divider().opacity(0.6) } }
     }
 }
 
@@ -458,8 +592,9 @@ enum BatteryTone: Equatable {
 /// GPU load: the device total in the title and meter, the renderer and tiler beside it when reported.
 struct GPUSection: View {
     let gpu: GPULoad
+    var divider = true
     var body: some View {
-        StatSection(icon: "cube.transparent", title: "GPU: \(percent(gpu.device))", open: openActivityMonitor) {
+        StatSection(icon: "cube.transparent", title: "GPU: \(percent(gpu.device))", open: openActivityMonitor, divider: divider) {
             if gpu.renderer != nil || gpu.tiler != nil {
                 HStack(spacing: 10) {
                     if let renderer = gpu.renderer { Detail("Renderer", percent(renderer)).frame(width: detailColumn, alignment: .leading) }
@@ -473,18 +608,19 @@ struct GPUSection: View {
 
 struct BatterySection: View {
     let stats: SystemStats
+    var divider = true
     var body: some View {
         let s = stats
         if s.hasBattery {
             let tone = BatteryTone(s)
             StatSection(icon: BatteryTone.icon(s), title: "Battery: \(BatteryTone.percent(s))%", open: { openSystemSettings("com.apple.Battery-Settings.extension") }, help: "Open Battery settings",
-                        titleColor: tone == .red ? .red : .primary) {
+                        titleColor: tone == .red ? .red : .primary, divider: divider) {
                 Detail(nil, s.charging ? "Charging" : (s.onAC ? "On power adapter" : (s.lowPowerMode ? "On battery · Low Power Mode" : "On battery")))
                 if let power = s.power { Detail("Using", watts(power)) }
                 Meter(value: s.batteryLevel, tint: tone.color)
             }
         } else {
-            StatSection(icon: "bolt.fill", title: "Power: Adapter", open: { openSystemSettings("com.apple.Battery-Settings.extension") }, help: "Open Energy settings") {
+            StatSection(icon: "bolt.fill", title: "Power: Adapter", open: { openSystemSettings("com.apple.Battery-Settings.extension") }, help: "Open Energy settings", divider: divider) {
                 if let power = s.power { Detail("Using", watts(power)) }
             }
         }
@@ -773,6 +909,7 @@ private let hours = (0..<24).map { (String(format: "%02d:00", $0), $0) }
 struct GeneralTab: View {
     @ObservedObject var model: AppModel
     @ObservedObject var state: SettingsState
+    @AppStorage(Pref.panelOnHover) private var panelOnHover = true
     var body: some View {
         SettingsPage {
             SettingsCard(title: "App") {
@@ -786,6 +923,11 @@ struct GeneralTab: View {
                     }))
                 }
                 if let error = state.loginError { SettingsNote(text: error) }
+                Divider()
+                SettingsRow(title: "Open on hover", titleWidth: 118,
+                            info: "The panel opens when the pointer rests on the menu bar icon and closes when it moves away. Rest on a row for its details. A click on the icon keeps the panel open until you click elsewhere.") {
+                    SettingsSwitch(title: "Open on hover", isOn: $panelOnHover)
+                }
             }
             UpdatesCard(updater: Updater.shared)
             SettingsCard(title: "Folders") {

@@ -39,7 +39,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     let monitor = MenuBarMonitor()
     let system = SystemMonitor()
     var statusItem: NSStatusItem!
-    let popover = NSPopover()
+    lazy var dashboard = DashboardPanel(model: model, system: system, openSettings: { [weak self] in self?.showSettings() }, play: { [weak self] in self?.play() })
     var overlay: NSPanel?
     var habitatView: HabitatView?
     lazy var settings = SettingsWindowController(model: model)
@@ -85,17 +85,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
         statusItem.button?.image = TowerIcon.menuBar()
         statusItem.button?.imagePosition = .imageLeft
-        statusItem.button?.toolTip = "Cats in Menubar"
         statusItem.button?.target = self
         statusItem.button?.action = #selector(togglePanel)
-        popover.behavior = .transient
-        let host = NSHostingController(rootView: DashboardView(model: model, system: system,
-            openSettings: { [weak self] in self?.showSettings() }, play: { [weak self] in self?.play() }))
-        host.sizingOptions = [.preferredContentSize]
-        popover.contentViewController = host
-        NotificationCenter.default.addObserver(forName: NSPopover.didCloseNotification, object: popover, queue: .main) { [weak self] _ in
-            self?.system.detailed = false
-        }
+        setUpDashboard()
         WiFiNamePermission.shared.changed = { [weak self] in self?.system.sample() }
         AppModel.log("Launched pid \(ProcessInfo.processInfo.processIdentifier), Accessibility: \(MenuBarMonitor.trusted)")
         model.changed = { [weak self] in self?.applyOptions() }
@@ -103,7 +95,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         model.home = { [weak self] in self?.toggleHome() }
         model.openHiddenApp = { [weak self] bundle in
             // The panel goes first: the app's own menu opens from the menu bar.
-            self?.popover.performClose(nil)
+            self?.dashboard.hide()
             MenuBarTidy.shared.open(bundle)
         }
         MenuBarTidy.shared.layoutChanged = { [weak self] in self?.layoutChanged() }
@@ -191,6 +183,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         system.wantsWiFi = defaults.bool(forKey: Pref.showNetwork)
         system.wantsGPU = defaults.bool(forKey: Pref.showGPU)
         system.wantsPower = defaults.bool(forKey: Pref.showBattery)
+        // The panel opening on hover would cover the tooltip.
+        statusItem.button?.toolTip = defaults.bool(forKey: Pref.panelOnHover) ? nil : "Cats in Menubar"
         systemUpdated(system.stats)
         let interval = max(defaults.double(forKey: Pref.interval), model.power.sampleFloor)
         if interval != monitorInterval { monitorInterval = interval; system.start(interval: interval) }
@@ -293,6 +287,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             if interval != monitorInterval { monitorInterval = interval; system.start(interval: interval) }
         }
         colony.quiet = quietNow
+        // The panel's contents follow the stats on the next pass; then it is measured again.
+        if dashboard.isShown { DispatchQueue.main.async { self.dashboard.resize() } }
         let gait = wheelPace.gait
         wheelPace.update(cpu: stats.cpu)
         // Waking from a nap should not wait for the resting cat's next one-second look.
@@ -409,24 +405,32 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         wheelStep = 0
         if wheelOn && wheelCat != nil { stepWheel() }
     }
-    @objc func togglePanel() {
-        if popover.isShown { popover.performClose(nil); return }
+    @objc func togglePanel() { dashboard.click() }
+    /// The panel under the icon (DashboardPanel): it opens when the pointer rests on the icon, or on a click.
+    func setUpDashboard() {
         guard let button = statusItem.button else { return }
-        // Fresh app lists and Wi-Fi details while the panel is open. The Wi-Fi name needs Location
-        // Services, asked once, the first time the panel opens on Wi-Fi.
-        system.detailed = true
-        system.sample()
-        if system.stats.wifi != nil && defaults.bool(forKey: Pref.showNetwork) { WiFiNamePermission.shared.askIfNeeded() }
-        // Size the panel before showing it; growing after it opens pushes it up behind the menu bar.
-        if let view = popover.contentViewController?.view {
-            view.layoutSubtreeIfNeeded()
-            popover.contentSize = view.fittingSize
+        dashboard.icon = { [weak self] in
+            guard let button = self?.statusItem.button, let window = button.window else { return nil }
+            return window.convertToScreen(button.convert(button.bounds, to: nil))
         }
-        NSApp.activate(ignoringOtherApps: true)
-        popover.show(relativeTo: button.bounds, of: button, preferredEdge: .minY)
-        if let frame = popover.contentViewController?.view.window?.frame, let screen = button.window?.screen {
-            AppModel.log("Panel frame \(frame) screen visible top \(screen.visibleFrame.maxY)")
+        dashboard.blockers = { [weak self] in
+            guard let self else { return .init(enabled: false) }
+            return .init(enabled: self.defaults.bool(forKey: Pref.panelOnHover),
+                         catBusy: self.hovering || self.habitatView?.dragging != nil || self.habitatView?.lasering == true || self.towerDropShown || self.wheelDropShown,
+                         buttonDown: NSEvent.pressedMouseButtons != 0,
+                         command: NSEvent.modifierFlags.contains(.command),
+                         towerMoving: StatusItemDrag.moving)
         }
+        // Fresh app lists and Wi-Fi details while the panel is open.
+        dashboard.willShow = { [weak self] in self?.system.detailed = true; self?.system.sample() }
+        dashboard.didHide = { [weak self] in self?.system.detailed = false }
+        // The Wi-Fi name needs Location Services, asked once, the first time the panel is clicked open on Wi-Fi;
+        // a prompt that pops up from just resting on the icon would be a surprise.
+        dashboard.clicked = { [weak self] in
+            guard let self else { return }
+            if self.system.stats.wifi != nil && self.defaults.bool(forKey: Pref.showNetwork) { WiFiNamePermission.shared.askIfNeeded() }
+        }
+        button.addTrackingArea(NSTrackingArea(rect: .zero, options: [.mouseEnteredAndExited, .activeAlways, .inVisibleRect], owner: dashboard, userInfo: nil))
     }
     @objc func play() { guard !paused else { return }; colony.play() }
     /// The tower icon in screen coordinates, on the menu bar the cats are using. macOS shows status
@@ -501,7 +505,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         statusItem.button?.image = TowerIcon.menuBar(cats: count, open: towerDropShown)
     }
     @objc func showSettings() {
-        popover.performClose(nil)
+        dashboard.hide()
         settings.show()
     }
     /// Cats stay where they are; the next scan moves any cat that ended up over a menu or icon.
@@ -509,7 +513,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         epoch += 1
         scan()
     }
-    @objc func willSleep() { suspended = true; habitatView?.endDrag(); overlay?.orderOut(nil); wheelTimer?.invalidate(); wheelTimer = nil; updateFaceStream() }
+    @objc func willSleep() { suspended = true; dashboard.hide(); habitatView?.endDrag(); overlay?.orderOut(nil); wheelTimer?.invalidate(); wheelTimer = nil; updateFaceStream() }
     @objc func didWake() {
         suspended = false; lastTick = ProcessInfo.processInfo.systemUptime; layoutChanged()
         wheelLast = lastTick; stepWheel(); updateFaceStream()
@@ -636,7 +640,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         monitor.scan(screen: frame, barHeight: height, ownItem: ownRect, skip: tidy.hiddenNow) { [weak self] snapshot in
             guard let self else { return }
             tidy.update(extras: snapshot.extras)
-            if !self.popover.isShown, self.habitatView?.dragging == nil, let button = self.statusItem.button, let window = button.window {
+            if !self.dashboard.isShown, self.habitatView?.dragging == nil, let button = self.statusItem.button, let window = button.window {
                 tidy.keepLeftmost(own: window.convertToScreen(button.convert(button.bounds, to: nil)), extras: snapshot.extras)
             }
             guard generation == self.epoch, !self.paused, !self.suspended else { return }

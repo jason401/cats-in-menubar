@@ -626,7 +626,12 @@ enum SystemClock {
 
 /// A ⌘-drag of a status item, posted as mouse events, then the pointer goes back where it was.
 enum StatusItemDrag {
-    static func perform(from: CGPoint, to: CGPoint, done: @escaping () -> Void) {
+    /// The pointer is ours for a moment: resting on the tower then is not the user's (DashboardPanel).
+    private(set) static var moving = false
+
+    static func perform(from: CGPoint, to: CGPoint, done finished: @escaping () -> Void) {
+        moving = true
+        let done = { moving = false; finished() }
         guard let source = CGEventSource(stateID: .combinedSessionState) else { return done() }
         let home = CGEvent(source: nil)?.location ?? from
         func event(_ type: CGEventType, _ point: CGPoint) -> CGEvent? {
