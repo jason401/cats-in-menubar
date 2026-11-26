@@ -44,8 +44,8 @@ func runProbe() {
         let r = copy(el, kAXExtrasMenuBarAttribute)
         if r.0 == .success, let v = r.1, CFGetTypeID(v) == AXUIElementGetTypeID() { out.append("EXTRAS \(app.bundleIdentifier ?? "?") policy \(app.activationPolicy.rawValue)"); dump(v as! AXUIElement, 1, &out) }
     }
+    // No timeout on the system-wide element: it would become the default for every question this app asks.
     let system = AXUIElementCreateSystemWide()
-    AXUIElementSetMessagingTimeout(system, 0.3)
     var last = ""
     for x in stride(from: Float(0), through: 1920, by: 4) {
         var hit: AXUIElement?

@@ -74,11 +74,6 @@ final class FinderShortcuts: ObservableObject {
     private var tapPort: CFMachPort?
     private var tapLoop: CFRunLoop?
     private var thread: Thread?
-    private lazy var systemWide: AXUIElement = {
-        let element = AXUIElementCreateSystemWide()
-        AXUIElementSetMessagingTimeout(element, 0.15)
-        return element
-    }()
     private var restore: (count: Int, items: [[NSPasteboard.PasteboardType: Data]])?
 
     private init() {
@@ -178,9 +173,14 @@ final class FinderShortcuts: ObservableObject {
         }
     }
 
+    /// Asks Finder itself, with a short timeout on Finder's element only: a timeout set on the system-wide
+    /// element would become the default for every Accessibility question this app asks.
     private func editingText() -> Bool {
+        guard let finder = NSRunningApplication.runningApplications(withBundleIdentifier: Self.finderID).first else { return false }
+        let app = AXUIElementCreateApplication(finder.processIdentifier)
+        AXUIElementSetMessagingTimeout(app, 0.15)
         var focused: CFTypeRef?
-        guard AXUIElementCopyAttributeValue(systemWide, kAXFocusedUIElementAttribute as CFString, &focused) == .success,
+        guard AXUIElementCopyAttributeValue(app, kAXFocusedUIElementAttribute as CFString, &focused) == .success,
               let focused, CFGetTypeID(focused) == AXUIElementGetTypeID() else { return false }
         var role: CFTypeRef?
         guard AXUIElementCopyAttributeValue(focused as! AXUIElement, kAXRoleAttribute as CFString, &role) == .success else { return false }
