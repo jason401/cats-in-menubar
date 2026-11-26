@@ -943,50 +943,69 @@ func testPanelHover(_ expect: (@autoclosure () -> Bool, String) -> Void) {
 }
 
 func testQuitOnClose(_ expect: (@autoclosure () -> Bool, String) -> Void) {
-    let window = WindowSample(id: 1, pid: 7, layer: 0, onscreen: true, alpha: 1, width: 600, height: 400)
-    expect(QuitOnCloseRules.counts(window, inSpace: { false }), "a visible window keeps its app open")
-    var off = window; off.onscreen = false
-    expect(QuitOnCloseRules.counts(off, inSpace: { true }), "minimized windows and other desktops still belong to a Space")
-    expect(!QuitOnCloseRules.counts(off, inSpace: { false }), "an invisible leftover with no Space does not count (TextEdit keeps one)")
-    var small = window; small.width = 40
-    expect(!QuitOnCloseRules.counts(small, inSpace: { true }), "tiny windows do not count")
-    var clear = window; clear.alpha = 0
-    expect(!QuitOnCloseRules.counts(clear, inSpace: { true }), "transparent windows do not count")
-    var palette = window; palette.layer = 3
-    expect(QuitOnCloseRules.counts(palette, inSpace: { false }), "a visible floating panel keeps its app open")
-    palette.onscreen = false
-    expect(!QuitOnCloseRules.counts(palette, inSpace: { true }), "a hidden floating panel does not")
-    var menu = window; menu.layer = Int(CGWindowLevelForKey(.mainMenuWindow))
-    expect(!QuitOnCloseRules.counts(menu, inSpace: { true }), "menu bar level windows do not count")
-    var asked = false
-    _ = QuitOnCloseRules.counts(window, inSpace: { asked = true; return true })
-    expect(!asked, "on-screen windows never need the Space lookup")
-    let now = Date()
     typealias R = QuitOnCloseRules
-    expect(R.step(windows: 0, hadWindows: false, hidden: false, emptySince: nil, now: now) == .keep, "an app that never showed a window stays")
-    expect(R.step(windows: 2, hadWindows: true, hidden: false, emptySince: now, now: now) == .keep, "an app with windows stays")
-    expect(R.step(windows: 0, hadWindows: true, hidden: true, emptySince: now.addingTimeInterval(-10), now: now) == .keep, "a hidden app stays")
-    expect(R.step(windows: 0, hadWindows: true, hidden: false, emptySince: nil, now: now) == .wait, "the first empty check only starts the wait")
-    expect(R.step(windows: 0, hadWindows: true, hidden: false, emptySince: now.addingTimeInterval(-1), now: now) == .wait, "a short gap is not a close")
-    expect(R.step(windows: 0, hadWindows: true, hidden: false, emptySince: now.addingTimeInterval(-R.grace), now: now) == .quit, "empty for the grace period quits")
-    expect(R.step(windows: 0, hadWindows: true, hidden: false, emptySince: now.addingTimeInterval(-R.quickGrace), now: now, grace: R.quickGrace) == .quit
-           && R.step(windows: 0, hadWindows: true, hidden: false, emptySince: now.addingTimeInterval(-R.quickGrace), now: now) == .wait,
-           "right after a click or ⌘W a shorter gap is enough")
-    expect(R.quickGrace < R.grace && R.quickChecks.last! > R.quickGrace && R.quickChecks.last! - R.quickChecks.first! >= R.quickGrace,
-           "quick checks span the quick grace, so one of them can confirm it")
-    expect(!R.pickable(bundle: FinderShortcuts.finderID, policy: .regular, own: "me") && !R.pickable(bundle: "me", policy: .regular, own: "me")
-           && !R.pickable(bundle: "x", policy: .accessory, own: "me") && !R.pickable(bundle: nil, policy: .regular, own: "me")
-           && R.pickable(bundle: "com.apple.TextEdit", policy: .regular, own: "me"), "only regular apps, never Finder or this app")
-    let kept: Set<String> = ["com.apple.Music"], picks: Set<String> = ["com.apple.Preview"]
-    expect(R.watched(bundle: "com.apple.TextEdit", policy: .regular, own: "me", all: true, picked: picks, exceptions: kept)
-           && !R.watched(bundle: "com.apple.Music", policy: .regular, own: "me", all: true, picked: picks, exceptions: kept),
-           "all apps: everything but the ones kept running")
-    expect(R.watched(bundle: "com.apple.Preview", policy: .regular, own: "me", all: false, picked: picks, exceptions: kept)
-           && !R.watched(bundle: "com.apple.TextEdit", policy: .regular, own: "me", all: false, picked: picks, exceptions: kept),
+    let window = WindowSample(id: 1, pid: 7, layer: 0, onscreen: true, alpha: 1, width: 600, height: 400)
+    expect(R.kind(window, app: 7, everything: false) == .shown, "a visible window keeps its app open")
+    var off = window; off.onscreen = false
+    expect(R.kind(off, app: 7, everything: false) == .ownOffscreen, "an off-screen window needs a closer look")
+    var small = window; small.width = 40
+    var clear = window; clear.alpha = 0
+    expect(R.kind(small, app: 7, everything: true) == .unrelated && R.kind(clear, app: 7, everything: true) == .unrelated, "tiny and transparent windows do not count")
+    var toolbar = window; toolbar.pid = 9; toolbar.layer = 3
+    expect(R.kind(toolbar, app: 7, everything: false) == .unrelated && R.kind(toolbar, app: 7, everything: true) == .shown,
+           "other processes' visible windows count only in the last check before a quit")
+    var ownPalette = window; ownPalette.layer = 3
+    expect(R.kind(ownPalette, app: 7, everything: false) == .unrelated, "an app's floating palette alone does not mark a window shown")
+    expect(R.offscreenKeepsApp(spaces: nil, visible: [1]), "no answer about desktops keeps the app")
+    expect(!R.offscreenKeepsApp(spaces: [], visible: [1]), "a window on no desktop is a leftover (TextEdit keeps one)")
+    expect(R.offscreenKeepsApp(spaces: [2], visible: [1]), "a window on another desktop keeps the app")
+    expect(!R.offscreenKeepsApp(spaces: [1], visible: [1]), "an off-screen window on the desktop in front was only hidden")
+    expect(R.offscreenKeepsApp(spaces: [1], visible: nil), "unknown desktops in front keep the app")
+    expect(R.standardWindow(fullScreen: false, minimized: false, role: kAXWindowRole, subrole: kAXStandardWindowSubrole)
+           && R.standardWindow(fullScreen: true, minimized: false, role: kAXWindowRole, subrole: "AXDialog")
+           && R.standardWindow(fullScreen: false, minimized: true, role: kAXWindowRole, subrole: "AXDialog")
+           && R.standardWindow(fullScreen: false, minimized: false, role: kAXWindowRole, subrole: nil), "standard, full screen and minimized windows count")
+    expect(!R.standardWindow(fullScreen: false, minimized: false, role: kAXWindowRole, subrole: "AXDialog")
+           && !R.standardWindow(fullScreen: false, minimized: false, role: kAXSheetRole, subrole: nil), "dialogs and sheets do not")
+    expect(R.schedulesCheck(.windowDestroyed, closeRequested: false) && !R.schedulesCheck(.appHidden, closeRequested: false)
+           && R.schedulesCheck(.appHidden, closeRequested: true) && !R.schedulesCheck(.other, closeRequested: true),
+           "only a window going away, or hiding right after a close click, starts the checks")
+    expect(!R.shouldQuit(hadWindows: false, terminated: false, hidden: false, closeRequested: false, minimized: false, userFacingWindow: false),
+           "an app that never showed a window stays")
+    expect(R.shouldQuit(hadWindows: true, terminated: false, hidden: false, closeRequested: false, minimized: false, userFacingWindow: false),
+           "no window left: quit")
+    expect(!R.shouldQuit(hadWindows: true, terminated: false, hidden: false, closeRequested: false, minimized: true, userFacingWindow: false)
+           && !R.shouldQuit(hadWindows: true, terminated: false, hidden: false, closeRequested: false, minimized: false, userFacingWindow: true),
+           "a minimized or open window keeps the app")
+    expect(!R.shouldQuit(hadWindows: true, terminated: false, hidden: true, closeRequested: false, minimized: false, userFacingWindow: false)
+           && R.shouldQuit(hadWindows: true, terminated: false, hidden: true, closeRequested: true, minimized: false, userFacingWindow: false),
+           "a hidden app (⌘H) quits only right after a click on a close button")
+    expect(R.checkDelays == [0.35, 1.0, 2.2] && R.confirmDelay == 1.2 && R.windowRereads == [0.5, 1.5, 4.0], "checks after a close, then a confirming one")
+    let frame = CGRect(x: 100, y: 100, width: 600, height: 400)
+    expect(R.inCloseArea(CGPoint(x: 120, y: 120), of: frame) && !R.inCloseArea(CGPoint(x: 200, y: 120), of: frame), "only the close button's corner is looked at")
+    expect(R.onCloseButton(CGPoint(x: 120, y: 120), of: frame) && !R.onCloseButton(CGPoint(x: 140, y: 120), of: frame),
+           "by place alone, only the close button's diagonal counts, never the minimize button")
+    expect(R.minimized(tags: 1 << 60) && !R.minimized(tags: 1 << 39), "the window server's minimized tag")
+    func covered(_ bundle: String, all: Bool = true, picked: Set<String> = [], kept: Set<String> = [], bars: Set<String> = [],
+                 policy: NSApplication.ActivationPolicy = .regular, ui: Bool = false, background: Bool = false, url: URL? = nil) -> Bool {
+        R.covered(bundle: bundle, url: url, policy: policy, own: "me", uiElement: ui, backgroundOnly: background,
+                  scope: QuitScope(all: all, picked: picked, exceptions: kept, menuBarApps: bars), bundleID: { $0.lastPathComponent == "Host.app" ? "com.host" : nil })
+    }
+    expect(covered("com.apple.TextEdit") && !covered("com.apple.Music", kept: ["com.apple.Music"]), "all apps: everything but the ones kept running")
+    expect(covered("com.apple.Preview", all: false, picked: ["com.apple.Preview"]) && !covered("com.apple.TextEdit", all: false, picked: ["com.apple.Preview"]),
            "picked: only the picked apps")
-    expect(!R.watched(bundle: FinderShortcuts.finderID, policy: .regular, own: "me", all: true, picked: [], exceptions: [])
-           && !R.watched(bundle: "x", policy: .accessory, own: "me", all: true, picked: [], exceptions: []),
-           "all apps still never covers Finder or apps without a Dock icon")
+    expect(!covered("com.apple.finder") && !covered("com.apple.mobilephone", all: false, picked: ["com.apple.mobilephone"]) && !covered("me"),
+           "Finder, Phone and this app never quit, even when picked")
+    expect(!covered("x", policy: .accessory) && !covered("x", background: true) && !covered("x", all: false, picked: ["x"], background: true),
+           "apps without a Dock icon and background apps never quit")
+    expect(!covered("bar", ui: true) && covered("bar", bars: ["bar"], ui: true), "menu bar apps quit only once allowed")
+    expect(!covered("com.host.helper", kept: ["com.host"], url: URL(fileURLWithPath: "/Applications/Host.app/Contents/Helpers/Helper.app")),
+           "an app inside a kept app's bundle is kept too")
+    expect(!covered("com.parallels.winapp.notepad", kept: ["com.parallels.desktop.console"]), "Windows apps of a kept Parallels are kept")
+    expect(!R.pickable(bundle: "com.apple.finder", policy: .regular, own: "me") && !R.pickable(bundle: "me", policy: .regular, own: "me")
+           && !R.pickable(bundle: "x", policy: .accessory, own: "me") && R.pickable(bundle: "com.apple.TextEdit", policy: .regular, own: "me"),
+           "only regular apps can be listed, never Finder or this app")
+    expect(QuitOnClose.flag(NSNumber(value: true)) && QuitOnClose.flag("YES") && !QuitOnClose.flag(nil) && !QuitOnClose.flag("0"), "Info.plist flags read as numbers or text")
     expect(Pref.defaults[Pref.quitOnCloseAll] as? Bool == true
            && (Pref.defaults[Pref.quitOnCloseExceptions] as? [String])?.contains("com.apple.Music") == true
            && R.defaultExceptions.contains("com.apple.mobilephone") && R.defaultExceptions.contains("com.kakao.KakaoTalkMac") && R.defaultExceptions.contains("local.aiilluminati"),

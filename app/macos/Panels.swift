@@ -32,6 +32,7 @@ enum Pref {
     static let quitOnCloseApps = "quitOnCloseApps"     // picked bundle ids ("Picked apps")
     static let quitOnCloseAll = "quitOnCloseAll"       // every app but the exceptions, or only picked apps
     static let quitOnCloseExceptions = "quitOnCloseExceptions" // bundle ids kept running in "All apps"
+    static let quitOnCloseMenuBarApps = "quitOnCloseMenuBarApps" // menu bar apps allowed to quit in "All apps" while in the Dock
     static let panelOnHover = "panelOnHover"           // resting the pointer on the icon opens the panel (DashboardPanel)
     static let defaults: [String: Any] = [
         count: 3, fixedLineup: false, rotate: false, rotatePace: 1, paused: false, quiet: false, activity: 1, adaptivePower: true, allowDrag: true,
@@ -1436,7 +1437,7 @@ struct AccessibilityTab: View {
                 }
             }
             SettingsCard(title: "Quit on close") {
-                SettingsRow(title: "Quit on close", titleWidth: 118, info: "An app quits when you close its last window. Unsaved documents still ask first. Minimized windows, windows on other desktops and hidden apps (⌘H) keep it open. An app that never showed a window is left alone.") {
+                SettingsRow(title: "Quit on close", titleWidth: 118, info: "An app quits about a second after you close its last window (the red button or ⌘W). Unsaved documents still ask first. Minimized windows and windows on other desktops keep it open; a hidden app (⌘H) quits only right after you click a close button. An app that never showed a window is left alone. Some apps keep working with no window, such as a screen recorder: keep those running.") {
                     SettingsSwitch(title: "Quit apps when their last window closes", isOn: $quitOnClose)
                 }
                 Divider()
@@ -1448,6 +1449,13 @@ struct AccessibilityTab: View {
                     SettingsStatus(text: AppPicker.summary(quitter.listedCount))
                     SettingsAction(title: "Choose…") { AppPicker.show(.quitOnClose) }.frame(width: 76)
                 }
+                if quitAll {
+                    Divider()
+                    SettingsRow(title: "Menu bar apps", titleWidth: 118, info: "Menu bar apps stay open. Ones picked here quit after their last window closes while they show a Dock icon. Keep running still wins.") {
+                        SettingsStatus(text: AppPicker.summary(quitter.menuBarAppCount))
+                        SettingsAction(title: "Choose…") { AppPicker.show(.quitMenuBarApps) }.frame(width: 76)
+                    }
+                }
             }
             ScrollCards(reverser: ScrollDirection.shared)
             MenuBarCards(tidy: MenuBarTidy.shared)
@@ -1457,13 +1465,14 @@ struct AccessibilityTab: View {
 
 /// App lists open in their own small window from a Choose… button, so the settings page stays short.
 enum AppPicker: String {
-    case quitOnClose, tidy, scrollSources
+    case quitOnClose, quitMenuBarApps, tidy, scrollSources
     static let size = NSSize(width: 320, height: 440)
     private static var windows: [AppPicker: NSWindow] = [:]
 
     var title: String {
         switch self {
         case .quitOnClose: "Quit on close apps"
+        case .quitMenuBarApps: "Menu bar apps to quit"
         case .tidy: "Apps in the panel"
         case .scrollSources: "Scroll sources"
         }
@@ -1471,6 +1480,7 @@ enum AppPicker: String {
     var view: AnyView {
         switch self {
         case .quitOnClose: AnyView(QuitAppsPicker(quitter: QuitOnClose.shared))
+        case .quitMenuBarApps: AnyView(QuitMenuBarAppsPicker(quitter: QuitOnClose.shared))
         case .tidy: AnyView(TidyAppsPicker(tidy: MenuBarTidy.shared))
         case .scrollSources: AnyView(ScrollSourcesList(reverser: ScrollDirection.shared))
         }
@@ -1565,6 +1575,16 @@ struct QuitAppsPicker: View {
                       setPicked: quitter.setListed)
             .onAppear { quitter.refreshApps() }
             .onChange(of: quitAll) { quitter.refreshApps() }
+    }
+}
+
+struct QuitMenuBarAppsPicker: View {
+    @ObservedObject var quitter: QuitOnClose
+    var body: some View {
+        AppPickerList(apps: quitter.menuBarCandidates, picked: quitter.menuBarApps, empty: "No menu bar apps are open.",
+                      footer: "Switched on: the menu bar app quits when its last window closes, while it shows a Dock icon.",
+                      setPicked: quitter.setMenuBarApp)
+            .onAppear { quitter.refreshApps() }
     }
 }
 
