@@ -879,36 +879,50 @@ func batteryPreviewStates() -> [(String, SystemStats)] {
 
 func testFinderKeys(_ expect: (@autoclosure () -> Bool, String) -> Void) {
     let cmd = CGEventFlags.maskCommand
-    var on = FinderKeyContext(cutPaste: true, pasteImages: true, finderFront: true)
-    func act(_ key: Int64, _ c: FinderKeyContext, _ flags: CGEventFlags = cmd) -> FinderKeyAction { FinderKeys.action(key: key, flags: flags, c) }
-    expect(act(FinderKeys.x, on) == .cutAsCopy, "⌘X in Finder becomes ⌘C and a cut")
-    expect(act(FinderKeys.v, on) == .pass, "⌘V with no cut and no image is Finder's own paste")
-    on.cutPending = true; on.clipboardHasFiles = true
-    expect(act(FinderKeys.v, on) == .moveHere, "⌘V after a cut moves the files")
-    expect(act(FinderKeys.c, on) == .forgetCut && act(FinderKeys.escape, on, []) == .forgetCut, "⌘C or Esc cancels a cut")
-    expect(act(FinderKeys.v, on, [.maskCommand, .maskAlternate]) == .pass, "⌥⌘V stays Finder's own move")
-    expect(act(FinderKeys.v, on, [.maskCommand, .maskShift]) == .pass, "⇧⌘V is left alone")
-    var editing = on; editing.editingText = true
-    expect(act(FinderKeys.x, editing) == .pass && act(FinderKeys.v, editing) == .pass && act(FinderKeys.escape, editing, []) == .pass,
-           "renaming and search fields keep ⌘X, ⌘V and Esc")
-    var other = on; other.finderFront = false
+    let on = FinderKeyContext(cutPaste: true, pasteImages: true, finderFront: true)
+    func act(_ key: Int64, _ c: FinderKeyContext, _ flags: CGEventFlags = cmd) -> FinderKeyAction { FinderKeys.route(key: key, flags: flags, c).action }
+    func forgets(_ key: Int64, _ c: FinderKeyContext, _ flags: CGEventFlags = cmd) -> Bool { FinderKeys.route(key: key, flags: flags, c).forgetCut }
+    expect(act(FinderKeys.x, on) == .cut, "⌘X in Finder marks the selection")
+    var cut = on; cut.marked = true; cut.clipboardUnchanged = true
+    expect(act(FinderKeys.v, cut) == .move && act(FinderKeys.v, cut, [.maskCommand, .maskShift]) == .move, "⌘V (and ⇧⌘V) after a cut moves the items")
+    var busy = cut; busy.moving = true
+    expect(act(FinderKeys.v, busy) == .swallow, "⌘V while a move runs does nothing")
+    expect(act(FinderKeys.c, cut) == .pass && forgets(FinderKeys.c, cut), "⌘C copies as usual and drops the cut")
+    var stale = cut; stale.clipboardUnchanged = false
+    expect(act(FinderKeys.v, stale) == .pasteImage && forgets(FinderKeys.v, stale), "once something else was copied, ⌘V drops the cut and pastes as usual")
+    expect(act(FinderKeys.v, on, [.maskCommand, .maskAlternate]) == .pass && act(FinderKeys.x, on, [.maskCommand, .maskControl]) == .pass,
+           "⌥⌘V and ⌃ combinations stay Finder's own")
+    expect(act(FinderKeys.v, on) == .pasteImage, "⌘V with images on looks at the clipboard first")
+    expect(act(FinderKeys.v, on, [.maskCommand, .maskShift]) == .pass, "⇧⌘V is never an image paste")
+    var pasting = on; pasting.pastingImage = true
+    expect(act(FinderKeys.v, pasting) == .pass, "one image paste at a time")
+    var editing = cut; editing.editingText = true
+    expect(act(FinderKeys.x, editing) == .pass && act(FinderKeys.v, editing) == .pass && !forgets(FinderKeys.c, editing), "renaming and search fields keep the keys")
+    var other = cut; other.finderFront = false
     expect(act(FinderKeys.x, other) == .pass && act(FinderKeys.v, other) == .pass, "other apps are never touched")
     var off = on; off.cutPaste = false; off.pasteImages = false
     expect(act(FinderKeys.x, off) == .pass && act(FinderKeys.v, off) == .pass, "both settings off: nothing changes")
-    var image = FinderKeyContext(cutPaste: true, pasteImages: true, finderFront: true, clipboardHasImage: true)
-    expect(act(FinderKeys.v, image) == .pasteImage, "⌘V with a copied image saves it as a file")
-    image.clipboardHasFiles = true
-    expect(act(FinderKeys.v, image) == .pass, "copied files (which carry icons as images) paste as files")
-    image.clipboardHasFiles = false; image.pasteImages = false
-    expect(act(FinderKeys.v, image) == .pass, "paste images off: Finder's own paste")
-    var cutOnly = on; cutOnly.cutPaste = false
-    expect(act(FinderKeys.x, cutOnly) == .pass && act(FinderKeys.v, cutOnly) == .pass, "cut and paste off: ⌘X and ⌘V stay Finder's")
-    expect(act(FinderKeys.x, on, []) == .pass, "X without ⌘ is typing")
-    var stale = on; stale.cutPending = false
-    expect(act(FinderKeys.v, stale) == .pass, "a cut is gone once something else was copied")
+    var cutOnly = cut; cutOnly.cutPaste = false
+    expect(act(FinderKeys.x, cutOnly) == .pass && act(FinderKeys.v, cutOnly) == .pasteImage, "cut and paste off: ⌘X stays Finder's")
+    expect(act(FinderKeys.x, on, []) == .pass && act(53, cut, []) == .pass, "typing and Esc are left alone")
+    expect(FinderKeys.imageType(["public.png", "public.tiff"]) == "public.png" && FinderKeys.imageType(["public.tiff"]) == "public.tiff"
+           && FinderKeys.imageType(["public.file-url", "public.png"]) == nil && FinderKeys.imageType(["public.utf8-plain-text"]) == nil,
+           "PNG first, any image next, never when files are copied")
     var parts = DateComponents(); parts.year = 2026; parts.month = 11; parts.day = 23; parts.hour = 21; parts.minute = 30; parts.second = 5
-    let date = Calendar.current.date(from: parts)!
-    expect(FinderKeys.imageName(at: date) == "Pasted Image 2026-11-23 at 21.30.05.png", "pasted images are named like screenshots")
+    let date = Calendar(identifier: .gregorian).date(from: parts)!
+    expect(FinderKeys.imageName(at: date) == "Pasted_Image_20261123_213005.png", "pasted images are named Pasted_Image_ and the time")
+    let taken: Set<String> = ["a.png", "a 2.png", "folder"]
+    expect(FinderKeys.freeName("a.png") { taken.contains($0) } == "a 3.png" && FinderKeys.freeName("b.png") { taken.contains($0) } == "b.png"
+           && FinderKeys.freeName("folder") { taken.contains($0) } == "folder 2", "taken names get 2, 3… like Finder")
+    expect(FinderKeys.needsFinder(NSError(domain: NSPOSIXErrorDomain, code: Int(EPERM)))
+           && FinderKeys.needsFinder(NSError(domain: NSCocoaErrorDomain, code: NSFileWriteNoPermissionError))
+           && FinderKeys.needsFinder(NSError(domain: NSCocoaErrorDomain, code: 1, userInfo: [NSUnderlyingErrorKey: NSError(domain: NSPOSIXErrorDomain, code: Int(EACCES))]))
+           && !FinderKeys.needsFinder(NSError(domain: NSCocoaErrorDomain, code: NSFileNoSuchFileError)), "permission errors go to Finder")
+    let a = URL(fileURLWithPath: "/x/a"), b = URL(fileURLWithPath: "/x/b"), c = URL(fileURLWithPath: "/x/c")
+    expect(FinderKeys.remaining([a, b, c], sourceGone: { $0 != b }, arrived: { $0 != c }) == [b, c], "an item counts as moved once gone from its folder and in the new one")
+    expect(FinderKeys.position(0, of: 1) == nil && FinderKeys.position(1, of: 3) == "2 of 3", "a move counts items only when there are several")
+    expect(FinderBridge.literal("a\"b\\c") == "\"a\\\"b\\\\c\"", "paths are quoted for AppleScript")
+    expect(Pref.defaults[Pref.finderCutPasteHUD] as? Bool == true, "the cut panel shows unless turned off")
 }
 
 func testPanelHover(_ expect: (@autoclosure () -> Bool, String) -> Void) {

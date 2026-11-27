@@ -49,6 +49,7 @@ cat > "$APP/Contents/Info.plist" <<PLIST
 <key>LSMinimumSystemVersion</key><string>14.0</string>
 <key>LSUIElement</key><true/>
 <key>NSHighResolutionCapable</key><true/>
+<key>NSAppleEventsUsageDescription</key><string>Only for the Finder shortcuts you turn on: to read the items you cut and the folder you paste into.</string>
 <key>NSLocationUsageDescription</key><string>Only to show the name of your Wi-Fi network in the panel. Your location is never read.</string>
 <key>NSLocationWhenInUseUsageDescription</key><string>Only to show the name of your Wi-Fi network in the panel. Your location is never read.</string>
 </dict></plist>

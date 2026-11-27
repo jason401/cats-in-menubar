@@ -28,6 +28,7 @@ enum Pref {
     static let tidyLeftmost = "menuBarTidyLeftmost" // keep the tower left of every other icon while tidying
     static let finderCutPaste = "finderCutPaste"       // ⌘X then ⌘V moves files in Finder (FinderShortcuts)
     static let finderPasteImages = "finderPasteImages" // ⌘V in Finder saves a copied image as a PNG file
+    static let finderCutPasteHUD = "finderCutPasteHUD" // the floating panel listing cut items (on unless turned off)
     static let quitOnClose = "quitOnClose"             // picked apps quit when their last window closes (QuitOnClose)
     static let quitOnCloseApps = "quitOnCloseApps"     // picked bundle ids ("Picked apps")
     static let quitOnCloseAll = "quitOnCloseAll"       // every app but the exceptions, or only picked apps
@@ -38,7 +39,7 @@ enum Pref {
         count: 3, fixedLineup: false, rotate: false, rotatePace: 1, paused: false, quiet: false, activity: 1, adaptivePower: true, allowDrag: true,
         nightQuiet: false, nightFrom: 23, nightTo: 7, interval: 2.0, topApps: 2, toyColor: -1, laser: true, scrollReverse: false, display: "",
         showCPU: true, showGPU: true, showMemory: true, showDisk: true, showBattery: true, showNetwork: true, cpuWheel: false, wheelSwapRange: WheelShift.defaultRange, wheelBattery: true, wheelBatteryMono: false, faceStream: false,
-        tidy: false, tidyLeftmost: true, finderCutPaste: false, finderPasteImages: false, quitOnClose: false,
+        tidy: false, tidyLeftmost: true, finderCutPaste: false, finderPasteImages: false, finderCutPasteHUD: true, quitOnClose: false,
         quitOnCloseAll: true, quitOnCloseExceptions: QuitOnCloseRules.defaultExceptions, panelOnHover: true,
     ]
 }
@@ -1417,6 +1418,7 @@ struct AccessibilityTab: View {
     @ObservedObject var quitter: QuitOnClose
     @AppStorage(Pref.finderCutPaste) private var cutPaste = false
     @AppStorage(Pref.finderPasteImages) private var pasteImages = false
+    @AppStorage(Pref.finderCutPasteHUD) private var showHUD = true
     @AppStorage(Pref.quitOnClose) private var quitOnClose = false
     @AppStorage(Pref.quitOnCloseAll) private var quitAll = true
     var body: some View {
@@ -1424,12 +1426,18 @@ struct AccessibilityTab: View {
             SettingsCard(title: "Accessibility") {
                 AccessibilityPermissionRow(model: model, info: "Everything on this page needs it, as the cats do.")
             }
-            SettingsCard(title: "Finder", info: "Renaming and other text fields always get ⌘X and ⌘V unchanged.") {
-                SettingsRow(title: "Cut & paste", titleWidth: 118, info: "⌘X marks the selected files; ⌘V in another folder moves them with Finder's own Move Item Here, so Undo works. ⌘C or Esc cancels.") {
+            SettingsCard(title: "Finder", info: "Renaming and other text fields always get ⌘X and ⌘V unchanged. The first time, macOS asks to let this app control Finder.") {
+                SettingsRow(title: "Cut & paste", titleWidth: 118, info: "Select items in Finder and press ⌘X to cut them; open the destination folder and press ⌘V to move them there. ⌘C cancels. A name already taken there gets a number, like “name 2”.") {
                     SettingsSwitch(title: "Cut and paste files in Finder", isOn: $cutPaste)
                 }
+                if cutPaste {
+                    Divider()
+                    SettingsRow(title: "Floating panel", titleWidth: 118, info: "Shows the cut items at the top of the screen while Finder is in front, and a move's progress.") {
+                        SettingsSwitch(title: "Show floating panel", isOn: $showHUD)
+                    }
+                }
                 Divider()
-                SettingsRow(title: "Paste images", titleWidth: 118, info: "⌘V in a Finder folder saves a copied image (a screenshot, a picture from a browser) as a PNG file there. Copied files paste as usual.") {
+                SettingsRow(title: "Paste images", titleWidth: 118, info: "When Finder is in front, ⌘V saves a copied image (a screenshot, a picture from a browser) as a PNG in the current folder. Copied files paste as usual.") {
                     SettingsSwitch(title: "Paste copied images as files", isOn: $pasteImages)
                 }
                 if (cutPaste || pasteImages) && !finder.running {
