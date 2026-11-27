@@ -3,35 +3,33 @@ import ApplicationServices
 import SwiftUI
 import UniformTypeIdentifiers
 
-// Finder shortcuts, both off by default (Settings > Accessibility). They work as Vorssaint's do, written anew:
-// - Cut and paste: ⌘X in Finder marks the selected items and puts their URLs on the clipboard. More ⌘X
-//   adds to the cut unless "Add to cut items" is off. ⌘V moves the marked items while that clipboard is
-//   current. After another copy, ⌃⌘V and the floating panel can still move them. The panel can also copy them.
-// - Paste images as files: ⌘V in a Finder folder while the clipboard holds an image (and no files) saves
-//   it there as a PNG.
-// Finder is asked for its selection and its current folder over Automation (asked for once, the first
-// time). Text fields (renaming, search) always get the keys unchanged. Needs Accessibility, like the cats.
+// Finder shortcuts (Settings > Accessibility).
+// ⌘X collects items to move. With copy accumulation enabled, ⌘C collects items to copy.
+// ⌘V uses the batch while its clipboard is current. ⌃⌘V applies the batch after another copy.
+// The image shortcut saves a clipboard image as PNG in the current folder.
+// Finder Automation reads the selection and destination, and Accessibility identifies text fields.
 
 /// What the tap does with one key press. A pure decision, so it can be tested without a keyboard.
 enum FinderKeyAction: Equatable {
-    case pass            // leave the key alone
-    case cut             // swallow ⌘X and mark Finder's selection
-    case move            // swallow ⌘V and move the marked items here
-    case swallow         // ignore another cut or move while a transfer is running
-    case pasteImage      // swallow ⌘V and paste the clipboard's image as a file (or replay ⌘V if it holds none)
+    case pass
+    case collect(FinderTransfer)
+    case transfer(FinderTransfer)
+    case waitForSelection
+    case swallow
+    case pasteImage
 }
 
 struct FinderKeyContext: Equatable {
-    var cutPaste = false, pasteImages = false
+    var cutPaste = false, copyAdds = false, pasteImages = false
     var finderFront = false, editingText = false
-    var marked = false                  // items are cut
-    var clipboardUnchanged = false      // the clipboard is still the one the cut wrote
-    var transferring = false, pastingImage = false
+    var batchKind: FinderTransfer?
+    var clipboardUnchanged = false
+    var collecting = false, transferring = false, pastingImage = false
 }
 
 enum FinderKeys {
     static let x: Int64 = 7, c: Int64 = 8, v: Int64 = 9
-    static let moveShortcut = "⌃⌘V"
+    static let batchShortcut = "⌃⌘V"
     private static let modifiers: CGEventFlags = [.maskCommand, .maskControl, .maskAlternate, .maskShift]
 
     /// ⌘ held, without ⌃ or ⌥. ⇧ may be held.
@@ -39,22 +37,28 @@ enum FinderKeys {
         flags.contains(.maskCommand) && flags.intersection([.maskControl, .maskAlternate]).isEmpty
     }
 
-    static func explicitMove(_ flags: CGEventFlags) -> Bool {
+    static func explicitTransfer(_ flags: CGEventFlags) -> Bool {
         flags.intersection(modifiers) == [.maskControl, .maskCommand]
+    }
+
+    static func plainCopy(_ flags: CGEventFlags) -> Bool {
+        flags.intersection(modifiers) == .maskCommand
     }
 
     static func route(key: Int64, flags: CGEventFlags, _ k: FinderKeyContext) -> FinderKeyAction {
         guard k.finderFront, !k.editingText else { return .pass }
-        if key == x && command(flags) && k.cutPaste { return k.transferring ? .swallow : .cut }
-        guard key == v else { return .pass }
+        if k.cutPaste && key == x && command(flags) { return k.transferring ? .swallow : .collect(.move) }
+        if k.cutPaste && k.copyAdds && key == c && plainCopy(flags) && !k.transferring { return .collect(.copy) }
+        guard key == v, command(flags) || explicitTransfer(flags) else { return .pass }
 
-        if explicitMove(flags) {
-            guard k.cutPaste && k.marked else { return .pass }
-            return k.transferring ? .swallow : .move
+        let explicit = explicitTransfer(flags)
+        if k.cutPaste {
+            if k.collecting { return .waitForSelection }
+            if let kind = k.batchKind, explicit || k.clipboardUnchanged {
+                return k.transferring ? .swallow : .transfer(kind)
+            }
         }
-        guard command(flags) else { return .pass }
-        if k.cutPaste && k.marked && k.clipboardUnchanged { return k.transferring ? .swallow : .move }
-        if k.pasteImages && !flags.contains(.maskShift) && !k.pastingImage { return .pasteImage }
+        if !explicit && k.pasteImages && !flags.contains(.maskShift) && !k.pastingImage { return .pasteImage }
         return .pass
     }
 
@@ -131,6 +135,26 @@ enum FinderKeys {
 
 enum FinderTransfer: Equatable { case move, copy }
 
+struct FinderFileBatch {
+    private(set) var kind: FinderTransfer = .move
+    private(set) var urls: [URL] = []
+    private var pastedCopy = false
+    var clipboardCount: Int?
+
+    mutating func collect(_ new: [URL], as kind: FinderTransfer, appending: Bool) {
+        let earlier = appending && self.kind == kind && !pastedCopy ? urls : []
+        self.kind = kind
+        urls = FinderKeys.merge(earlier, adding: new)
+        pastedCopy = false
+    }
+
+    mutating func finish(_ transfer: FinderTransfer, remaining: [URL], succeeded: Bool) {
+        urls = remaining
+        if urls.isEmpty { clipboardCount = nil }
+        if kind == .copy && transfer == .copy && succeeded { pastedCopy = true }
+    }
+}
+
 /// What the floating panel shows.
 struct CutHUDState: Equatable {
     struct Item: Equatable, Identifiable { let url: URL; var id: URL { url }; var name: String { url.lastPathComponent } }
@@ -142,6 +166,7 @@ struct CutHUDState: Equatable {
     }
     struct Result: Equatable { var transfer: FinderTransfer; var count = 0, failed = 0 }
     var items: [Item] = []
+    var kind: FinderTransfer = .move
     var clipboardUnchanged = false
     var progress: Progress?
     var result: Result?
@@ -152,18 +177,18 @@ struct CutHUDState: Equatable {
 final class FinderShortcuts: ObservableObject {
     static let shared = FinderShortcuts()
     static let finderID = "com.apple.finder"
-    /// Marks the ⌘V this app replays, so the tap lets it through.
+    /// Marks synthetic keys so the tap lets them through.
     static let replayMarker: Int64 = 0x4361_7473   // "Cats"
     @Published private(set) var running = false
     @Published private(set) var hud = CutHUDState()
 
     private let lock = NSLock()
     // Guarded by lock; shared with the tap thread.
-    private var cutPaste = false, pasteImages = false, showHUD = true, addToCut = true, finderFront = false
-    private var marks: [URL] = []
-    private var markedCount: Int?        // set only when the cut wrote the clipboard
+    private var cutPaste = false, copyAdds = true, pasteImages = false, showHUD = true, addToCut = true, finderFront = false
+    private var batch = FinderFileBatch()
+    private var pendingSelections = 0
     private var transferring = false, pastingImage = false
-    private var generation = 0           // invalidates late replies from cuts and transfers
+    private var generation = 0           // invalidates work when the list is cleared or transferred
     private var tapPort: CFMachPort?
     private var tapLoop: CFRunLoop?
     private var thread: Thread?
@@ -191,14 +216,15 @@ final class FinderShortcuts: ObservableObject {
     /// Starts or stops the tap from the settings and the Accessibility permission.
     func apply() {
         let defaults = UserDefaults.standard
-        let (wanted, cutOn): (Bool, Bool) = locked {
+        let (wanted, clearBatch): (Bool, Bool) = locked {
             cutPaste = defaults.bool(forKey: Pref.finderCutPaste)
+            copyAdds = defaults.object(forKey: Pref.finderCopyAdds) as? Bool ?? true
             pasteImages = defaults.bool(forKey: Pref.finderPasteImages)
             showHUD = defaults.object(forKey: Pref.finderCutPasteHUD) as? Bool ?? true
             addToCut = defaults.object(forKey: Pref.finderCutAdds) as? Bool ?? true
-            return ((cutPaste || pasteImages) && MenuBarMonitor.trusted, cutPaste)
+            return ((cutPaste || pasteImages) && MenuBarMonitor.trusted, !cutPaste || (!copyAdds && batch.kind == .copy))
         }
-        if !cutOn { reset() }
+        if clearBatch { reset() }
         setFinderFront(NSWorkspace.shared.frontmostApplication?.bundleIdentifier == Self.finderID)
         if wanted && thread == nil { start() } else if !wanted && thread != nil { stop() }
     }
@@ -246,34 +272,71 @@ final class FinderShortcuts: ObservableObject {
         let key = event.getIntegerValueField(.keyboardEventKeycode)
         let flags = event.flags
         guard (key == FinderKeys.x && FinderKeys.command(flags)) ||
-              (key == FinderKeys.v && (FinderKeys.command(flags) || FinderKeys.explicitMove(flags))) else { return event }
+              (key == FinderKeys.c && FinderKeys.plainCopy(flags)) ||
+              (key == FinderKeys.v && (FinderKeys.command(flags) || FinderKeys.explicitTransfer(flags))) else { return event }
         let initialCount = NSPasteboard.general.changeCount
         let context = keyContext(clipboardCount: initialCount)
-        // Ask Finder about focus only for a key that might be intercepted.
-        guard FinderKeys.route(key: key, flags: flags, context) != .pass, AXIsProcessTrusted(),
-              !editingText() else { return event }
+        guard FinderKeys.route(key: key, flags: flags, context) != .pass, AXIsProcessTrusted() else { return event }
+        let editing = editingText()
+        // If Finder cannot identify focus, keep its native copy action available.
+        guard editing != true, key != FinderKeys.c || editing == false else { return event }
         let count = NSPasteboard.general.changeCount
-        switch FinderKeys.route(key: key, flags: flags, keyContext(clipboardCount: count)) {
+        let action = FinderKeys.route(key: key, flags: flags, keyContext(clipboardCount: count))
+        switch action {
         case .pass:
             return event
-        case .swallow:
+        case .collect(let kind):
+            return collect(kind, expecting: initialCount) ? nil : event
+        case .waitForSelection:
+            deferPaste(flags: flags, target: Self.finderPID)
             return nil
-        case .cut:
-            return cut(expecting: initialCount) ? nil : event
-        case .move:
-            let expected: Int? = FinderKeys.explicitMove(flags) ? nil : count
-            return beginTransfer(.move, expectingClipboard: expected) ? nil : event
-        case .pasteImage:
-            locked { pastingImage = true }
-            pasteImage(into: Self.finderPID, expecting: count)
-            return nil
+        default:
+            return performPaste(action, flags: flags, clipboardCount: count, target: Self.finderPID) ? nil : event
         }
     }
 
-    private func keyContext(clipboardCount: Int) -> FinderKeyContext {
+    private func keyContext(clipboardCount: Int, waitForSelection: Bool = true) -> FinderKeyContext {
         locked {
-            FinderKeyContext(cutPaste: cutPaste, pasteImages: pasteImages, finderFront: finderFront, marked: !marks.isEmpty,
-                             clipboardUnchanged: markedCount == clipboardCount, transferring: transferring, pastingImage: pastingImage)
+            FinderKeyContext(cutPaste: cutPaste, copyAdds: copyAdds, pasteImages: pasteImages, finderFront: finderFront,
+                             batchKind: batch.urls.isEmpty ? nil : batch.kind, clipboardUnchanged: batch.clipboardCount == clipboardCount,
+                             collecting: waitForSelection && pendingSelections != 0, transferring: transferring, pastingImage: pastingImage)
+        }
+    }
+
+    private func performPaste(_ action: FinderKeyAction, flags: CGEventFlags, clipboardCount: Int, target: pid_t) -> Bool {
+        switch action {
+        case .transfer(let kind):
+            let expected: Int? = FinderKeys.explicitTransfer(flags) ? nil : clipboardCount
+            return beginTransfer(kind, expectingClipboard: expected)
+        case .pasteImage:
+            guard locked({
+                guard pasteImages, !pastingImage else { return false }
+                pastingImage = true
+                return true
+            }) else { return false }
+            pasteImage(into: target, expecting: clipboardCount)
+            return true
+        case .swallow:
+            return true
+        default:
+            return false
+        }
+    }
+
+    /// A paste pressed while Finder is answering a selection query runs after that selection is applied.
+    private func deferPaste(flags: CGEventFlags, target: pid_t) {
+        work.async {
+            let editing = self.editingText() == true
+            DispatchQueue.main.async {
+                guard NSWorkspace.shared.frontmostApplication?.processIdentifier == target else { return }
+                let count = NSPasteboard.general.changeCount
+                var context = self.keyContext(clipboardCount: count, waitForSelection: false)
+                context.editingText = editing
+                let action = FinderKeys.route(key: FinderKeys.v, flags: flags, context)
+                if !self.performPaste(action, flags: flags, clipboardCount: count, target: target) {
+                    self.replay(FinderKeys.v, flags: flags, ifFront: target)
+                }
+            }
         }
     }
 
@@ -281,63 +344,73 @@ final class FinderShortcuts: ObservableObject {
 
     /// Asks Finder itself, with a short timeout on Finder's element only: a timeout set on the system-wide
     /// element would become the default for every Accessibility question this app asks.
-    private func editingText() -> Bool {
+    private func editingText() -> Bool? {
         let pid = Self.finderPID
-        guard pid != 0 else { return false }
+        guard pid != 0 else { return nil }
         let app = AXUIElementCreateApplication(pid)
         AXUIElementSetMessagingTimeout(app, 0.15)
         var focused: CFTypeRef?
-        guard AXUIElementCopyAttributeValue(app, kAXFocusedUIElementAttribute as CFString, &focused) == .success,
-              let focused, CFGetTypeID(focused) == AXUIElementGetTypeID() else { return false }
+        let status = AXUIElementCopyAttributeValue(app, kAXFocusedUIElementAttribute as CFString, &focused)
+        if status == .noValue { return false }
+        guard status == .success, let focused, CFGetTypeID(focused) == AXUIElementGetTypeID() else { return nil }
+        let element = focused as! AXUIElement
+        AXUIElementSetMessagingTimeout(element, 0.15)
         var role: CFTypeRef?
-        guard AXUIElementCopyAttributeValue(focused as! AXUIElement, kAXRoleAttribute as CFString, &role) == .success else { return false }
-        return FinderKeys.textRoles.contains(role as? String ?? "")
+        guard AXUIElementCopyAttributeValue(element, kAXRoleAttribute as CFString, &role) == .success,
+              let role = role as? String else { return nil }
+        return FinderKeys.textRoles.contains(role)
     }
 
-    // MARK: Cut
+    // MARK: Collecting items
 
-    private func cut(expecting clipboardCount: Int) -> Bool {
+    private func collect(_ kind: FinderTransfer, expecting clipboardCount: Int) -> Bool {
         guard let token = locked({ () -> Int? in
-            guard cutPaste, finderFront, !transferring else { return nil }
-            generation += 1
+            guard cutPaste, finderFront, !transferring, kind == .move || copyAdds else { return nil }
+            pendingSelections += 1
             return generation
         }) else { return false }
+        let target = Self.finderPID
         work.async {
             let urls = FinderBridge.selection()
             DispatchQueue.main.async {
-                guard !urls.isEmpty else { return }
                 let board = NSPasteboard.general
-                let update = self.locked { () -> (items: [URL], earlierCount: Int)? in
-                    guard self.generation == token, self.cutPaste, !self.transferring else { return nil }
-                    let earlier = self.addToCut ? self.marks : []
-                    let items = FinderKeys.merge(earlier, adding: urls)
+                let updated = self.locked { () -> FinderFileBatch? in
+                    guard self.generation == token else { return nil }
+                    self.pendingSelections -= 1
+                    guard !urls.isEmpty, self.cutPaste, kind == .move || self.copyAdds else { return nil }
+                    let count = board.changeCount
+                    let canWrite = count == clipboardCount || self.batch.clipboardCount == count
+                    self.batch.collect(urls, as: kind, appending: kind == .copy || self.addToCut)
+                    self.batch.clipboardCount = nil
                     // A copy made while Finder was answering takes precedence.
-                    self.markedCount = nil
-                    if board.changeCount == clipboardCount {
+                    if canWrite {
                         board.clearContents()
-                        if board.writeObjects(items as [NSURL]) { self.markedCount = board.changeCount }
+                        if board.writeObjects(self.batch.urls as [NSURL]) { self.batch.clipboardCount = board.changeCount }
                     }
-                    self.marks = items
-                    return (items, earlier.count)
+                    return self.batch
                 }
-                guard let update else { return }
-                self.dismiss?.cancel()
-                self.hud = CutHUDState(items: update.items.map { .init(url: $0) })
-                self.refreshPanel()
-                AppModel.log("Finder: cut \(urls.count) items" + (update.earlierCount == 0 ? "" : ", \(update.items.count) in all"))
+                if let updated {
+                    self.dismiss?.cancel()
+                    self.hud = CutHUDState(items: updated.urls.map { .init(url: $0) }, kind: updated.kind)
+                    self.refreshPanel()
+                    let verb = kind == .move ? "cut" : "copied"
+                    AppModel.log("Finder: \(verb) \(urls.count) items, \(updated.urls.count) in the list")
+                } else if kind == .copy, board.changeCount == clipboardCount, self.locked({ self.generation == token }) {
+                    self.replay(FinderKeys.c, ifFront: target)
+                }
             }
         }
         return true
     }
 
-    /// Drops the cut. `clearClipboard` also empties the clipboard the cut wrote, if it is still current.
+    /// Clears the batch and, if requested, its clipboard while that clipboard is still current.
     func reset(clearClipboard: Bool = false) {
         let count: Int? = locked {
-            let count = markedCount
+            let count = batch.clipboardCount
             generation += 1
-            marks = []
+            pendingSelections = 0
+            batch = FinderFileBatch()
             transferring = false
-            markedCount = nil
             return count
         }
         if clearClipboard, let count, NSPasteboard.general.changeCount == count { NSPasteboard.general.clearContents() }
@@ -351,24 +424,26 @@ final class FinderShortcuts: ObservableObject {
 
     func transferFromPanel(_ transfer: FinderTransfer) {
         guard NSWorkspace.shared.frontmostApplication?.bundleIdentifier == Self.finderID else { return }
-        _ = beginTransfer(transfer)
+        _ = beginTransfer(transfer, fromPanel: true)
     }
 
-    private func beginTransfer(_ transfer: FinderTransfer, expectingClipboard expected: Int? = nil) -> Bool {
+    private func beginTransfer(_ transfer: FinderTransfer, expectingClipboard expected: Int? = nil, fromPanel: Bool = false) -> Bool {
         guard let operation = locked({ () -> (urls: [URL], token: Int)? in
-            guard cutPaste, finderFront, !transferring, !marks.isEmpty else { return nil }
+            guard cutPaste, finderFront, !transferring, !batch.urls.isEmpty,
+                  fromPanel ? pendingSelections == 0 && (transfer == .copy || batch.kind == .move) : transfer == batch.kind else { return nil }
             if let expected {
-                guard markedCount == expected, NSPasteboard.general.changeCount == expected else { return nil }
+                guard batch.clipboardCount == expected, NSPasteboard.general.changeCount == expected else { return nil }
             }
             generation += 1
+            pendingSelections = 0
             transferring = true
-            return (marks, generation)
+            return (batch.urls, generation)
         }) else { return false }
         let (urls, token) = operation
         publish(token, .init(transfer: transfer, total: urls.count))
         work.async {
             guard let folder = FinderBridge.insertionLocation() else {
-                DispatchQueue.main.async { self.finishTransfer(token, transfer, count: 0, failed: urls.count, stillCut: urls) }
+                DispatchQueue.main.async { self.finishTransfer(token, transfer, count: 0, failed: urls.count, remaining: urls) }
                 return
             }
             let fm = FileManager.default
@@ -427,7 +502,7 @@ final class FinderShortcuts: ObservableObject {
                 poll?.cancel()
                 finished += sizes[index] ?? 0
             }
-            var stillCut = transfer == .copy ? urls : []
+            var remaining = transfer == .copy ? urls : []
             if !refused.isEmpty {
                 let canceled = FinderBridge.move(refused, to: folder)
                 let left = FinderKeys.remaining(refused, sourceGone: { url in
@@ -435,9 +510,9 @@ final class FinderShortcuts: ObservableObject {
                     return lstat(url.path, &info) != 0 && errno == ENOENT
                 }, arrived: { fm.fileExists(atPath: folder.appendingPathComponent($0.lastPathComponent).path) })
                 transferred += refused.count - left.count
-                if canceled { stillCut = left } else { failed += left.count }
+                if canceled { remaining = left } else { failed += left.count }
             }
-            DispatchQueue.main.async { self.finishTransfer(token, transfer, count: transferred, failed: failed, stillCut: stillCut) }
+            DispatchQueue.main.async { self.finishTransfer(token, transfer, count: transferred, failed: failed, remaining: remaining) }
         }
         return true
     }
@@ -457,19 +532,18 @@ final class FinderShortcuts: ObservableObject {
         }
     }
 
-    private func finishTransfer(_ token: Int, _ transfer: FinderTransfer, count: Int, failed: Int, stillCut: [URL]) {
-        guard locked({
-            guard generation == token else { return false }
+    private func finishTransfer(_ token: Int, _ transfer: FinderTransfer, count: Int, failed: Int, remaining: [URL]) {
+        guard let kind = locked({ () -> FinderTransfer? in
+            guard generation == token else { return nil }
             generation += 1
             transferring = false
-            marks = stillCut
-            if stillCut.isEmpty { markedCount = nil }
-            return true
+            batch.finish(transfer, remaining: remaining, succeeded: count > 0)
+            return batch.kind
         }) else { return }
         let verb = transfer == .move ? "moved" : "copied"
         AppModel.log("Finder: \(verb) \(count) items" + (failed > 0 ? ", \(failed) could not be \(verb)" : ""))
         let result = CutHUDState.Result(transfer: transfer, count: count, failed: failed)
-        hud = CutHUDState(items: stillCut.map { .init(url: $0) }, result: result)
+        hud = CutHUDState(items: remaining.map { .init(url: $0) }, kind: kind, result: result)
         refreshPanel()
         dismiss?.cancel()
         let later = DispatchWorkItem { [weak self] in
@@ -518,18 +592,19 @@ final class FinderShortcuts: ObservableObject {
         switch result {
         case .saved: break
         case .failed: NSSound.beep()
-        case .notImage: replayPaste(ifFront: target)
+        case .notImage: replay(FinderKeys.v, ifFront: target)
         }
     }
 
-    /// Finder's own ⌘V, when the clipboard held no image. Marked, so the tap lets it through.
-    private func replayPaste(ifFront target: pid_t) {
-        guard target != 0, NSWorkspace.shared.frontmostApplication?.processIdentifier == target else { return }
-        let source = CGEventSource(stateID: .hidSystemState)
-        source?.userData = Self.replayMarker
-        guard let down = CGEvent(keyboardEventSource: source, virtualKey: CGKeyCode(FinderKeys.v), keyDown: true),
-              let up = CGEvent(keyboardEventSource: source, virtualKey: CGKeyCode(FinderKeys.v), keyDown: false) else { return }
-        down.flags = .maskCommand; up.flags = .maskCommand
+    /// Replays a key that Finder should handle itself.
+    private func replay(_ key: Int64, flags: CGEventFlags = .maskCommand, ifFront target: pid_t) {
+        guard target != 0, NSWorkspace.shared.frontmostApplication?.processIdentifier == target,
+              let source = CGEventSource(stateID: .hidSystemState) else { return }
+        source.userData = Self.replayMarker
+        guard let down = CGEvent(keyboardEventSource: source, virtualKey: CGKeyCode(key), keyDown: true),
+              let up = CGEvent(keyboardEventSource: source, virtualKey: CGKeyCode(key), keyDown: false) else { return }
+        down.flags = flags
+        up.flags = flags
         down.post(tap: .cghidEventTap)
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.04) { up.post(tap: .cghidEventTap) }
     }
@@ -538,11 +613,11 @@ final class FinderShortcuts: ObservableObject {
 
     private func updatePanelClipboardStatus() {
         let count = NSPasteboard.general.changeCount
-        let current = locked { markedCount == count }
+        let current = locked { batch.clipboardCount == count }
         if hud.clipboardUnchanged != current { hud.clipboardUnchanged = current }
     }
 
-    /// Shown while items are cut and Finder is in front; transfer progress and results show anywhere.
+    /// The file list shows in Finder. Transfer progress and results can show in any app.
     private func refreshPanel() {
         guard Thread.isMainThread else { DispatchQueue.main.async { self.refreshPanel() }; return }
         let (show, front) = locked { (showHUD, finderFront) }
@@ -584,7 +659,7 @@ final class FinderShortcuts: ObservableObject {
     }
 }
 
-/// The panel's look: what is cut, a move under way, or how it went.
+/// The file list and its transfer status.
 struct CutHUDView: View {
     static let width: CGFloat = 286
     @ObservedObject var shortcuts: FinderShortcuts
@@ -621,13 +696,13 @@ struct CutHUDView: View {
                 }
             } else {
                 HStack(spacing: 8) {
-                    Image(systemName: "scissors").foregroundStyle(.orange)
-                    Text("Cut").font(.system(size: 13, weight: .semibold))
+                    Image(systemName: hud.kind == .move ? "scissors" : "document.on.document").foregroundStyle(.orange)
+                    Text(hud.kind == .move ? "Cut" : "Copy").font(.system(size: 13, weight: .semibold))
                     Text("\(hud.items.count)").font(.system(size: 11, weight: .semibold)).padding(.horizontal, 6).padding(.vertical, 1)
                         .background(Capsule().fill(Color.orange.opacity(0.25)))
                     Spacer()
                     Button { shortcuts.reset(clearClipboard: true) } label: { Image(systemName: "xmark.circle.fill").foregroundStyle(.secondary) }
-                        .buttonStyle(.plain).help("Cancel cut")
+                        .buttonStyle(.plain).help("Clear file list")
                 }
                 ForEach(hud.items.prefix(5)) { item in
                     HStack(spacing: 6) {
@@ -637,13 +712,15 @@ struct CutHUDView: View {
                 }
                 if hud.items.count > 5 { Text("+\(hud.items.count - 5)").font(.system(size: 11)).foregroundStyle(.secondary) }
                 HStack(spacing: 6) {
-                    Button { shortcuts.transferFromPanel(.move) } label: {
+                    Button { shortcuts.transferFromPanel(hud.kind) } label: {
                         HStack(spacing: 5) {
-                            Text("Move \(hud.items.count) Here")
-                            Text(hud.clipboardUnchanged ? "⌘V" : FinderKeys.moveShortcut).foregroundStyle(.secondary)
+                            Text(hud.kind == .move ? "Move \(hud.items.count) Here" : "Copy \(hud.items.count) Here")
+                            Text(hud.clipboardUnchanged ? "⌘V" : FinderKeys.batchShortcut).foregroundStyle(.secondary)
                         }
                     }
-                    Button("Copy Here") { shortcuts.transferFromPanel(.copy) }
+                    if hud.kind == .move {
+                        Button("Copy Here") { shortcuts.transferFromPanel(.copy) }
+                    }
                 }
                 .controlSize(.small)
             }
@@ -669,7 +746,7 @@ enum FinderBridge {
     }
 
     /// Runs a script; nil on any error. `canceled` reports the user's Cancel (-128).
-    static func run(_ source: String, canceled: UnsafeMutablePointer<Bool>? = nil) -> String? {
+    private static func run(_ source: String, canceled: UnsafeMutablePointer<Bool>? = nil) -> NSAppleEventDescriptor? {
         queue.sync {
             guard mayControlFinder(), let script = NSAppleScript(source: source) else { return nil }
             var error: NSDictionary?
@@ -678,7 +755,7 @@ enum FinderBridge {
                 if (error[NSAppleScript.errorNumber] as? Int) == -128 { canceled?.pointee = true }
                 return nil
             }
-            return result.stringValue ?? ""
+            return result
         }
     }
 
@@ -690,20 +767,26 @@ enum FinderBridge {
     static func selection() -> [URL] {
         let script = """
         tell application "Finder"
-            set out to ""
+            set paths to {}
             repeat with f in (get selection)
-                set out to out & POSIX path of (f as alias) & linefeed
+                set end of paths to POSIX path of (f as alias)
             end repeat
-            return out
+            return paths
         end tell
         """
-        return (run(script) ?? "").split(separator: "\n").map { URL(fileURLWithPath: String($0)) }
+        guard let result = run(script), result.numberOfItems > 0 else { return [] }
+        var urls: [URL] = []
+        for index in 1...result.numberOfItems {
+            guard let path = result.atIndex(index)?.stringValue, path.hasPrefix("/") else { return [] }
+            urls.append(URL(fileURLWithPath: path))
+        }
+        return urls
     }
 
     /// The folder Finder would paste into.
     static func insertionLocation() -> URL? {
-        guard let path = run("tell application \"Finder\" to return POSIX path of (insertion location as alias)")?
-            .trimmingCharacters(in: .whitespacesAndNewlines), !path.isEmpty else { return nil }
+        guard let path = run("tell application \"Finder\" to return POSIX path of (insertion location as alias)")?.stringValue,
+              path.hasPrefix("/") else { return nil }
         return URL(fileURLWithPath: path, isDirectory: true)
     }
 
