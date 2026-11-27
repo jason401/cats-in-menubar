@@ -148,6 +148,22 @@ struct FinderFileBatch {
         pastedCopy = false
     }
 
+    mutating func remove(_ url: URL, from clipboard: NSPasteboard) -> Bool {
+        guard let index = urls.firstIndex(of: url) else { return false }
+        urls.remove(at: index)
+        let expected = clipboardCount
+        syncClipboard(clipboard, expecting: expected)
+        return true
+    }
+
+    /// Replaces the file list only while the expected clipboard is still current.
+    mutating func syncClipboard(_ clipboard: NSPasteboard, expecting expected: Int?) {
+        clipboardCount = nil
+        guard let expected, clipboard.changeCount == expected else { return }
+        clipboard.clearContents()
+        if !urls.isEmpty && clipboard.writeObjects(urls as [NSURL]) { clipboardCount = clipboard.changeCount }
+    }
+
     mutating func finish(_ transfer: FinderTransfer, remaining: [URL], succeeded: Bool) {
         urls = remaining
         if urls.isEmpty { clipboardCount = nil }
@@ -381,12 +397,8 @@ final class FinderShortcuts: ObservableObject {
                     let count = board.changeCount
                     let canWrite = count == clipboardCount || self.batch.clipboardCount == count
                     self.batch.collect(urls, as: kind, appending: kind == .copy || self.addToCut)
-                    self.batch.clipboardCount = nil
                     // A copy made while Finder was answering takes precedence.
-                    if canWrite {
-                        board.clearContents()
-                        if board.writeObjects(self.batch.urls as [NSURL]) { self.batch.clipboardCount = board.changeCount }
-                    }
+                    self.batch.syncClipboard(board, expecting: canWrite ? count : nil)
                     return self.batch
                 }
                 if let updated {
@@ -401,6 +413,16 @@ final class FinderShortcuts: ObservableObject {
             }
         }
         return true
+    }
+
+    func removeItem(_ url: URL) {
+        guard let updated = locked({ () -> FinderFileBatch? in
+            guard !transferring, batch.remove(url, from: .general) else { return nil }
+            return batch
+        }) else { return }
+        dismiss?.cancel()
+        hud = CutHUDState(items: updated.urls.map { .init(url: $0) }, kind: updated.kind)
+        refreshPanel()
     }
 
     /// Clears the batch and, if requested, its clipboard while that clipboard is still current.
@@ -662,6 +684,9 @@ final class FinderShortcuts: ObservableObject {
 /// The file list and its transfer status.
 struct CutHUDView: View {
     static let width: CGFloat = 286
+    private let visibleRows = 5
+    private let rowHeight: CGFloat = 22
+    private let rowSpacing: CGFloat = 4
     @ObservedObject var shortcuts: FinderShortcuts
     var body: some View {
         let hud = shortcuts.hud
@@ -704,13 +729,12 @@ struct CutHUDView: View {
                     Button { shortcuts.reset(clearClipboard: true) } label: { Image(systemName: "xmark.circle.fill").foregroundStyle(.secondary) }
                         .buttonStyle(.plain).help("Clear file list")
                 }
-                ForEach(hud.items.prefix(5)) { item in
-                    HStack(spacing: 6) {
-                        Image(nsImage: NSWorkspace.shared.icon(forFile: item.url.path)).resizable().frame(width: 17, height: 17)
-                        Text(item.name).font(.system(size: 12)).lineLimit(1).truncationMode(.middle)
-                    }
+                if hud.items.count > visibleRows {
+                    ScrollView { fileRows(hud.items).padding(.trailing, 8) }
+                        .frame(height: CGFloat(visibleRows) * rowHeight + CGFloat(visibleRows - 1) * rowSpacing)
+                } else {
+                    fileRows(hud.items)
                 }
-                if hud.items.count > 5 { Text("+\(hud.items.count - 5)").font(.system(size: 11)).foregroundStyle(.secondary) }
                 HStack(spacing: 6) {
                     Button { shortcuts.transferFromPanel(hud.kind) } label: {
                         HStack(spacing: 5) {
@@ -729,6 +753,27 @@ struct CutHUDView: View {
         .frame(width: Self.width, alignment: .leading)
         .background(RoundedRectangle(cornerRadius: 16).fill(.regularMaterial))
         .overlay(RoundedRectangle(cornerRadius: 16).stroke(Color.white.opacity(0.12), lineWidth: 1))
+    }
+
+    private func fileRows(_ items: [CutHUDState.Item]) -> some View {
+        LazyVStack(spacing: rowSpacing) {
+            ForEach(items) { item in
+                HStack(spacing: 6) {
+                    Image(nsImage: NSWorkspace.shared.icon(forFile: item.url.path)).resizable().frame(width: 17, height: 17)
+                    Text(item.name).font(.system(size: 12)).lineLimit(1).truncationMode(.middle)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                    Button { shortcuts.removeItem(item.url) } label: {
+                        Image(systemName: "xmark").font(.system(size: 9, weight: .semibold)).foregroundStyle(.secondary)
+                            .frame(width: rowHeight, height: rowHeight)
+                            .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("Remove \(item.name) from list")
+                    .help("Remove from list")
+                }
+                .frame(height: rowHeight)
+            }
+        }
     }
 }
 

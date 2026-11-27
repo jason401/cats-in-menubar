@@ -979,6 +979,31 @@ func testFinderKeys(_ expect: (@autoclosure () -> Bool, String) -> Void) {
     batch.collect([d], as: .copy, appending: true)
     expect(batch.kind == .copy && batch.urls == [d], "switching from cut to copy starts a new copy batch")
 
+    let clipboard = NSPasteboard.withUniqueName()
+    defer { clipboard.releaseGlobally() }
+    let fileOnly: [NSPasteboard.ReadingOptionKey: Any] = [.urlReadingFileURLsOnly: true]
+    batch.collect([bFile, folder], as: .move, appending: false)
+    batch.syncClipboard(clipboard, expecting: clipboard.changeCount)
+    let removedFolder = batch.remove(folder, from: clipboard)
+    let remainingURLs = clipboard.readObjects(forClasses: [NSURL.self], options: fileOnly) as? [URL]
+    expect(removedFolder && batch.urls == [bFile] && remainingURLs == [bFile] && batch.clipboardCount == clipboard.changeCount,
+           "removing a folder updates the queued items and their clipboard")
+    let removedLast = batch.remove(bFile, from: clipboard)
+    expect(removedLast && batch.urls.isEmpty && batch.clipboardCount == nil && clipboard.types?.isEmpty != false,
+           "removing the final item clears the clipboard that held the batch")
+
+    batch.collect([bFile, d], as: .copy, appending: true)
+    batch.syncClipboard(clipboard, expecting: clipboard.changeCount)
+    clipboard.clearContents()
+    _ = clipboard.setString("new text", forType: .string)
+    let newerClipboard = clipboard.changeCount
+    let removedFile = batch.remove(bFile, from: clipboard)
+    let removedMissing = batch.remove(folder, from: clipboard)
+    expect(removedFile && !removedMissing && batch.kind == .copy && batch.urls == [d] && batch.clipboardCount == nil
+           && clipboard.changeCount == newerClipboard && clipboard.string(forType: .string) == "new text",
+           "removing an item from a copy batch preserves newer clipboard contents")
+
+
 }
 
 func testPanelHover(_ expect: (@autoclosure () -> Bool, String) -> Void) {

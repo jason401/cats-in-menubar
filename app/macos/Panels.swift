@@ -1436,7 +1436,7 @@ struct AccessibilityTab: View {
                 }
                 if cutPaste {
                     Divider()
-                    SettingsRow(title: "Floating panel", titleWidth: 118, info: "Shows the collected items and their paste shortcut. Choose Move Here or Copy Here to transfer them to the current folder. Click ✕ to clear the list.") {
+                    SettingsRow(title: "Floating panel", titleWidth: 118, info: "Shows the collected items and their paste shortcut. Choose Move Here or Copy Here to transfer them to the current folder. Use the × beside an item to remove it from the list, or the top × to clear the list.") {
                         SettingsSwitch(title: "Show floating panel", isOn: $showHUD)
                     }
                     Divider()
