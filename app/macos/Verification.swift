@@ -923,6 +923,14 @@ func testFinderKeys(_ expect: (@autoclosure () -> Bool, String) -> Void) {
     expect(FinderKeys.position(0, of: 1) == nil && FinderKeys.position(1, of: 3) == "2 of 3", "a move counts items only when there are several")
     expect(FinderBridge.literal("a\"b\\c") == "\"a\\\"b\\\\c\"", "paths are quoted for AppleScript")
     expect(Pref.defaults[Pref.finderCutPasteHUD] as? Bool == true, "the cut panel shows unless turned off")
+    let bFile = URL(fileURLWithPath: "/A/b.txt"), cFile = URL(fileURLWithPath: "/C/c.txt"), d = URL(fileURLWithPath: "/C/d.txt")
+    expect(FinderKeys.merge([bFile], adding: [cFile, d]) == [bFile, cFile, d], "a second ⌘X adds items from another folder")
+    expect(FinderKeys.merge([bFile, cFile], adding: [cFile, URL(fileURLWithPath: "/C/./c.txt")]) == [bFile, cFile], "an item cut twice is moved once")
+    let folder = URL(fileURLWithPath: "/C"), inner = URL(fileURLWithPath: "/C/sub/e.txt")
+    expect(FinderKeys.merge([folder], adding: [inner]) == [folder] && FinderKeys.merge([cFile, bFile], adding: [folder]) == [bFile, folder],
+           "items inside a cut folder go with the folder")
+    expect(FinderKeys.merge([URL(fileURLWithPath: "/Cat")], adding: [cFile]).count == 2, "a folder only takes in what is truly inside it")
+    expect(Pref.defaults[Pref.finderCutAdds] as? Bool == true, "another ⌘X adds to the cut unless turned off")
 }
 
 func testPanelHover(_ expect: (@autoclosure () -> Bool, String) -> Void) {

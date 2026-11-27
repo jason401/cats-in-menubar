@@ -5,7 +5,8 @@ import UniformTypeIdentifiers
 
 // Finder shortcuts, both off by default (Settings > Accessibility). They work as Vorssaint's do, written anew:
 // - Cut and paste: ⌘X in Finder marks the selected items (and copies them, so other apps can still paste
-//   them), and ⌘V in another folder moves them there. This app moves the files itself; items it may not
+//   them), and ⌘V in another folder moves them there. More ⌘X add to the cut, from any folder, unless
+//   "Add to cut items" is off (then each ⌘X starts over, as in Vorssaint). This app moves the files itself; items it may not
 //   touch are handed to Finder, which asks for a password if needed. A floating panel shows what is cut.
 // - Paste images as files: ⌘V in a Finder folder while the clipboard holds an image (and no files) saves
 //   it there as a PNG.
@@ -109,6 +110,16 @@ enum FinderKeys {
         items.filter { !(sourceGone($0) && arrived($0)) }
     }
 
+    /// A later ⌘X adds to the cut: new items join the end, once each. An item inside a cut folder is
+    /// already part of it, so it is left out (and folders cut later take in what was cut from inside them).
+    static func merge(_ cut: [URL], adding new: [URL]) -> [URL] {
+        func path(_ url: URL) -> String { url.standardizedFileURL.path }
+        func inside(_ item: URL, _ folder: URL) -> Bool { path(item).hasPrefix(path(folder).hasSuffix("/") ? path(folder) : path(folder) + "/") }
+        var all: [URL] = []
+        for url in cut + new where !all.contains(where: { path($0) == path(url) }) { all.append(url) }
+        return all.filter { item in !all.contains { inside(item, $0) } }
+    }
+
     /// "2 of 5", shown only for more than one item.
     static func position(_ done: Int, of total: Int) -> String? {
         total > 1 ? "\(min(max(done + 1, 1), total)) of \(total)" : nil
@@ -137,7 +148,7 @@ final class FinderShortcuts: ObservableObject {
 
     private let lock = NSLock()
     // Guarded by lock; shared with the tap thread.
-    private var cutPaste = false, pasteImages = false, showHUD = true, finderFront = false
+    private var cutPaste = false, pasteImages = false, showHUD = true, addToCut = true, finderFront = false
     private var marks: [URL] = []
     private var markedCount = 0          // the clipboard the cut wrote
     private var moving = false, pastingImage = false
@@ -172,6 +183,7 @@ final class FinderShortcuts: ObservableObject {
             cutPaste = defaults.bool(forKey: Pref.finderCutPaste)
             pasteImages = defaults.bool(forKey: Pref.finderPasteImages)
             showHUD = defaults.object(forKey: Pref.finderCutPasteHUD) as? Bool ?? true
+            addToCut = defaults.object(forKey: Pref.finderCutAdds) as? Bool ?? true
             return ((cutPaste || pasteImages) && MenuBarMonitor.trusted, cutPaste)
         }
         if !cutOn { reset() }
@@ -277,15 +289,18 @@ final class FinderShortcuts: ObservableObject {
             let urls = FinderBridge.selection()
             DispatchQueue.main.async {
                 guard self.locked({ self.generation }) == token else { return }
-                guard !urls.isEmpty else { self.reset(); return }
                 let board = NSPasteboard.general
+                // With "Add to cut items" a cut still on the clipboard grows; otherwise a new cut replaces it.
+                let earlier: [URL] = self.locked { self.addToCut && !self.marks.isEmpty && self.markedCount == board.changeCount ? self.marks : [] }
+                guard !urls.isEmpty else { if earlier.isEmpty { self.reset() }; return }
+                let items = FinderKeys.merge(earlier, adding: urls)
                 board.clearContents()
-                board.writeObjects(urls as [NSURL])
-                self.locked { self.marks = urls; self.markedCount = board.changeCount; self.moving = false }
+                board.writeObjects(items as [NSURL])
+                self.locked { self.marks = items; self.markedCount = board.changeCount; self.moving = false }
                 self.dismiss?.cancel()
-                self.hud = CutHUDState(items: urls.map { .init(url: $0) })
+                self.hud = CutHUDState(items: items.map { .init(url: $0) })
                 self.refreshPanel()
-                AppModel.log("Finder: cut \(urls.count) items")
+                AppModel.log("Finder: cut \(urls.count) items" + (earlier.isEmpty ? "" : ", \(items.count) in all"))
             }
         }
     }

@@ -29,6 +29,7 @@ enum Pref {
     static let finderCutPaste = "finderCutPaste"       // ⌘X then ⌘V moves files in Finder (FinderShortcuts)
     static let finderPasteImages = "finderPasteImages" // ⌘V in Finder saves a copied image as a PNG file
     static let finderCutPasteHUD = "finderCutPasteHUD" // the floating panel listing cut items (on unless turned off)
+    static let finderCutAdds = "finderCutAdds"         // another ⌘X adds to the cut instead of replacing it
     static let quitOnClose = "quitOnClose"             // picked apps quit when their last window closes (QuitOnClose)
     static let quitOnCloseApps = "quitOnCloseApps"     // picked bundle ids ("Picked apps")
     static let quitOnCloseAll = "quitOnCloseAll"       // every app but the exceptions, or only picked apps
@@ -39,7 +40,7 @@ enum Pref {
         count: 3, fixedLineup: false, rotate: false, rotatePace: 1, paused: false, quiet: false, activity: 1, adaptivePower: true, allowDrag: true,
         nightQuiet: false, nightFrom: 23, nightTo: 7, interval: 2.0, topApps: 2, toyColor: -1, laser: true, scrollReverse: false, display: "",
         showCPU: true, showGPU: true, showMemory: true, showDisk: true, showBattery: true, showNetwork: true, cpuWheel: false, wheelSwapRange: WheelShift.defaultRange, wheelBattery: true, wheelBatteryMono: false, faceStream: false,
-        tidy: false, tidyLeftmost: true, finderCutPaste: false, finderPasteImages: false, finderCutPasteHUD: true, quitOnClose: false,
+        tidy: false, tidyLeftmost: true, finderCutPaste: false, finderPasteImages: false, finderCutPasteHUD: true, finderCutAdds: true, quitOnClose: false,
         quitOnCloseAll: true, quitOnCloseExceptions: QuitOnCloseRules.defaultExceptions, panelOnHover: true,
     ]
 }
@@ -1419,6 +1420,7 @@ struct AccessibilityTab: View {
     @AppStorage(Pref.finderCutPaste) private var cutPaste = false
     @AppStorage(Pref.finderPasteImages) private var pasteImages = false
     @AppStorage(Pref.finderCutPasteHUD) private var showHUD = true
+    @AppStorage(Pref.finderCutAdds) private var addToCut = true
     @AppStorage(Pref.quitOnClose) private var quitOnClose = false
     @AppStorage(Pref.quitOnCloseAll) private var quitAll = true
     var body: some View {
@@ -1434,6 +1436,10 @@ struct AccessibilityTab: View {
                     Divider()
                     SettingsRow(title: "Floating panel", titleWidth: 118, info: "Shows the cut items at the top of the screen while Finder is in front, and a move's progress.") {
                         SettingsSwitch(title: "Show floating panel", isOn: $showHUD)
+                    }
+                    Divider()
+                    SettingsRow(title: "Add to cut", titleWidth: 118, info: "Another ⌘X adds the selected items to the cut, from any folder, and one ⌘V moves them all. Off: each ⌘X starts a new cut. The panel's ✕, ⌘C or copying something else empties the cut.") {
+                        SettingsSwitch(title: "Add to cut items", isOn: $addToCut)
                     }
                 }
                 Divider()
