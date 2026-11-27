@@ -1429,16 +1429,16 @@ struct AccessibilityTab: View {
                 AccessibilityPermissionRow(model: model, info: "Everything on this page needs it, as the cats do.")
             }
             SettingsCard(title: "Finder", info: "Renaming and other text fields always get ⌘X and ⌘V unchanged. The first time, macOS asks to let this app control Finder.") {
-                SettingsRow(title: "Cut & paste", titleWidth: 118, info: "Select items in Finder and press ⌘X to cut them; open the destination folder and press ⌘V to move them there. ⌘C cancels. A name already taken there gets a number, like “name 2”.") {
+                SettingsRow(title: "Cut & paste", titleWidth: 118, info: "Select files or folders in Finder and press ⌘X. Open the destination and press ⌘V to move them. If you copy something else in the meantime, press ⌃⌘V to move the cut items. Names already taken get a number, like “name 2”.") {
                     SettingsSwitch(title: "Cut and paste files in Finder", isOn: $cutPaste)
                 }
                 if cutPaste {
                     Divider()
-                    SettingsRow(title: "Floating panel", titleWidth: 118, info: "Shows the cut items at the top of the screen while Finder is in front, and a move's progress.") {
+                    SettingsRow(title: "Floating panel", titleWidth: 118, info: "Shows the cut items and the current move shortcut. Use Move Here or Copy Here to put the items in the current Finder folder, or click ✕ to clear the list.") {
                         SettingsSwitch(title: "Show floating panel", isOn: $showHUD)
                     }
                     Divider()
-                    SettingsRow(title: "Add to cut", titleWidth: 118, info: "Another ⌘X adds the selected items to the cut, from any folder, and one ⌘V moves them all. Off: each ⌘X starts a new cut. The panel's ✕, ⌘C or copying something else empties the cut.") {
+                    SettingsRow(title: "Add to cut", titleWidth: 118, info: "Another ⌘X adds the selected items from any folder. The list stays available while you copy other things. Turn this off to start a new list with each ⌘X.") {
                         SettingsSwitch(title: "Add to cut items", isOn: $addToCut)
                     }
                 }

@@ -879,31 +879,45 @@ func batteryPreviewStates() -> [(String, SystemStats)] {
 
 func testFinderKeys(_ expect: (@autoclosure () -> Bool, String) -> Void) {
     let cmd = CGEventFlags.maskCommand
+    let moveShortcut: CGEventFlags = [.maskControl, .maskCommand]
     let on = FinderKeyContext(cutPaste: true, pasteImages: true, finderFront: true)
-    func act(_ key: Int64, _ c: FinderKeyContext, _ flags: CGEventFlags = cmd) -> FinderKeyAction { FinderKeys.route(key: key, flags: flags, c).action }
-    func forgets(_ key: Int64, _ c: FinderKeyContext, _ flags: CGEventFlags = cmd) -> Bool { FinderKeys.route(key: key, flags: flags, c).forgetCut }
+    func act(_ key: Int64, _ c: FinderKeyContext, _ flags: CGEventFlags = cmd) -> FinderKeyAction { FinderKeys.route(key: key, flags: flags, c) }
     expect(act(FinderKeys.x, on) == .cut, "⌘X in Finder marks the selection")
     var cut = on; cut.marked = true; cut.clipboardUnchanged = true
     expect(act(FinderKeys.v, cut) == .move && act(FinderKeys.v, cut, [.maskCommand, .maskShift]) == .move, "⌘V (and ⇧⌘V) after a cut moves the items")
-    var busy = cut; busy.moving = true
-    expect(act(FinderKeys.v, busy) == .swallow, "⌘V while a move runs does nothing")
-    expect(act(FinderKeys.c, cut) == .pass && forgets(FinderKeys.c, cut), "⌘C copies as usual and drops the cut")
+    expect(act(FinderKeys.c, cut) == .pass, "⌘C stays Finder's own copy while files are marked")
     var stale = cut; stale.clipboardUnchanged = false
-    expect(act(FinderKeys.v, stale) == .pasteImage && forgets(FinderKeys.v, stale), "once something else was copied, ⌘V drops the cut and pastes as usual")
-    expect(act(FinderKeys.v, on, [.maskCommand, .maskAlternate]) == .pass && act(FinderKeys.x, on, [.maskCommand, .maskControl]) == .pass,
-           "⌥⌘V and ⌃ combinations stay Finder's own")
+    expect(act(FinderKeys.v, stale) == .pasteImage && act(FinderKeys.v, stale, moveShortcut) == .move,
+           "after another copy, ⌘V handles the current clipboard and ⌃⌘V moves the retained items")
+    expect(act(FinderKeys.v, stale, [.maskCommand, .maskShift]) == .pass && act(FinderKeys.x, stale) == .cut,
+           "⇧⌘V passes through after another copy, and ⌘X can add to the retained cut")
+    var staleWithoutImages = stale; staleWithoutImages.pasteImages = false
+    expect(act(FinderKeys.v, staleWithoutImages) == .pass && act(FinderKeys.v, staleWithoutImages, moveShortcut) == .move,
+           "the clipboard and the retained cut both work with image pasting turned off")
+    var busy = cut; busy.transferring = true
+    expect(act(FinderKeys.v, busy) == .swallow && act(FinderKeys.v, busy, moveShortcut) == .swallow && act(FinderKeys.x, busy) == .swallow,
+           "cut and move keys cannot start another transfer while one is running")
+    busy.clipboardUnchanged = false
+    expect(act(FinderKeys.v, busy) == .pasteImage && act(FinderKeys.c, busy) == .pass,
+           "unrelated clipboard shortcuts still work during a transfer")
+    expect(act(FinderKeys.v, cut, [.maskCommand, .maskAlternate]) == .pass && act(FinderKeys.x, cut, moveShortcut) == .pass
+           && act(FinderKeys.v, stale, [.maskControl, .maskCommand, .maskShift]) == .pass, "Finder's other modifier combinations pass through")
+    expect(act(FinderKeys.v, on, moveShortcut) == .pass, "⌃⌘V passes through when there is no marked cut")
     expect(act(FinderKeys.v, on) == .pasteImage, "⌘V with images on looks at the clipboard first")
-    expect(act(FinderKeys.v, on, [.maskCommand, .maskShift]) == .pass, "⇧⌘V is never an image paste")
+    expect(act(FinderKeys.v, on, [.maskCommand, .maskShift]) == .pass, "⇧⌘V never pastes images")
     var pasting = on; pasting.pastingImage = true
     expect(act(FinderKeys.v, pasting) == .pass, "one image paste at a time")
     var editing = cut; editing.editingText = true
-    expect(act(FinderKeys.x, editing) == .pass && act(FinderKeys.v, editing) == .pass && !forgets(FinderKeys.c, editing), "renaming and search fields keep the keys")
+    expect(act(FinderKeys.x, editing) == .pass && act(FinderKeys.v, editing) == .pass && act(FinderKeys.c, editing) == .pass
+           && act(FinderKeys.v, editing, moveShortcut) == .pass, "renaming and search fields keep the keys")
     var other = cut; other.finderFront = false
-    expect(act(FinderKeys.x, other) == .pass && act(FinderKeys.v, other) == .pass, "other apps are never touched")
+    expect(act(FinderKeys.x, other) == .pass && act(FinderKeys.v, other) == .pass && act(FinderKeys.v, other, moveShortcut) == .pass,
+           "other apps are never touched")
     var off = on; off.cutPaste = false; off.pasteImages = false
     expect(act(FinderKeys.x, off) == .pass && act(FinderKeys.v, off) == .pass, "both settings off: nothing changes")
-    var cutOnly = cut; cutOnly.cutPaste = false
-    expect(act(FinderKeys.x, cutOnly) == .pass && act(FinderKeys.v, cutOnly) == .pasteImage, "cut and paste off: ⌘X stays Finder's")
+    var imagesOnly = cut; imagesOnly.cutPaste = false
+    expect(act(FinderKeys.x, imagesOnly) == .pass && act(FinderKeys.v, imagesOnly) == .pasteImage
+           && act(FinderKeys.v, imagesOnly, moveShortcut) == .pass, "with only images enabled, cut and move keys pass through")
     expect(act(FinderKeys.x, on, []) == .pass && act(53, cut, []) == .pass, "typing and Esc are left alone")
     expect(FinderKeys.imageType(["public.png", "public.tiff"]) == "public.png" && FinderKeys.imageType(["public.tiff"]) == "public.tiff"
            && FinderKeys.imageType(["public.file-url", "public.png"]) == nil && FinderKeys.imageType(["public.utf8-plain-text"]) == nil,
