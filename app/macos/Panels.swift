@@ -32,6 +32,7 @@ enum Pref {
     static let finderCutAdds = "finderCutAdds"         // another ⌘X adds to the cut instead of replacing it
     static let finderCopyAdds = "finderCopyAdds"       // ⌘C in Finder collects items for the next paste
     static let finderCollectImages = "finderCollectImages" // images copied in any app join the copy list
+    static let finderImageFormat = "finderImageFormat" // how pasted and collected images are saved: png, jpeg or original
     static let quitOnClose = "quitOnClose"             // picked apps quit when their last window closes (QuitOnClose)
     static let quitOnCloseApps = "quitOnCloseApps"     // picked bundle ids ("Picked apps")
     static let quitOnCloseAll = "quitOnCloseAll"       // every app but the exceptions, or only picked apps
@@ -42,7 +43,7 @@ enum Pref {
         count: 3, fixedLineup: false, rotate: false, rotatePace: 1, paused: false, quiet: false, activity: 1, adaptivePower: true, allowDrag: true,
         nightQuiet: false, nightFrom: 23, nightTo: 7, interval: 2.0, topApps: 2, toyColor: -1, laser: true, scrollReverse: false, display: "",
         showCPU: true, showGPU: true, showMemory: true, showDisk: true, showBattery: true, showNetwork: true, cpuWheel: false, wheelSwapRange: WheelShift.defaultRange, wheelBattery: true, wheelBatteryMono: false, faceStream: false,
-        tidy: false, tidyLeftmost: true, finderCutPaste: false, finderPasteImages: false, finderCutPasteHUD: true, finderCutAdds: true, finderCopyAdds: true, finderCollectImages: false, quitOnClose: false,
+        tidy: false, tidyLeftmost: true, finderCutPaste: false, finderPasteImages: false, finderCutPasteHUD: true, finderCutAdds: true, finderCopyAdds: true, finderCollectImages: false, finderImageFormat: "png", quitOnClose: false,
         quitOnCloseAll: true, quitOnCloseExceptions: QuitOnCloseRules.defaultExceptions, panelOnHover: true,
     ]
 }
@@ -1425,6 +1426,7 @@ struct AccessibilityTab: View {
     @AppStorage(Pref.finderCutAdds) private var addToCut = true
     @AppStorage(Pref.finderCopyAdds) private var addToCopy = true
     @AppStorage(Pref.finderCollectImages) private var addImages = false
+    @AppStorage(Pref.finderImageFormat) private var imageFormat = FinderKeys.ImageFormat.png.rawValue
     @AppStorage(Pref.quitOnClose) private var quitOnClose = false
     @AppStorage(Pref.quitOnCloseAll) private var quitAll = true
     var body: some View {
@@ -1451,14 +1453,20 @@ struct AccessibilityTab: View {
                     }
                     if addToCopy {
                         Divider()
-                        SettingsRow(title: "Add images", titleWidth: 118, info: "An image you copy in any app (a picture from a browser, a screenshot copied to the clipboard) joins the copy list, and the clipboard keeps it for pasting elsewhere. Press ⌘V in a Finder folder to save them all as PNG files. Copies marked private, such as passwords, are skipped. A cut list is left alone. If macOS asks whether this app may paste from other apps, choose Allow.") {
+                        SettingsRow(title: "Add images", titleWidth: 118, info: "An image you copy in any app (a picture from a browser, a screenshot copied to the clipboard) joins the copy list, and the clipboard keeps it for pasting elsewhere. Press ⌘V in a Finder folder to save them all, in the image format below. Copies marked private, such as passwords, are skipped. A cut list is left alone. If macOS asks whether this app may paste from other apps, choose Allow.") {
                             SettingsSwitch(title: "Add copied images to the list", isOn: $addImages)
                         }
                     }
                 }
                 Divider()
-                SettingsRow(title: "Paste images", titleWidth: 118, info: "When Finder is in front, ⌘V saves a copied image (a screenshot, a picture from a browser) as a PNG in the current folder. Copied files paste as usual.") {
+                SettingsRow(title: "Paste images", titleWidth: 118, info: "When Finder is in front, ⌘V saves a copied image (a screenshot, a picture from a browser) as a file in the current folder. Copied files paste as usual.") {
                     SettingsSwitch(title: "Paste copied images as files", isOn: $pasteImages)
+                }
+                if pasteImages || (cutPaste && addToCopy && addImages) {
+                    Divider()
+                    SettingsRow(title: "Image format", titleWidth: 118, info: "PNG keeps every pixel. JPEG makes smaller files; see-through parts turn white. As copied keeps the format the app put on the clipboard, often JPEG for photos and PNG or TIFF for screenshots. Images already in the list keep the format they were saved in.") {
+                        SettingsMenu(options: FinderKeys.ImageFormat.allCases.map { ($0.title, $0.rawValue) }, selection: $imageFormat)
+                    }
                 }
                 if (cutPaste || pasteImages) && !finder.running {
                     SettingsNote(text: "Needs Accessibility access. Check the permission above.")

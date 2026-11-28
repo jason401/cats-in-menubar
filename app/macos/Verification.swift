@@ -1,6 +1,7 @@
 import Cocoa
 import SwiftUI
 import ImageIO
+import UniformTypeIdentifiers
 
 func runSelfTests() {
     var checks = 0
@@ -948,7 +949,48 @@ func testFinderKeys(_ expect: (@autoclosure () -> Bool, String) -> Void) {
            "saved images no list holds are removed")
     var parts = DateComponents(); parts.year = 2026; parts.month = 11; parts.day = 23; parts.hour = 21; parts.minute = 30; parts.second = 5
     let date = Calendar(identifier: .gregorian).date(from: parts)!
-    expect(FinderKeys.imageName(at: date) == "Pasted_Image_20261123_213005.png", "pasted images are named Pasted_Image_ and the time")
+    expect(FinderKeys.imageName(at: date) == "Pasted_Image_20261123_213005.png" && FinderKeys.imageName(at: date, ext: "jpg") == "Pasted_Image_20261123_213005.jpg",
+           "pasted images are named Pasted_Image_ and the time, with the format's extension")
+    let photo = ["public.tiff", "public.jpeg", "public.png"]
+    expect(FinderKeys.imageType(photo, for: .png) == "public.png" && FinderKeys.imageType(photo, for: .jpeg) == "public.jpeg"
+           && FinderKeys.imageType(photo, for: .original) == "public.jpeg" && FinderKeys.imageType(["public.tiff", "public.heic"], for: .original) == "public.heic"
+           && FinderKeys.imageType(["public.tiff"], for: .original) == "public.tiff" && FinderKeys.imageType(["public.tiff"], for: .jpeg) == "public.tiff"
+           && FinderKeys.imageType(["public.file-url", "public.jpeg"], for: .original) == nil,
+           "each image format reads the clipboard type closest to it, TIFF last")
+    expect(FinderKeys.fileExtension("public.jpeg") == "jpg" && FinderKeys.fileExtension("public.png") == "png"
+           && FinderKeys.fileExtension("public.tiff") == "tiff" && FinderKeys.fileExtension("public.heic") == "heic", "kept images get their own extension")
+    expect(FinderKeys.ImageFormat.allCases.map(\.title) == ["PNG", "JPEG", "As copied"] && Pref.defaults[Pref.finderImageFormat] as? String == "png"
+           && FinderKeys.ImageFormat(rawValue: "original") == .original, "images save as PNG unless another format is picked")
+    // A 4×4 half-transparent red square, as PNG and TIFF.
+    func encoded(_ type: UTType) -> Data {
+        let context = CGContext(data: nil, width: 4, height: 4, bitsPerComponent: 8, bytesPerRow: 0, space: CGColorSpace(name: CGColorSpace.sRGB)!,
+                                bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)!
+        context.setFillColor(CGColor(red: 1, green: 0, blue: 0, alpha: 0.5))
+        context.fill(CGRect(x: 0, y: 0, width: 4, height: 4))
+        let data = NSMutableData()
+        let destination = CGImageDestinationCreateWithData(data, type.identifier as CFString, 1, nil)!
+        CGImageDestinationAddImage(destination, context.makeImage()!, nil)
+        _ = CGImageDestinationFinalize(destination)
+        return data as Data
+    }
+    let pngSample = encoded(.png), tiffSample = encoded(.tiff)
+    func starts(_ data: Data?, _ bytes: [UInt8]) -> Bool { data.map { Array($0.prefix(bytes.count)) == bytes } ?? false }
+    let asJPEG = FinderKeys.imageFile(pngSample, type: "public.png", format: .jpeg)
+    let asPNG = FinderKeys.imageFile(tiffSample, type: "public.tiff", format: .png)
+    let kept = FinderKeys.imageFile(tiffSample, type: "public.tiff", format: .original)
+    expect(asJPEG?.ext == "jpg" && starts(asJPEG?.data, [0xFF, 0xD8, 0xFF]) && asPNG?.ext == "png" && starts(asPNG?.data, [0x89, 0x50, 0x4E, 0x47])
+           && kept?.ext == "tiff" && kept?.data == tiffSample && FinderKeys.imageFile(pngSample, type: "public.png", format: .png)?.data == pngSample,
+           "images convert to PNG or JPEG, and keep their bytes when already in the chosen format")
+    if let jpeg = asJPEG?.data, let source = CGImageSourceCreateWithData(jpeg as CFData, nil), let image = CGImageSourceCreateImageAtIndex(source, 0, nil),
+       let context = CGContext(data: nil, width: 1, height: 1, bitsPerComponent: 8, bytesPerRow: 4, space: CGColorSpace(name: CGColorSpace.sRGB)!,
+                               bitmapInfo: CGImageAlphaInfo.noneSkipLast.rawValue) {
+        context.draw(image, in: CGRect(x: 0, y: 0, width: 1, height: 1))
+        let pixel = context.data!.assumingMemoryBound(to: UInt8.self)
+        expect(pixel[0] > 200 && pixel[1] > 90 && pixel[2] > 90, "see-through parts turn white in JPEG, not black")
+    } else {
+        expect(false, "a converted JPEG can be read back")
+    }
+    expect(FinderKeys.imageFile(Data("not an image".utf8), type: "public.png", format: .original) == nil, "data that is no image is not saved")
     let taken: Set<String> = ["a.png", "a 2.png", "folder"]
     expect(FinderKeys.freeName("a.png") { taken.contains($0) } == "a 3.png" && FinderKeys.freeName("b.png") { taken.contains($0) } == "b.png"
            && FinderKeys.freeName("folder") { taken.contains($0) } == "folder 2", "taken names get 2, 3… like Finder")
