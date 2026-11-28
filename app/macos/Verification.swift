@@ -929,7 +929,16 @@ func testFinderKeys(_ expect: (@autoclosure () -> Bool, String) -> Void) {
            && act(FinderKeys.v, editing, batchShortcut) == .pass, "renaming and search fields keep the keys")
     var other = cut; other.finderFront = false
     expect(act(FinderKeys.x, other) == .pass && act(FinderKeys.c, other) == .pass && act(FinderKeys.v, other) == .pass
-           && act(FinderKeys.v, other, batchShortcut) == .pass, "other apps are never touched")
+           && act(FinderKeys.v, other, shifted) == .pass, "other apps keep ⌘X, ⌘C and ⌘V")
+    var otherTyping = other; otherTyping.editingText = true
+    expect(act(FinderKeys.v, other, batchShortcut) == .pasteList && act(FinderKeys.v, otherTyping, batchShortcut) == .pasteList,
+           "⌃⌘V in another app pastes the list, into its text fields too")
+    var otherEmpty = other; otherEmpty.batchKind = nil
+    var otherOff = other; otherOff.cutPaste = false
+    var otherBusy = other; otherBusy.pastingList = true
+    expect(act(FinderKeys.v, otherEmpty, batchShortcut) == .pass && act(FinderKeys.v, otherOff, batchShortcut) == .pass
+           && act(FinderKeys.v, otherBusy, batchShortcut) == .swallow && act(FinderKeys.c, other, batchShortcut) == .pass,
+           "without a list, or with the shortcuts off, ⌃⌘V stays the app's own; one paste at a time")
     var off = on; off.cutPaste = false; off.pasteImages = false
     expect(act(FinderKeys.x, off) == .pass && act(FinderKeys.c, off) == .pass && act(FinderKeys.v, off) == .pass, "both settings off: nothing changes")
     var imagesOnly = cut; imagesOnly.cutPaste = false
@@ -1054,6 +1063,32 @@ func testFinderKeys(_ expect: (@autoclosure () -> Bool, String) -> Void) {
     expect(full.urls.count == 3 && !full.addImage(URL(fileURLWithPath: "/cache/9.png"), clipboardCount: 9, limit: 3) && full.clipboardCount == 2,
            "a list takes no more than the image limit")
     expect(Pref.defaults[Pref.finderCollectImages] as? Bool == false, "collecting copied images starts off")
+    var pasted = FinderFileBatch()
+    _ = pasted.addImage(image1, clipboardCount: 1)
+    pasted.markPasted()
+    expect(pasted.urls == [image1] && pasted.addImage(image2, clipboardCount: 2) && pasted.urls == [image2],
+           "after pasting into another app the list stays, and the next copied image starts a new one")
+    var pastedCut = FinderFileBatch()
+    pastedCut.collect([bFile], as: .move, appending: true)
+    pastedCut.markPasted()
+    pastedCut.collect([d], as: .move, appending: true)
+    expect(pastedCut.urls == [bFile, d], "a cut list pasted into another app keeps growing and still moves in Finder")
+    expect(Pref.defaults[Pref.finderHUDEverywhere] as? Bool == true, "the list shows over every app unless turned off")
+
+    let listBoard = NSPasteboard.withUniqueName()
+    defer { listBoard.releaseGlobally() }
+    _ = listBoard.setString("earlier text", forType: .string)
+    let before = FinderKeys.snapshot(listBoard)
+    listBoard.clearContents()
+    listBoard.writeObjects(FinderKeys.listItems([image1, image2, bFile]))
+    let listed = listBoard.readObjects(forClasses: [NSURL.self], options: [.urlReadingFileURLsOnly: true]) as? [URL]
+    let marked = listBoard.pasteboardItems?.first?.types.contains(NSPasteboard.PasteboardType("org.nspasteboard.TransientType")) == true
+    expect(listed == [image1, image2, bFile] && marked && FinderKeys.collectableImageType((listBoard.types ?? []).map(\.rawValue)) == nil,
+           "the list pastes as files, marked passing so it is never collected again")
+    FinderKeys.restore(before, to: listBoard)
+    expect(listBoard.string(forType: .string) == "earlier text" && listBoard.pasteboardItems?.count == 1, "the earlier clipboard is put back")
+    FinderKeys.restore([], to: listBoard)
+    expect(listBoard.pasteboardItems?.isEmpty != false, "an empty clipboard is put back empty")
 
     let clipboard = NSPasteboard.withUniqueName()
     defer { clipboard.releaseGlobally() }

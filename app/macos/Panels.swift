@@ -29,6 +29,7 @@ enum Pref {
     static let finderCutPaste = "finderCutPaste"       // ⌘X then ⌘V moves files in Finder (FinderShortcuts)
     static let finderPasteImages = "finderPasteImages" // ⌘V in Finder saves a copied image as a PNG file
     static let finderCutPasteHUD = "finderCutPasteHUD" // the floating panel listing cut items (on unless turned off)
+    static let finderHUDEverywhere = "finderHUDEverywhere" // the panel shows over every app, not only Finder
     static let finderCutAdds = "finderCutAdds"         // another ⌘X adds to the cut instead of replacing it
     static let finderCopyAdds = "finderCopyAdds"       // ⌘C in Finder collects items for the next paste
     static let finderCollectImages = "finderCollectImages" // images copied in any app join the copy list
@@ -43,7 +44,7 @@ enum Pref {
         count: 3, fixedLineup: false, rotate: false, rotatePace: 1, paused: false, quiet: false, activity: 1, adaptivePower: true, allowDrag: true,
         nightQuiet: false, nightFrom: 23, nightTo: 7, interval: 2.0, topApps: 2, toyColor: -1, laser: true, scrollReverse: false, display: "",
         showCPU: true, showGPU: true, showMemory: true, showDisk: true, showBattery: true, showNetwork: true, cpuWheel: false, wheelSwapRange: WheelShift.defaultRange, wheelBattery: true, wheelBatteryMono: false, faceStream: false,
-        tidy: false, tidyLeftmost: true, finderCutPaste: false, finderPasteImages: false, finderCutPasteHUD: true, finderCutAdds: true, finderCopyAdds: true, finderCollectImages: false, finderImageFormat: "png", quitOnClose: false,
+        tidy: false, tidyLeftmost: true, finderCutPaste: false, finderPasteImages: false, finderCutPasteHUD: true, finderHUDEverywhere: true, finderCutAdds: true, finderCopyAdds: true, finderCollectImages: false, finderImageFormat: "png", quitOnClose: false,
         quitOnCloseAll: true, quitOnCloseExceptions: QuitOnCloseRules.defaultExceptions, panelOnHover: true,
     ]
 }
@@ -1423,6 +1424,7 @@ struct AccessibilityTab: View {
     @AppStorage(Pref.finderCutPaste) private var cutPaste = false
     @AppStorage(Pref.finderPasteImages) private var pasteImages = false
     @AppStorage(Pref.finderCutPasteHUD) private var showHUD = true
+    @AppStorage(Pref.finderHUDEverywhere) private var showEverywhere = true
     @AppStorage(Pref.finderCutAdds) private var addToCut = true
     @AppStorage(Pref.finderCopyAdds) private var addToCopy = true
     @AppStorage(Pref.finderCollectImages) private var addImages = false
@@ -1435,13 +1437,19 @@ struct AccessibilityTab: View {
                 AccessibilityPermissionRow(model: model, info: "Everything on this page needs it, as the cats do.")
             }
             SettingsCard(title: "Finder", info: "Renaming, search, and other text fields use the usual ⌘X, ⌘C, and ⌘V. The first time, macOS asks to let this app control Finder.") {
-                SettingsRow(title: "File shortcuts", titleWidth: 118, info: "Use ⌘X to collect files or folders to move. With Add to copy on, ⌘C collects them to copy. Open the destination and press ⌘V. After copying something else, use ⌃⌘V for the collected files. Names already taken get a number, like “name 2”.") {
+                SettingsRow(title: "File shortcuts", titleWidth: 118, info: "Use ⌘X to collect files or folders to move. With Add to copy on, ⌘C collects them to copy. Open the destination and press ⌘V. After copying something else, use ⌃⌘V for the collected files. In another app, ⌃⌘V pastes them there. Names already taken get a number, like “name 2”.") {
                     SettingsSwitch(title: "File shortcuts in Finder", isOn: $cutPaste)
                 }
                 if cutPaste {
                     Divider()
                     SettingsRow(title: "Floating panel", titleWidth: 118, info: "Shows the collected items and their paste shortcut. Choose Move Here or Copy Here to transfer them to the current folder. Use the × beside an item to remove it from the list, or the top × to clear the list.") {
                         SettingsSwitch(title: "Show floating panel", isOn: $showHUD)
+                    }
+                    if showHUD {
+                        Divider()
+                        SettingsRow(title: "In every app", titleWidth: 118, info: "The list stays on screen over any app, not only Finder. In another app, Paste Here or ⌃⌘V pastes every item there as files, the way files copied in Finder paste, and the clipboard is then put back. Nothing is moved. Turned off, the list shows in Finder, and for a moment when an image joins it.") {
+                            SettingsSwitch(title: "Show the list in every app", isOn: $showEverywhere)
+                        }
                     }
                     Divider()
                     SettingsRow(title: "Add to cut", titleWidth: 118, info: "Another ⌘X adds the selected items from any folder. The list stays available while you copy other things. Turn this off to start a new list with each ⌘X.") {
