@@ -31,6 +31,7 @@ enum Pref {
     static let finderCutPasteHUD = "finderCutPasteHUD" // the floating panel listing cut items (on unless turned off)
     static let finderCutAdds = "finderCutAdds"         // another ⌘X adds to the cut instead of replacing it
     static let finderCopyAdds = "finderCopyAdds"       // ⌘C in Finder collects items for the next paste
+    static let finderCollectImages = "finderCollectImages" // images copied in any app join the copy list
     static let quitOnClose = "quitOnClose"             // picked apps quit when their last window closes (QuitOnClose)
     static let quitOnCloseApps = "quitOnCloseApps"     // picked bundle ids ("Picked apps")
     static let quitOnCloseAll = "quitOnCloseAll"       // every app but the exceptions, or only picked apps
@@ -41,7 +42,7 @@ enum Pref {
         count: 3, fixedLineup: false, rotate: false, rotatePace: 1, paused: false, quiet: false, activity: 1, adaptivePower: true, allowDrag: true,
         nightQuiet: false, nightFrom: 23, nightTo: 7, interval: 2.0, topApps: 2, toyColor: -1, laser: true, scrollReverse: false, display: "",
         showCPU: true, showGPU: true, showMemory: true, showDisk: true, showBattery: true, showNetwork: true, cpuWheel: false, wheelSwapRange: WheelShift.defaultRange, wheelBattery: true, wheelBatteryMono: false, faceStream: false,
-        tidy: false, tidyLeftmost: true, finderCutPaste: false, finderPasteImages: false, finderCutPasteHUD: true, finderCutAdds: true, finderCopyAdds: true, quitOnClose: false,
+        tidy: false, tidyLeftmost: true, finderCutPaste: false, finderPasteImages: false, finderCutPasteHUD: true, finderCutAdds: true, finderCopyAdds: true, finderCollectImages: false, quitOnClose: false,
         quitOnCloseAll: true, quitOnCloseExceptions: QuitOnCloseRules.defaultExceptions, panelOnHover: true,
     ]
 }
@@ -1423,6 +1424,7 @@ struct AccessibilityTab: View {
     @AppStorage(Pref.finderCutPasteHUD) private var showHUD = true
     @AppStorage(Pref.finderCutAdds) private var addToCut = true
     @AppStorage(Pref.finderCopyAdds) private var addToCopy = true
+    @AppStorage(Pref.finderCollectImages) private var addImages = false
     @AppStorage(Pref.quitOnClose) private var quitOnClose = false
     @AppStorage(Pref.quitOnCloseAll) private var quitAll = true
     var body: some View {
@@ -1446,6 +1448,12 @@ struct AccessibilityTab: View {
                     Divider()
                     SettingsRow(title: "Add to copy", titleWidth: 118, info: "Press ⌘C in several folders, then ⌘V to copy the collected items. Repeated pastes reuse the list. The next ⌘C after a successful paste starts a fresh list, as does switching between ⌘C and ⌘X. Turn this off for standard Finder copying.") {
                         SettingsSwitch(title: "Add to copied items", isOn: $addToCopy)
+                    }
+                    if addToCopy {
+                        Divider()
+                        SettingsRow(title: "Add images", titleWidth: 118, info: "An image you copy in any app (a picture from a browser, a screenshot copied to the clipboard) joins the copy list, and the clipboard keeps it for pasting elsewhere. Press ⌘V in a Finder folder to save them all as PNG files. Copies marked private, such as passwords, are skipped. A cut list is left alone. If macOS asks whether this app may paste from other apps, choose Allow.") {
+                            SettingsSwitch(title: "Add copied images to the list", isOn: $addImages)
+                        }
                     }
                 }
                 Divider()

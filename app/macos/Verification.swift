@@ -938,6 +938,14 @@ func testFinderKeys(_ expect: (@autoclosure () -> Bool, String) -> Void) {
     expect(FinderKeys.imageType(["public.png", "public.tiff"]) == "public.png" && FinderKeys.imageType(["public.tiff"]) == "public.tiff"
            && FinderKeys.imageType(["public.file-url", "public.png"]) == nil && FinderKeys.imageType(["public.utf8-plain-text"]) == nil,
            "PNG first, any image next, never when files are copied")
+    expect(FinderKeys.collectableImageType(["public.png"]) == "public.png" && FinderKeys.collectableImageType(["public.tiff", "public.html"]) == "public.tiff"
+           && FinderKeys.collectableImageType(["public.png", "org.nspasteboard.ConcealedType"]) == nil
+           && FinderKeys.collectableImageType(["public.png", "org.nspasteboard.TransientType"]) == nil
+           && FinderKeys.collectableImageType(["public.file-url", "public.tiff"]) == nil && FinderKeys.collectableImageType(["public.utf8-plain-text"]) == nil,
+           "copied images join the list, never private copies or copied files")
+    let shotFolder = URL(fileURLWithPath: "/cache/Copied Images"), shot1 = shotFolder.appendingPathComponent("a.png"), shot2 = shotFolder.appendingPathComponent("b.png")
+    expect(FinderKeys.unusedImages([shot1, shot2], keeping: [URL(fileURLWithPath: "/cache/./Copied Images/a.png")]) == [shot2],
+           "saved images no list holds are removed")
     var parts = DateComponents(); parts.year = 2026; parts.month = 11; parts.day = 23; parts.hour = 21; parts.minute = 30; parts.second = 5
     let date = Calendar(identifier: .gregorian).date(from: parts)!
     expect(FinderKeys.imageName(at: date) == "Pasted_Image_20261123_213005.png", "pasted images are named Pasted_Image_ and the time")
@@ -978,6 +986,32 @@ func testFinderKeys(_ expect: (@autoclosure () -> Bool, String) -> Void) {
     expect(batch.kind == .move && batch.urls == [folder], "switching from copy to cut starts a new move batch")
     batch.collect([d], as: .copy, appending: true)
     expect(batch.kind == .copy && batch.urls == [d], "switching from cut to copy starts a new copy batch")
+
+    let image1 = URL(fileURLWithPath: "/cache/Pasted_Image_1.png"), image2 = URL(fileURLWithPath: "/cache/Pasted_Image_2.png")
+    var images = FinderFileBatch()
+    expect(images.addImage(image1, clipboardCount: 7) && images.kind == .copy && images.urls == [image1] && images.clipboardCount == 7,
+           "a copied image starts a copy list, and its clipboard stands for the list")
+    expect(images.addImage(image2, clipboardCount: 8) && images.urls == [image1, image2] && images.clipboardCount == 8,
+           "another copied image joins the list")
+    expect(images.addImage(image1, clipboardCount: nil) && images.urls == [image1, image2] && images.clipboardCount == 8,
+           "an image already listed is not added twice, and a stale clipboard keeps the current one")
+    var mixed = FinderFileBatch()
+    mixed.collect([bFile], as: .copy, appending: true)
+    mixed.clipboardCount = 3
+    expect(mixed.addImage(image1, clipboardCount: 4) && mixed.urls == [bFile, image1] && mixed.clipboardCount == 4,
+           "images join files collected with ⌘C in Finder")
+    var cutList = FinderFileBatch()
+    cutList.collect([bFile], as: .move, appending: true)
+    expect(!cutList.addImage(image1, clipboardCount: 5) && cutList.kind == .move && cutList.urls == [bFile], "a cut list is never touched by a copied image")
+    images.finish(.copy, remaining: images.urls, succeeded: true)
+    let image3 = URL(fileURLWithPath: "/cache/Pasted_Image_3.png")
+    expect(images.addImage(image3, clipboardCount: nil) && images.urls == [image3] && images.clipboardCount == nil,
+           "after a paste, the next copied image starts a fresh list")
+    var full = FinderFileBatch()
+    for n in 0..<3 { _ = full.addImage(URL(fileURLWithPath: "/cache/\(n).png"), clipboardCount: n, limit: 3) }
+    expect(full.urls.count == 3 && !full.addImage(URL(fileURLWithPath: "/cache/9.png"), clipboardCount: 9, limit: 3) && full.clipboardCount == 2,
+           "a list takes no more than the image limit")
+    expect(Pref.defaults[Pref.finderCollectImages] as? Bool == false, "collecting copied images starts off")
 
     let clipboard = NSPasteboard.withUniqueName()
     defer { clipboard.releaseGlobally() }
